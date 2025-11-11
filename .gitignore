@@ -1,0 +1,10 @@
+# Ignore dependencies and secrets
+node_modules/
+.env
+.vscode/
+dist/
+*.log
+*.zip
+*.vsix
+.DS_Store
+Thumbs.db

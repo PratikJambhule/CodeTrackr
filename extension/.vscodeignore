@@ -1,0 +1,42 @@
+# Node modules and lockfiles
+node_modules
+package-lock.json
+pnpm-lock.yaml
+yarn.lock
+
+# VS Code and editor metadata
+.vscode
+.vscode/**
+.idea
+.DS_Store
+
+# Git
+.git
+.git/**
+
+# Build artifacts and source maps
+!dist/
+out/
+build/
+*.map
+
+# TypeScript and source files (if you ship JS only)
+*.ts
+src/
+
+# Tests and coverage
+tests/
+coverage/
+*.test.js
+
+# Package outputs
+*.vsix
+
+# Logs
+npm-debug.log
+*.log
+
+# Misc
+.env
+*.local
+README.md

@@ -1,0 +1,127 @@
+{
+  "name": "codetrackr-vscode",
+  "displayName": "CodeTrackr for VS Code",
+  "description": "A VS Code extension for CodeTrackr, a time-tracking tool for developers. This extension automatically tracks your coding activity in Visual Studio Code and sends it to your CodeTrackr backend.",
+  "publisher": "CodeTrackr-ext",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Soham-Official/CodeTrackr.git"
+  },
+  "version": "2.0.5",
+  "icon": "images/icon.png",
+  "license": "MIT",
+  "author": {
+    "name": "Pratik Jambhule, Kartik Kharat, Soham",
+    "url": "https://github.com/Soham-Official/CodeTrackr"
+  },
+  "contributors": [
+    {
+      "name": "Pratik Jambhule",
+      "url": "https://github.com/PratikJambhule"
+    },
+    {
+      "name": "Kartik Kharat",
+      "url": "https://github.com/kartik-kharat"
+    },
+    {
+      "name": "Soham",
+      "url": "https://github.com/Soham-Official"
+    }
+  ],
+  "homepage": "https://github.com/Soham-Official/CodeTrackr",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Programming Languages",
+    "Other"
+  ],
+  "main": "./dist/extension.js",
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "contributes": {
+    "commands": [
+      {
+        "command": "codetrackr.start",
+        "title": "CodeTrackr: Start Tracking",
+        "category": "CodeTrackr"
+      },
+      {
+        "command": "codetrackr.stop",
+        "title": "CodeTrackr: Stop Tracking",
+        "category": "CodeTrackr"
+      },
+      {
+        "command": "codetrackr.flushNow",
+        "title": "CodeTrackr: Flush Now",
+        "category": "CodeTrackr"
+      },
+      {
+        "command": "codetrackr.setupApiKey",
+        "title": "CodeTrackr: Setup API Key",
+        "category": "CodeTrackr"
+      },
+      {
+        "command": "codetrackr.showInfo",
+        "title": "CodeTrackr: Show Connection Info",
+        "category": "CodeTrackr"
+      }
+    ],
+    "configuration": {
+      "type": "object",
+      "title": "CodeTrackr Settings",
+      "properties": {
+        "codetrackr.apiBase": {
+          "type": "string",
+          "default": "http://127.0.0.1:5050",
+          "description": "Your backend API base URL (e.g., http://127.0.0.1:5050 or https://your-domain.com)."
+        },
+        "codetrackr.apiKey": {
+          "type": "string",
+          "default": "",
+          "description": "Your CodeTrackr API key (get it from your dashboard at /profile). Required for tracking."
+        },
+        "codetrackr.userId": {
+          "type": "string",
+          "default": "",
+          "description": "DEPRECATED: No longer used. Authentication is now handled via API key."
+        },
+        "codetrackr.flushIntervalSeconds": {
+          "type": "number",
+          "default": 30,
+          "minimum": 5,
+          "description": "How often the timer ticks (in seconds)."
+        },
+        "codetrackr.minFlushMinutes": {
+          "type": "number",
+          "default": 0.5,
+          "minimum": 0.1,
+          "description": "Minimum minutes before a record is sent."
+        }
+      }
+    }
+  },
+  "keywords": [
+    "code",
+    "productivity",
+    "tracking",
+    "time tracking",
+    "codetrackr",
+    "mongodb",
+    "atlas",
+    "vscode"
+  ],
+  "scripts": {
+    "vscode:prepublish": "npm run build",
+    "build": "esbuild ./extension.js --bundle --outfile=dist/extension.js --external:vscode --format=cjs --platform=node",
+    "package": "vsce package"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.85.0",
+    "esbuild": "^0.14.54"
+  },
+  "dependencies": {
+    "axios": "^1.13.2"
+  }
+}
