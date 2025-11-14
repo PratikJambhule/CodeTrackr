@@ -3,6 +3,7 @@ import { Trophy, Users } from 'lucide-react';
 import { useTheme } from '../contexts/ThemeContext';
 import GradientText from '../components/GradientText';
 import TextType from '../components/TextType';
+import { API_URL } from '../config';
 
 interface LeaderboardEntry {
   rank: number;
@@ -35,7 +36,7 @@ export default function Leaderboard() {
 
   const fetchLeaderboard = async () => {
     try {
-      const res = await fetch('http://localhost:5050/api/leaderboard');
+      const res = await fetch(`${API_URL}/api/leaderboard`);
       if (res.ok) {
         const data = await res.json();
         console.log('Leaderboard data:', data);

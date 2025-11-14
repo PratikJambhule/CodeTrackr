@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { CheckCircle, Copy, ExternalLink, Download, Key, ArrowRight } from 'lucide-react';
+import { API_URL } from '../config';
 
 const Onboarding = () => {
     const [apiKey, setApiKey] = useState('');
@@ -15,7 +16,7 @@ const Onboarding = () => {
 
     const fetchUserProfile = async () => {
         try {
-            const response = await fetch('http://localhost:5050/api/user/profile', {
+            const response = await fetch(`${API_URL}/api/user/profile`, {
                 credentials: 'include'
             });
             const data = await response.json();
@@ -39,7 +40,7 @@ const Onboarding = () => {
 
     const completeOnboarding = async () => {
         try {
-            await fetch('http://localhost:5050/api/user/complete-onboarding', {
+            await fetch(`${API_URL}/api/user/complete-onboarding`, {
                 method: 'POST',
                 credentials: 'include'
             });

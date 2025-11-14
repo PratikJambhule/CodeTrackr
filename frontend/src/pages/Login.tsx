@@ -1,12 +1,13 @@
 import { LogIn } from 'lucide-react';
 import { useTheme } from '../contexts/ThemeContext';
 import GradientText from '../components/GradientText';
+import { API_URL } from '../config';
 
 export default function Login() {
   const { theme } = useTheme();
   
   const handleGoogleLogin = () => {
-    window.location.href = 'http://localhost:5050/auth/google';
+    window.location.href = `${API_URL}/auth/google`;
   };
 
   return (

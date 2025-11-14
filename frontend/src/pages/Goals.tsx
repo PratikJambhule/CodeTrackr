@@ -3,6 +3,7 @@ import { Target, ChevronLeft, ChevronRight, X, Plus, CheckCircle, Circle, Trash2
 import { useTheme } from '../contexts/ThemeContext';
 import GradientText from '../components/GradientText';
 import TextType from '../components/TextType';
+import { API_URL } from '../config';
 
 interface Todo {
   id: string;
@@ -43,7 +44,7 @@ export default function Goals() {
 
   const fetchGoals = async () => {
     try {
-      const res = await fetch('http://localhost:5050/api/goals', {
+      const res = await fetch(`${API_URL}/api/goals`, {
         credentials: 'include'
       });
       if (res.ok) {
@@ -58,7 +59,7 @@ export default function Goals() {
   const createGoal = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      const res = await fetch('http://localhost:5050/api/goals/create', {
+      const res = await fetch(`${API_URL}/api/goals/create`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',

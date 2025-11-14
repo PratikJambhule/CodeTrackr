@@ -6,6 +6,7 @@ import { Line, Pie } from 'react-chartjs-2';
 import { useTheme } from '../contexts/ThemeContext';
 import GradientText from '../components/GradientText';
 import TextType from '../components/TextType';
+import { API_URL } from '../config';
 
 ChartJS.register(CategoryScale, LinearScale, BarElement, LineElement, PointElement, Title, Tooltip, Legend, ArcElement, ChartDataLabels);
 
@@ -27,7 +28,7 @@ export default function Dashboard({ user }: { user: any }) {
     try {
       console.log('Fetching analytics for user:', user);
       console.log('User ID:', user.id);
-      const res = await fetch(`http://localhost:5050/api/analytics/${user.id}`);
+      const res = await fetch(`${API_URL}/api/analytics/${user.id}`);
       console.log('Response status:', res.status);
       if (res.ok) {
         const data = await res.json();
@@ -47,7 +48,7 @@ export default function Dashboard({ user }: { user: any }) {
 
   const fetchWeeklyAnalytics = async () => {
     try {
-      const res = await fetch(`http://localhost:5050/api/analytics/weekly/${user.id}`);
+      const res = await fetch(`${API_URL}/api/analytics/weekly/${user.id}`);
       if (res.ok) {
         const data = await res.json();
         setWeeklyAnalytics(data);
@@ -59,7 +60,7 @@ export default function Dashboard({ user }: { user: any }) {
 
   const fetchTimeSlotData = async (startHour: number, endHour: number) => {
     try {
-      const res = await fetch(`http://localhost:5050/api/analytics/timeslot/${user.id}?start=${startHour}&end=${endHour}`);
+      const res = await fetch(`${API_URL}/api/analytics/timeslot/${user.id}?start=${startHour}&end=${endHour}`);
       if (res.ok) {
         const data = await res.json();
         setTimeSlotData(data);

@@ -3,6 +3,7 @@ import { Users2, Lock, Search, Plus, ArrowRight, Trophy, Users, X } from 'lucide
 import { useTheme } from '../contexts/ThemeContext';
 import GradientText from '../components/GradientText';
 import TextType from '../components/TextType';
+import { API_URL } from '../config';
 
 interface Group {
   _id: string;
@@ -72,7 +73,7 @@ export default function Groups({ user }: { user: any }) {
   const fetchMyGroups = async () => {
     setLoading(true);
     try {
-      const res = await fetch('http://localhost:5050/api/groups/my-groups', {
+      const res = await fetch(`${API_URL}/api/groups/my-groups`, {
         credentials: 'include'
       });
       if (res.ok) {
@@ -96,8 +97,8 @@ export default function Groups({ user }: { user: any }) {
     setLoading(true);
     try {
       const url = searchQuery
-        ? `http://localhost:5050/api/groups/discover?search=${encodeURIComponent(searchQuery)}`
-        : 'http://localhost:5050/api/groups/discover';
+        ? `${API_URL}/api/groups/discover?search=${encodeURIComponent(searchQuery)}`
+        : `${API_URL}/api/groups/discover`;
       
       const res = await fetch(url, {
         credentials: 'include'
@@ -129,7 +130,7 @@ export default function Groups({ user }: { user: any }) {
   const handleCreateGroup = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      const res = await fetch('http://localhost:5050/api/groups/create', {
+      const res = await fetch(`${API_URL}/api/groups/create`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
@@ -160,7 +161,7 @@ export default function Groups({ user }: { user: any }) {
     if (!selectedGroup) return;
 
     try {
-      const res = await fetch(`http://localhost:5050/api/groups/${selectedGroup._id}/join`, {
+      const res = await fetch(`${API_URL}/api/groups/${selectedGroup._id}/join`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
@@ -186,7 +187,7 @@ export default function Groups({ user }: { user: any }) {
 
   const handleViewDetails = async (group: Group) => {
     try {
-      const res = await fetch(`http://localhost:5050/api/groups/${group._id}/details`, {
+      const res = await fetch(`${API_URL}/api/groups/${group._id}/details`, {
         credentials: 'include'
       });
       if (res.ok) {
@@ -208,7 +209,7 @@ export default function Groups({ user }: { user: any }) {
     if (group.visibility === 'public') {
       // Join public groups directly (no password needed)
       try {
-        const res = await fetch(`http://localhost:5050/api/groups/${group._id}/join`, {
+        const res = await fetch(`${API_URL}/api/groups/${group._id}/join`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           credentials: 'include',
@@ -239,7 +240,7 @@ export default function Groups({ user }: { user: any }) {
     }
 
     try {
-      const res = await fetch(`http://localhost:5050/api/groups/${groupId}/leave`, {
+      const res = await fetch(`${API_URL}/api/groups/${groupId}/leave`, {
         method: 'POST',
         credentials: 'include'
       });

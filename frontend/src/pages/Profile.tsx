@@ -3,6 +3,7 @@ import { Key, Copy, CheckCircle, RefreshCw, Mail, Calendar, AlertCircle } from '
 import { useTheme } from '../contexts/ThemeContext';
 import GradientText from '../components/GradientText';
 import TextType from '../components/TextType';
+import { API_URL } from '../config';
 
 const Profile = () => {
     const { theme } = useTheme();
@@ -24,7 +25,7 @@ const Profile = () => {
 
     const fetchUserProfile = async () => {
         try {
-            const response = await fetch('http://localhost:5050/api/user/profile', {
+            const response = await fetch(`${API_URL}/api/user/profile`, {
                 credentials: 'include'
             });
             const data = await response.json();
@@ -50,7 +51,7 @@ const Profile = () => {
     const regenerateApiKey = async () => {
         setRegenerating(true);
         try {
-            const response = await fetch('http://localhost:5050/api/user/regenerate-api-key', {
+            const response = await fetch(`${API_URL}/api/user/regenerate-api-key`, {
                 method: 'POST',
                 credentials: 'include'
             });

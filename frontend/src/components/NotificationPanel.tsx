@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import './NotificationPanel.css';
+import { API_URL } from '../config';
 
 interface Notification {
   _id: string;
@@ -77,7 +78,7 @@ const NotificationPanel: React.FC = () => {
   const fetchNotifications = async () => {
     try {
       const token = localStorage.getItem('token');
-      const response = await fetch('http://localhost:5050/api/notifications', {
+      const response = await fetch(`${API_URL}/api/notifications`, {
         headers: {
           'Authorization': `Bearer ${token}`,
         },
@@ -110,7 +111,7 @@ const NotificationPanel: React.FC = () => {
   const fetchUnreadCount = async () => {
     try {
       const token = localStorage.getItem('token');
-      const response = await fetch('http://localhost:5050/api/notifications/unread-count', {
+      const response = await fetch(`${API_URL}/api/notifications/unread-count`, {
         headers: {
           'Authorization': `Bearer ${token}`,
         },
@@ -129,7 +130,7 @@ const NotificationPanel: React.FC = () => {
   const markAsRead = async (id: string) => {
     try {
       const token = localStorage.getItem('token');
-      const response = await fetch(`http://localhost:5050/api/notifications/${id}/read`, {
+      const response = await fetch(`${API_URL}/api/notifications/${id}/read`, {
         method: 'PATCH',
         headers: {
           'Authorization': `Bearer ${token}`,
@@ -151,7 +152,7 @@ const NotificationPanel: React.FC = () => {
   const markAllAsRead = async () => {
     try {
       const token = localStorage.getItem('token');
-      const response = await fetch('http://localhost:5050/api/notifications/mark-all-read', {
+      const response = await fetch(`${API_URL}/api/notifications/mark-all-read`, {
         method: 'PATCH',
         headers: {
           'Authorization': `Bearer ${token}`,
@@ -171,7 +172,7 @@ const NotificationPanel: React.FC = () => {
   const deleteNotification = async (id: string) => {
     try {
       const token = localStorage.getItem('token');
-      const response = await fetch(`http://localhost:5050/api/notifications/${id}`, {
+      const response = await fetch(`${API_URL}/api/notifications/${id}`, {
         method: 'DELETE',
         headers: {
           'Authorization': `Bearer ${token}`,

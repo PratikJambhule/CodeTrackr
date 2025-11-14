@@ -8,6 +8,7 @@ import NotificationPanel from './components/NotificationPanel';
 import ThemeSelector from './components/ThemeSelector';
 import GradientText from './components/GradientText';
 import { useTheme } from './contexts/ThemeContext';
+import { API_URL } from './config';
 
 // Pages
 import Login from './pages/Login';
@@ -34,7 +35,7 @@ function App() {
 
   const checkAuth = async () => {
     try {
-      const res = await fetch('http://localhost:5050/auth/current-user', {
+      const res = await fetch(`${API_URL}/auth/current-user`, {
         credentials: 'include'
       });
       if (res.ok) {
@@ -50,7 +51,7 @@ function App() {
 
   const handleLogout = async () => {
     try {
-      await fetch('http://localhost:5050/auth/logout', {
+      await fetch(`${API_URL}/auth/logout`, {
         method: 'POST',
         credentials: 'include'
       });

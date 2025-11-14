@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Users, Plus, UserPlus } from 'lucide-react';
+import { API_URL } from '../config';
 
 export default function Teams({ user }: { user: any }) {
   const [teams, setTeams] = useState([]);
@@ -13,7 +14,7 @@ export default function Teams({ user }: { user: any }) {
 
   const fetchTeams = async () => {
     try {
-      const res = await fetch('http://localhost:5050/api/teams');
+      const res = await fetch(`${API_URL}/api/teams`);
       if (res.ok) {
         const data = await res.json();
         setTeams(data);
@@ -26,7 +27,7 @@ export default function Teams({ user }: { user: any }) {
   const createTeam = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      const res = await fetch('http://localhost:5050/api/teams/create', {
+      const res = await fetch(`${API_URL}/api/teams/create`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
