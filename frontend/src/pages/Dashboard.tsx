@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { BarChart3, Clock, Code, TrendingUp, Calendar } from 'lucide-react';
+import { BarChart3, Clock, Code, TrendingUp, Calendar, ArrowLeft } from 'lucide-react';
 import { Chart as ChartJS, CategoryScale, LinearScale, BarElement, LineElement, PointElement, Title, Tooltip, Legend, ArcElement } from 'chart.js';
 import ChartDataLabels from 'chartjs-plugin-datalabels';
 import { Line, Pie } from 'react-chartjs-2';
@@ -15,6 +15,8 @@ export default function Dashboard({ user }: { user: any }) {
   const [weeklyAnalytics, setWeeklyAnalytics] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [viewMode, setViewMode] = useState<'daily' | 'weekly'>('daily');
+  const [selectedTimeSlot, setSelectedTimeSlot] = useState<{ start: number, end: number } | null>(null);
+  const [timeSlotData, setTimeSlotData] = useState<any>(null);
 
   useEffect(() => {
     fetchAnalytics();
@@ -53,6 +55,28 @@ export default function Dashboard({ user }: { user: any }) {
     } catch (error) {
       console.error('Failed to fetch weekly analytics:', error);
     }
+  };
+
+  const fetchTimeSlotData = async (startHour: number, endHour: number) => {
+    try {
+      const res = await fetch(`http://localhost:5050/api/analytics/timeslot/${user.id}?start=${startHour}&end=${endHour}`);
+      if (res.ok) {
+        const data = await res.json();
+        setTimeSlotData(data);
+      }
+    } catch (error) {
+      console.error('Failed to fetch time slot data:', error);
+    }
+  };
+
+  const handleTimeSlotClick = (startHour: number, endHour: number) => {
+    setSelectedTimeSlot({ start: startHour, end: endHour });
+    fetchTimeSlotData(startHour, endHour);
+  };
+
+  const handleBackToOverview = () => {
+    setSelectedTimeSlot(null);
+    setTimeSlotData(null);
   };
 
   if (loading) {
@@ -264,6 +288,274 @@ export default function Dashboard({ user }: { user: any }) {
       className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 transition-colors duration-300"
       style={{ backgroundColor: theme.colors.background }}
     >
+      {/* Time Slot Detail View */}
+      {selectedTimeSlot && timeSlotData ? (
+        <div>
+          {/* Back Button */}
+          <button
+            onClick={handleBackToOverview}
+            className="cursor-target mb-6 flex items-center gap-2 px-4 py-2 rounded-lg transition-all duration-200 hover:scale-105"
+            style={{
+              backgroundColor: `${theme.colors.surface}80`,
+              borderColor: theme.colors.primary,
+              color: theme.colors.text,
+              border: `2px solid ${theme.colors.primary}`,
+            }}
+          >
+            <ArrowLeft className="w-5 h-5" />
+            <span className="font-medium">Back to Overview</span>
+          </button>
+
+          {/* Time Slot Header */}
+          <div className="mb-8">
+            <h1 className="text-4xl font-bold mb-2">
+              <GradientText animationSpeed={6}>
+                {`${selectedTimeSlot.start}:00 - ${selectedTimeSlot.end}:00 Detailed Analysis`}
+              </GradientText>
+            </h1>
+            <p style={{ color: theme.colors.textSecondary }}>
+              Detailed breakdown of your coding activity during this 2-hour window
+            </p>
+          </div>
+
+          {/* Time Slot Stats */}
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
+            <div 
+              className="backdrop-blur-lg rounded-xl p-6 border transition-all duration-300"
+              style={{
+                backgroundColor: `${theme.colors.surface}80`,
+                borderColor: theme.colors.border,
+              }}
+            >
+              <div 
+                className="inline-flex p-3 rounded-lg mb-4"
+                style={{
+                  background: `linear-gradient(to right, ${theme.colors.primary}, ${theme.colors.accent})`,
+                }}
+              >
+                <Clock className="w-6 h-6" />
+              </div>
+              <div className="text-3xl font-bold mb-1">
+                <GradientText animationSpeed={5}>
+                  {timeSlotData.totalMinutes}m
+                </GradientText>
+              </div>
+              <div className="text-sm" style={{ color: theme.colors.textSecondary }}>
+                Active Time
+              </div>
+            </div>
+
+            <div 
+              className="backdrop-blur-lg rounded-xl p-6 border transition-all duration-300"
+              style={{
+                backgroundColor: `${theme.colors.surface}80`,
+                borderColor: theme.colors.border,
+              }}
+            >
+              <div 
+                className="inline-flex p-3 rounded-lg mb-4"
+                style={{
+                  background: `linear-gradient(to right, ${theme.colors.primary}, ${theme.colors.accent})`,
+                }}
+              >
+                <Code className="w-6 h-6" />
+              </div>
+              <div className="text-3xl font-bold mb-1">
+                <GradientText animationSpeed={5}>
+                  {timeSlotData.totalLines}
+                </GradientText>
+              </div>
+              <div className="text-sm" style={{ color: theme.colors.textSecondary }}>
+                Lines Changed
+              </div>
+            </div>
+
+            <div 
+              className="backdrop-blur-lg rounded-xl p-6 border transition-all duration-300"
+              style={{
+                backgroundColor: `${theme.colors.surface}80`,
+                borderColor: theme.colors.border,
+              }}
+            >
+              <div 
+                className="inline-flex p-3 rounded-lg mb-4"
+                style={{
+                  background: `linear-gradient(to right, ${theme.colors.primary}, ${theme.colors.accent})`,
+                }}
+              >
+                <BarChart3 className="w-6 h-6" />
+              </div>
+              <div className="text-3xl font-bold mb-1">
+                <GradientText animationSpeed={5}>
+                  {timeSlotData.fileCount}
+                </GradientText>
+              </div>
+              <div className="text-sm" style={{ color: theme.colors.textSecondary }}>
+                Files Edited
+              </div>
+            </div>
+
+            <div 
+              className="backdrop-blur-lg rounded-xl p-6 border transition-all duration-300"
+              style={{
+                backgroundColor: `${theme.colors.surface}80`,
+                borderColor: theme.colors.border,
+              }}
+            >
+              <div 
+                className="inline-flex p-3 rounded-lg mb-4"
+                style={{
+                  background: `linear-gradient(to right, ${theme.colors.primary}, ${theme.colors.accent})`,
+                }}
+              >
+                <TrendingUp className="w-6 h-6" />
+              </div>
+              <div className="text-3xl font-bold mb-1">
+                <GradientText animationSpeed={5}>
+                  {timeSlotData.productivity}%
+                </GradientText>
+              </div>
+              <div className="text-sm" style={{ color: theme.colors.textSecondary }}>
+                Productivity
+              </div>
+            </div>
+          </div>
+
+          {/* Time Slot Charts */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            {/* Minute-by-minute activity line chart */}
+            <div 
+              className="backdrop-blur-lg rounded-xl p-6 border transition-all duration-300"
+              style={{
+                backgroundColor: `${theme.colors.surface}80`,
+                borderColor: theme.colors.border,
+              }}
+            >
+              <h2 className="text-xl font-bold mb-4">
+                <GradientText animationSpeed={7}>
+                  Activity Timeline
+                </GradientText>
+              </h2>
+              <div style={{ height: '300px' }}>
+                <Line 
+                  data={{
+                    labels: timeSlotData.tenMinuteSlots?.map((t: any) => t.label) || [],
+                    datasets: [{
+                      label: 'Lines Changed',
+                      data: timeSlotData.tenMinuteSlots?.map((t: any) => t.lines) || [],
+                      backgroundColor: `${theme.colors.primary}20`,
+                      borderColor: theme.colors.primary,
+                      borderWidth: 2,
+                      fill: true,
+                      tension: 0.4,
+                      pointRadius: 4,
+                      pointHoverRadius: 6,
+                      pointBackgroundColor: theme.colors.primary,
+                    }]
+                  }} 
+                  options={{
+                    ...lineChartOptions,
+                    plugins: {
+                      ...lineChartOptions.plugins,
+                      tooltip: {
+                        ...lineChartOptions.plugins?.tooltip,
+                        callbacks: {
+                          label: function(context: any) {
+                            return `${context.parsed.y} lines`;
+                          }
+                        }
+                      }
+                    }
+                  }} 
+                />
+              </div>
+            </div>
+
+            {/* Language breakdown pie chart */}
+            <div 
+              className="backdrop-blur-lg rounded-xl p-6 border transition-all duration-300"
+              style={{
+                backgroundColor: `${theme.colors.surface}80`,
+                borderColor: theme.colors.border,
+              }}
+            >
+              <h2 className="text-xl font-bold mb-4">
+                <GradientText animationSpeed={7}>
+                  Languages Used
+                </GradientText>
+              </h2>
+              <div style={{ height: '300px' }}>
+                <Pie 
+                  data={{
+                    labels: timeSlotData.languages?.map((l: any) => l._id) || [],
+                    datasets: [{
+                      data: timeSlotData.languages?.map((l: any) => l.minutes) || [],
+                      backgroundColor: [
+                        `${theme.colors.primary}cc`,
+                        `${theme.colors.accent}cc`,
+                        `${theme.colors.secondary}cc`,
+                        `${theme.colors.primary}99`,
+                        `${theme.colors.accent}99`,
+                      ],
+                      borderColor: [
+                        theme.colors.primary,
+                        theme.colors.accent,
+                        theme.colors.secondary,
+                        theme.colors.primary,
+                        theme.colors.accent,
+                      ],
+                      borderWidth: 3,
+                    }]
+                  }} 
+                  options={{
+                    ...pieChartOptions,
+                    plugins: {
+                      ...pieChartOptions.plugins,
+                      legend: {
+                        ...pieChartOptions.plugins?.legend,
+                        labels: {
+                          ...pieChartOptions.plugins?.legend?.labels,
+                          generateLabels: function(chart: any) {
+                            const data = chart.data;
+                            if (data.labels.length && data.datasets.length) {
+                              return data.labels.map((label: string, i: number) => {
+                                const value = data.datasets[0].data[i];
+                                return {
+                                  text: `${label}: ${value.toFixed(1)}min`,
+                                  fillStyle: data.datasets[0].backgroundColor[i],
+                                  strokeStyle: data.datasets[0].borderColor[i],
+                                  lineWidth: 2,
+                                  hidden: false,
+                                  index: i
+                                };
+                              });
+                            }
+                            return [];
+                          }
+                        }
+                      },
+                      tooltip: {
+                        ...pieChartOptions.plugins?.tooltip,
+                        callbacks: {
+                          label: function(context: any) {
+                            const label = context.label || '';
+                            const value = context.parsed;
+                            const total = context.dataset.data.reduce((a: number, b: number) => a + b, 0);
+                            const percentage = ((value / total) * 100).toFixed(1);
+                            return `${label}: ${value.toFixed(1)}min (${percentage}%)`;
+                          }
+                        }
+                      }
+                    }
+                  }} 
+                />
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : (
+        /* Main Dashboard View */
+        <div>
       <div className="mb-8">
         <h1 className="text-4xl font-bold mb-2">
           <TextType
@@ -429,7 +721,7 @@ export default function Dashboard({ user }: { user: any }) {
       </div>
 
       {/* Charts */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
         <div 
           className="backdrop-blur-lg rounded-xl p-6 border transition-all duration-300"
           style={{
@@ -464,6 +756,61 @@ export default function Dashboard({ user }: { user: any }) {
           </div>
         </div>
       </div>
+
+      {/* Time Slot Selection (Daily View Only) */}
+      {viewMode === 'daily' && (
+        <div 
+          className="backdrop-blur-lg rounded-xl p-6 border transition-all duration-300"
+          style={{
+            backgroundColor: `${theme.colors.surface}80`,
+            borderColor: theme.colors.border,
+          }}
+        >
+          <h2 className="text-xl font-bold mb-4">
+            <GradientText animationSpeed={7}>
+              Drill Down: Select a 2-Hour Time Slot
+            </GradientText>
+          </h2>
+          <p className="mb-4 text-sm" style={{ color: theme.colors.textSecondary }}>
+            Click on any time slot below to see detailed analysis of your activity during that period
+          </p>
+          <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-3">
+            {[0, 2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 22].map((hour) => (
+              <button
+                key={hour}
+                onClick={() => handleTimeSlotClick(hour, hour + 2)}
+                className="cursor-target px-4 py-3 rounded-lg border-2 transition-all duration-200 hover:scale-105 hover:shadow-lg"
+                style={{
+                  backgroundColor: `${theme.colors.surface}60`,
+                  borderColor: `${theme.colors.primary}60`,
+                  color: theme.colors.text,
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.backgroundColor = `${theme.colors.primary}20`;
+                  e.currentTarget.style.borderColor = theme.colors.primary;
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.backgroundColor = `${theme.colors.surface}60`;
+                  e.currentTarget.style.borderColor = `${theme.colors.primary}60`;
+                }}
+              >
+                <div className="text-center">
+                  <div className="text-xs font-medium mb-1" style={{ color: theme.colors.textSecondary }}>
+                    {hour.toString().padStart(2, '0')}:00 - {(hour + 2).toString().padStart(2, '0')}:00
+                  </div>
+                  <div className="text-lg font-bold">
+                    <GradientText animationSpeed={6}>
+                      <Clock className="w-5 h-5 mx-auto" />
+                    </GradientText>
+                  </div>
+                </div>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+        </div>
+      )}
     </div>
   );
 }
