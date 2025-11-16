@@ -10,6 +10,9 @@ require('./config/passport'); // Passport configuration
 
 const app = express();
 
+// Trust proxy for production (required for secure cookies on Render/Vercel)
+app.set("trust proxy", 1);
+
 // CORS: allow requests from frontend (FRONTEND_URL) and local dev ports
 const allowedOrigins = [
   process.env.FRONTEND_URL || 'http://localhost:5173', 
@@ -26,20 +29,22 @@ app.use(cors({
     // Reject without error to avoid crashing
     return callback(null, false);
   },
-  methods: ["GET", "POST", "OPTIONS"],
+  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
   credentials: true
 }));
 app.use(express.json());
 app.use(cookieParser());
 
-// Express session
+// Express session - configured for production
+const isProduction = process.env.NODE_ENV === 'production';
 app.use(session({
   secret: process.env.SESSION_SECRET || 'your_secret_key_codetrackr_2024',
   resave: false,
   saveUninitialized: false,
   cookie: {
-    secure: false, // Set to true if using HTTPS
+    secure: isProduction, // true in production (HTTPS), false in development
     httpOnly: true,
+    sameSite: isProduction ? 'none' : 'lax', // 'none' for cross-site in production
     maxAge: 24 * 60 * 60 * 1000 // 24 hours
   }
 }));
