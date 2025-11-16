@@ -2,6 +2,15 @@
 
 All notable changes to the CodeTrackr VS Code extension will be documented in this file.
 
+## [2.0.6] - 2025-11-16
+
+### Changed
+- **Production Ready**: Default API base URL now points to production backend (https://codetrackr-backend-uckp.onrender.com)
+- **Frontend Links**: All profile/dashboard links now point to production frontend (https://code-trackr-frontend.vercel.app)
+- Users can still override API base URL in settings if needed
+
+---
+
 ## [2.0.5] - 2025-11-11
 
 ### Fixed

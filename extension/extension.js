@@ -24,7 +24,7 @@ const lineCounts = new Map();
 function getCfg() {
   const cfg = vscode.workspace.getConfiguration("codetrackr");
   return {
-    apiBase: cfg.get("apiBase", "http://127.0.0.1:5050"),
+    apiBase: cfg.get("apiBase", "https://codetrackr-backend-uckp.onrender.com"),
     userId: cfg.get("userId") || safeUsername(),
     apiKey: cfg.get("apiKey") || "",
     // flush every 30 seconds
@@ -401,7 +401,7 @@ async function verifyApiKey(apiKey) {
         "Get New Key"
       ).then((selection) => {
         if (selection === "Get New Key") {
-          vscode.env.openExternal(vscode.Uri.parse("http://localhost:5173/profile"));
+          vscode.env.openExternal(vscode.Uri.parse("https://code-trackr-frontend.vercel.app/profile"));
         }
       });
     } else {
@@ -425,7 +425,7 @@ async function showApiKeyInfo() {
     );
     
     if (action === "Open Dashboard") {
-      vscode.env.openExternal(vscode.Uri.parse("http://localhost:5173/profile"));
+      vscode.env.openExternal(vscode.Uri.parse("https://code-trackr-frontend.vercel.app/profile"));
     } else if (action === "Enter API Key") {
       await promptForApiKey();
     }
@@ -475,7 +475,7 @@ function activate(context) {
       "Enter API Key"
     ).then((selection) => {
       if (selection === "Get API Key") {
-        vscode.env.openExternal(vscode.Uri.parse("http://localhost:5173/profile"));
+        vscode.env.openExternal(vscode.Uri.parse("https://code-trackr-frontend.vercel.app/profile"));
       } else if (selection === "Enter API Key") {
         promptForApiKey();
       }
