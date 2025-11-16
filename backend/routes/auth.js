@@ -8,6 +8,8 @@ router.get('/google', passport.authenticate('google', { scope: ['profile', 'emai
 
 // Google auth callback
 router.get('/google/callback', passport.authenticate('google', { failureRedirect: '/login' }), (req, res) => {
+    console.log("🔥 Google callback HIT!", req.query);
+
     // Successful authentication, create a JWT with more user info
     const payload = { 
         id: req.user.id, 
