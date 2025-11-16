@@ -9,7 +9,21 @@ require("dotenv").config();
 require('./config/passport'); // Passport configuration
 
 const app = express();
-app.use(cors({ origin: ["http://localhost:5173", "http://localhost:5174"], methods: ["GET","POST","OPTIONS"], credentials: true }));
+
+// CORS: allow requests from frontend (FRONTEND_URL) and local dev ports
+const allowedOrigins = [process.env.FRONTEND_URL || 'http://localhost:5173', 'http://localhost:5174'];
+app.use(cors({
+  origin: function(origin, callback) {
+    // allow server-to-server or tools with no origin
+    if (!origin) return callback(null, true);
+    if (allowedOrigins.indexOf(origin) !== -1) {
+      return callback(null, true);
+    }
+    return callback(new Error('CORS policy: This origin is not allowed'), false);
+  },
+  methods: ["GET", "POST", "OPTIONS"],
+  credentials: true
+}));
 app.use(express.json());
 app.use(cookieParser());
 
