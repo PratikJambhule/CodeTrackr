@@ -83,7 +83,10 @@ const groupRoutes = require('./routes/groups');
 const userRoutes = require('./routes/user');
 const extensionRoutes = require('./routes/extension');
 const notificationRoutes = require('./routes/notifications');
+
+console.log('📍 Mounting routes...');
 app.use('/auth', authRoutes);
+console.log('✅ Auth routes mounted at /auth');
 app.use('/api/analytics', analyticsRoutes);
 app.use('/api/teams', teamRoutes);
 app.use('/api/leaderboard', leaderboardRoutes);
