@@ -11,7 +11,11 @@ require('./config/passport'); // Passport configuration
 const app = express();
 
 // CORS: allow requests from frontend (FRONTEND_URL) and local dev ports
-const allowedOrigins = [process.env.FRONTEND_URL || 'http://localhost:5173', 'http://localhost:5174'];
+const allowedOrigins = [
+  process.env.FRONTEND_URL || 'http://localhost:5173', 
+  'http://localhost:5173',
+  'http://localhost:5174'
+];
 app.use(cors({
   origin: function(origin, callback) {
     // allow server-to-server or tools with no origin
@@ -19,7 +23,8 @@ app.use(cors({
     if (allowedOrigins.indexOf(origin) !== -1) {
       return callback(null, true);
     }
-    return callback(new Error('CORS policy: This origin is not allowed'), false);
+    // Reject without error to avoid crashing
+    return callback(null, false);
   },
   methods: ["GET", "POST", "OPTIONS"],
   credentials: true
