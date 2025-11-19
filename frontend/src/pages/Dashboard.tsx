@@ -296,7 +296,7 @@ export default function Dashboard({ user }: { user: any }) {
         }
       },
       datalabels: {
-        color: theme.colors.text,
+        color: '#FFFFFF', // Always use white for maximum contrast on colored pie slices
         font: {
           size: 16,
           weight: 'bold' as const
@@ -306,10 +306,10 @@ export default function Dashboard({ user }: { user: any }) {
           const percentage = ((value / total) * 100);
           return percentage > 5 ? `${percentage.toFixed(1)}%` : '';
         },
-        textStrokeColor: 'rgba(0, 0, 0, 0.8)',
-        textStrokeWidth: 4,
-        textShadowColor: 'rgba(0, 0, 0, 0.9)',
-        textShadowBlur: 6
+        textStrokeColor: '#000000', // Black stroke for white text
+        textStrokeWidth: 3,
+        textShadowColor: 'rgba(0, 0, 0, 0.8)',
+        textShadowBlur: 4
       }
     }
   };
