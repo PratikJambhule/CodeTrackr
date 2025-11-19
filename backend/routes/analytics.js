@@ -81,9 +81,9 @@ router.get('/:userId', async (req, res) => {
             }
         }
 
-        // HOURLY activity aggregation for last 7 days (for the line chart)
+        // HOURLY activity aggregation for TODAY only (for the line chart)
         const hourlyMap = {};
-        activities.forEach(a => {
+        todayActivities.forEach(a => {
             const date = new Date(a.timestamp);
             const hour = date.getHours();
             const hourKey = `${hour}:00`;
