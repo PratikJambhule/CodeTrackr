@@ -8,14 +8,19 @@ const { isAuthenticated } = require('../middleware/auth');
 router.get('/:userId', async (req, res) => {
     try {
         const { userId } = req.params;
-        console.log('Daily analytics request for userId:', userId);
+        const { timezone } = req.query; // Get timezone offset from query (in minutes)
+        console.log('Daily analytics request for userId:', userId, 'timezone offset:', timezone);
 
         const userIdStr = userId.toString();
 
-        // Get today's date boundaries (fix: don't mutate the Date object)
+        // Get today's date boundaries in user's timezone
         const now = new Date();
-        const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
-        const endOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+        const timezoneOffset = timezone ? parseInt(timezone) : 0; // Timezone offset in minutes
+        
+        // Adjust current time to user's timezone
+        const userNow = new Date(now.getTime() - (timezoneOffset * 60000));
+        const startOfToday = new Date(Date.UTC(userNow.getUTCFullYear(), userNow.getUTCMonth(), userNow.getUTCDate(), 0, 0, 0, 0));
+        const endOfToday = new Date(Date.UTC(userNow.getUTCFullYear(), userNow.getUTCMonth(), userNow.getUTCDate(), 23, 59, 59, 999));
 
         // Get activities from last 7 days for overall stats
         const sevenDaysAgo = new Date();
@@ -85,7 +90,9 @@ router.get('/:userId', async (req, res) => {
         const hourlyMap = {};
         todayActivities.forEach(a => {
             const date = new Date(a.timestamp);
-            const hour = date.getHours();
+            // Adjust to user's timezone
+            const userTime = new Date(date.getTime() - (timezoneOffset * 60000));
+            const hour = userTime.getUTCHours();
             const hourKey = `${hour}:00`;
             if (!hourlyMap[hourKey]) {
                 hourlyMap[hourKey] = 0;

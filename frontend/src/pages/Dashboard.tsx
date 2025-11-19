@@ -37,7 +37,9 @@ export default function Dashboard({ user }: { user: any }) {
     try {
       console.log('Fetching analytics for user:', user);
       console.log('User ID:', user.id);
-      const res = await fetch(`${API_URL}/api/analytics/${user.id}`, {
+      // Get user's timezone offset in minutes (negative for IST)
+      const timezoneOffset = new Date().getTimezoneOffset();
+      const res = await fetch(`${API_URL}/api/analytics/${user.id}?timezone=${timezoneOffset}`, {
         cache: 'no-cache',
         headers: {
           'Cache-Control': 'no-cache',
