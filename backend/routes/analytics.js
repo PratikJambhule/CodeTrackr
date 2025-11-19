@@ -296,20 +296,24 @@ router.get('/summary/:userId', isAuthenticated, async (req, res) => {
 router.get('/timeslot/:userId', async (req, res) => {
     try {
         const { userId } = req.params;
-        const { start, end } = req.query;
+        const { start, end, timezone } = req.query;
         
-        console.log(`Time slot analytics request for userId: ${userId}, ${start}:00 - ${end}:00`);
+        console.log(`Time slot analytics request for userId: ${userId}, ${start}:00 - ${end}:00, timezone offset: ${timezone}`);
 
         const userIdStr = userId.toString();
         const startHour = parseInt(start);
         const endHour = parseInt(end);
+        const timezoneOffset = timezone ? parseInt(timezone) : 0;
 
-        // Get today's date with specified time range
-        const today = new Date();
-        const startTime = new Date(today.setHours(startHour, 0, 0, 0));
-        const endTime = new Date(today.setHours(endHour, 0, 0, 0));
+        // Get today's date in user's timezone
+        const now = new Date();
+        const userNow = new Date(now.getTime() - (timezoneOffset * 60000));
+        
+        // Create start and end times in UTC that represent the user's local hours
+        const startTime = new Date(Date.UTC(userNow.getUTCFullYear(), userNow.getUTCMonth(), userNow.getUTCDate(), startHour, 0, 0, 0));
+        const endTime = new Date(Date.UTC(userNow.getUTCFullYear(), userNow.getUTCMonth(), userNow.getUTCDate(), endHour, 0, 0, 0));
 
-        console.log(`Searching activities between ${startTime} and ${endTime}`);
+        console.log(`Searching activities between ${startTime.toISOString()} and ${endTime.toISOString()}`);
 
         // Get activities in this time slot for today
         const activities = await Activity.find({

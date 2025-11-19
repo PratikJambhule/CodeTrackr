@@ -83,7 +83,8 @@ export default function Dashboard({ user }: { user: any }) {
 
   const fetchTimeSlotData = async (startHour: number, endHour: number) => {
     try {
-      const res = await fetch(`${API_URL}/api/analytics/timeslot/${user.id}?start=${startHour}&end=${endHour}`, {
+      const timezoneOffset = new Date().getTimezoneOffset();
+      const res = await fetch(`${API_URL}/api/analytics/timeslot/${user.id}?start=${startHour}&end=${endHour}&timezone=${timezoneOffset}`, {
         cache: 'no-cache',
         headers: {
           'Cache-Control': 'no-cache',
