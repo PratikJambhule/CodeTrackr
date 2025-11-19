@@ -248,12 +248,14 @@ export default function Dashboard({ user }: { user: any }) {
       legend: {
         position: 'right' as const,
         labels: {
-          color: theme.colors.primary, // Use primary color for better visibility
+          color: theme.colors.text, // Use main text color for better readability
           font: { 
-            size: 14, 
+            size: 15, 
             weight: 'bold' as const
           },
           padding: 15,
+          boxWidth: 20,
+          boxHeight: 20,
           generateLabels: function(chart: any) {
             const data = chart.data;
             if (data.labels.length && data.datasets.length) {
