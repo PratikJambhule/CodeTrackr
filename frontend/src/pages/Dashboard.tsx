@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { BarChart3, Clock, Code, TrendingUp, Calendar, ArrowLeft } from 'lucide-react';
 import { Chart as ChartJS, CategoryScale, LinearScale, BarElement, LineElement, PointElement, Title, Tooltip, Legend, ArcElement } from 'chart.js';
 import ChartDataLabels from 'chartjs-plugin-datalabels';
@@ -24,11 +24,26 @@ export default function Dashboard({ user }: { user: any }) {
     fetchWeeklyAnalytics();
   }, []);
 
-  const fetchAnalytics = async () => {
+  useEffect(() => {
+    // Refetch data when view mode changes
+    if (viewMode === 'daily') {
+      fetchAnalytics();
+    } else {
+      fetchWeeklyAnalytics();
+    }
+  }, [viewMode]);
+
+  const fetchAnalytics = useCallback(async () => {
     try {
       console.log('Fetching analytics for user:', user);
       console.log('User ID:', user.id);
-      const res = await fetch(`${API_URL}/api/analytics/${user.id}`);
+      const res = await fetch(`${API_URL}/api/analytics/${user.id}`, {
+        cache: 'no-cache',
+        headers: {
+          'Cache-Control': 'no-cache',
+          'Pragma': 'no-cache'
+        }
+      });
       console.log('Response status:', res.status);
       if (res.ok) {
         const data = await res.json();
@@ -44,11 +59,17 @@ export default function Dashboard({ user }: { user: any }) {
     } finally {
       setLoading(false);
     }
-  };
+  }, [user]);
 
-  const fetchWeeklyAnalytics = async () => {
+  const fetchWeeklyAnalytics = useCallback(async () => {
     try {
-      const res = await fetch(`${API_URL}/api/analytics/weekly/${user.id}`);
+      const res = await fetch(`${API_URL}/api/analytics/weekly/${user.id}`, {
+        cache: 'no-cache',
+        headers: {
+          'Cache-Control': 'no-cache',
+          'Pragma': 'no-cache'
+        }
+      });
       if (res.ok) {
         const data = await res.json();
         setWeeklyAnalytics(data);
@@ -56,11 +77,17 @@ export default function Dashboard({ user }: { user: any }) {
     } catch (error) {
       console.error('Failed to fetch weekly analytics:', error);
     }
-  };
+  }, [user]);
 
   const fetchTimeSlotData = async (startHour: number, endHour: number) => {
     try {
-      const res = await fetch(`${API_URL}/api/analytics/timeslot/${user.id}?start=${startHour}&end=${endHour}`);
+      const res = await fetch(`${API_URL}/api/analytics/timeslot/${user.id}?start=${startHour}&end=${endHour}`, {
+        cache: 'no-cache',
+        headers: {
+          'Cache-Control': 'no-cache',
+          'Pragma': 'no-cache'
+        }
+      });
       if (res.ok) {
         const data = await res.json();
         setTimeSlotData(data);
