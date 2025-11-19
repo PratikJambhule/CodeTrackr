@@ -17,10 +17,16 @@ router.get('/:userId', async (req, res) => {
         const now = new Date();
         const timezoneOffset = timezone ? parseInt(timezone) : 0; // Timezone offset in minutes
         
-        // Adjust current time to user's timezone
-        const userNow = new Date(now.getTime() - (timezoneOffset * 60000));
-        const startOfToday = new Date(Date.UTC(userNow.getUTCFullYear(), userNow.getUTCMonth(), userNow.getUTCDate(), 0, 0, 0, 0));
-        const endOfToday = new Date(Date.UTC(userNow.getUTCFullYear(), userNow.getUTCMonth(), userNow.getUTCDate(), 23, 59, 59, 999));
+        // Calculate midnight in user's timezone, converted to UTC
+        const userMidnightInUTC = new Date(Date.UTC(
+            now.getUTCFullYear(),
+            now.getUTCMonth(),
+            now.getUTCDate()
+        ));
+        userMidnightInUTC.setUTCMinutes(userMidnightInUTC.getUTCMinutes() + timezoneOffset);
+        
+        const startOfToday = new Date(userMidnightInUTC.getTime());
+        const endOfToday = new Date(userMidnightInUTC.getTime() + (24 * 3600000) - 1);
 
         // Get activities from last 7 days for overall stats
         const sevenDaysAgo = new Date();
@@ -305,13 +311,22 @@ router.get('/timeslot/:userId', async (req, res) => {
         const endHour = parseInt(end);
         const timezoneOffset = timezone ? parseInt(timezone) : 0;
 
-        // Get today's date in user's timezone
+        // Get today's date at midnight in user's timezone
         const now = new Date();
-        const userNow = new Date(now.getTime() - (timezoneOffset * 60000));
         
-        // Create start and end times in UTC that represent the user's local hours
-        const startTime = new Date(Date.UTC(userNow.getUTCFullYear(), userNow.getUTCMonth(), userNow.getUTCDate(), startHour, 0, 0, 0));
-        const endTime = new Date(Date.UTC(userNow.getUTCFullYear(), userNow.getUTCMonth(), userNow.getUTCDate(), endHour, 0, 0, 0));
+        // Calculate what time in UTC corresponds to midnight in user's timezone
+        // If timezoneOffset is -330 (IST), we need to ADD 330 minutes to UTC to get IST
+        // So to go from IST midnight to UTC, we SUBTRACT 330 minutes
+        const userMidnightInUTC = new Date(Date.UTC(
+            now.getUTCFullYear(),
+            now.getUTCMonth(),
+            now.getUTCDate()
+        ));
+        userMidnightInUTC.setUTCMinutes(userMidnightInUTC.getUTCMinutes() + timezoneOffset);
+        
+        // Now add the hours to get the time range in UTC
+        const startTime = new Date(userMidnightInUTC.getTime() + (startHour * 3600000));
+        const endTime = new Date(userMidnightInUTC.getTime() + (endHour * 3600000));
 
         console.log(`Searching activities between ${startTime.toISOString()} and ${endTime.toISOString()}`);
 
