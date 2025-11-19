@@ -12,10 +12,10 @@ router.get('/:userId', async (req, res) => {
 
         const userIdStr = userId.toString();
 
-        // Get today's date
-        const today = new Date();
-        const startOfToday = new Date(today.setHours(0, 0, 0, 0));
-        const endOfToday = new Date(today.setHours(23, 59, 59, 999));
+        // Get today's date boundaries (fix: don't mutate the Date object)
+        const now = new Date();
+        const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
+        const endOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
 
         // Get activities from last 7 days for overall stats
         const sevenDaysAgo = new Date();
