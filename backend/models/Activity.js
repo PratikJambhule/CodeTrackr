@@ -22,6 +22,14 @@ const activitySchema = new mongoose.Schema({
         type: Number,
         default: 0
     },
+    analysis: {
+        errorCount: { type: Number, default: 0 },
+        gitCommitCount: { type: Number, default: 0 },
+        terminalCommandCount: { type: Number, default: 0 },
+        terminalGitCommitCount: { type: Number, default: 0 },
+        activeTerminalCount: { type: Number, default: 0 },
+        lastTerminalCommand: { type: String, default: "unknown" }
+    },
     timestamp: {
         type: Date,
         default: Date.now

@@ -2,11 +2,7 @@
 const express = require("express");
 const mongoose = require("mongoose");
 const cors = require("cors");
-const session = require('express-session');
-const passport = require('passport');
-const cookieParser = require('cookie-parser');
 require("dotenv").config();
-require('./config/passport'); // Passport configuration
 
 const app = express();
 
@@ -33,25 +29,6 @@ app.use(cors({
   credentials: true
 }));
 app.use(express.json());
-app.use(cookieParser());
-
-// Express session - configured for production
-const isProduction = process.env.NODE_ENV === 'production';
-app.use(session({
-  secret: process.env.SESSION_SECRET || 'your_secret_key_codetrackr_2024',
-  resave: false,
-  saveUninitialized: false,
-  cookie: {
-    secure: isProduction, // true in production (HTTPS), false in development
-    httpOnly: true,
-    sameSite: isProduction ? 'none' : 'lax', // 'none' for cross-site in production
-    maxAge: 24 * 60 * 60 * 1000 // 24 hours
-  }
-}));
-
-// Passport middleware
-app.use(passport.initialize());
-app.use(passport.session());
 
 // Helper: convert a Date (or date-like) to an ISO string in IST (+05:30)
 function toIstIsoString(date) {
@@ -79,7 +56,6 @@ mongoose.connect(process.env.MONGO_URI, {
 const Activity = require('./models/Activity');
 
 // Routes
-const authRoutes = require('./routes/auth');
 const analyticsRoutes = require('./routes/analytics');
 const teamRoutes = require('./routes/team');
 const leaderboardRoutes = require('./routes/leaderboard');
@@ -90,8 +66,6 @@ const extensionRoutes = require('./routes/extension');
 const notificationRoutes = require('./routes/notifications');
 
 console.log('📍 Mounting routes...');
-app.use('/auth', authRoutes);
-console.log('✅ Auth routes mounted at /auth');
 app.use('/api/analytics', analyticsRoutes);
 app.use('/api/teams', teamRoutes);
 app.use('/api/leaderboard', leaderboardRoutes);

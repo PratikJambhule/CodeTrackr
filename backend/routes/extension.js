@@ -14,7 +14,8 @@ router.post('/track', verifyApiKey, async (req, res) => {
             duration,
             linesAdded,
             linesRemoved,
-            timestamp
+            timestamp,
+            analysis
         } = req.body;
 
         // Validate required fields
@@ -35,6 +36,14 @@ router.post('/track', verifyApiKey, async (req, res) => {
             duration: Number(duration),
             linesAdded: Number(linesAdded) || 0,
             linesRemoved: Number(linesRemoved) || 0,
+            analysis: {
+                errorCount: Number(analysis?.errorCount) || 0,
+                gitCommitCount: Number(analysis?.gitCommitCount) || 0,
+                terminalCommandCount: Number(analysis?.terminalCommandCount) || 0,
+                terminalGitCommitCount: Number(analysis?.terminalGitCommitCount) || 0,
+                activeTerminalCount: Number(analysis?.activeTerminalCount) || 0,
+                lastTerminalCommand: analysis?.lastTerminalCommand || 'unknown'
+            },
             timestamp: timestamp ? new Date(timestamp) : new Date(),
             date: new Date().toISOString().split('T')[0]
         });
@@ -82,6 +91,14 @@ router.post('/track/batch', verifyApiKey, async (req, res) => {
             duration: Number(activity.duration),
             linesAdded: Number(activity.linesAdded) || 0,
             linesRemoved: Number(activity.linesRemoved) || 0,
+            analysis: {
+                errorCount: Number(activity?.analysis?.errorCount) || 0,
+                gitCommitCount: Number(activity?.analysis?.gitCommitCount) || 0,
+                terminalCommandCount: Number(activity?.analysis?.terminalCommandCount) || 0,
+                terminalGitCommitCount: Number(activity?.analysis?.terminalGitCommitCount) || 0,
+                activeTerminalCount: Number(activity?.analysis?.activeTerminalCount) || 0,
+                lastTerminalCommand: activity?.analysis?.lastTerminalCommand || 'unknown'
+            },
             timestamp: activity.timestamp ? new Date(activity.timestamp) : new Date(),
             date: new Date().toISOString().split('T')[0]
         }));
