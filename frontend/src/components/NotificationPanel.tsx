@@ -77,11 +77,8 @@ const NotificationPanel: React.FC = () => {
   // Fetch notifications
   const fetchNotifications = async () => {
     try {
-      const token = localStorage.getItem('token');
       const response = await fetch(`${API_URL}/api/notifications`, {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-        },
+        credentials: 'include',
       });
 
       if (response.ok) {
@@ -110,11 +107,8 @@ const NotificationPanel: React.FC = () => {
   // Fetch unread count
   const fetchUnreadCount = async () => {
     try {
-      const token = localStorage.getItem('token');
       const response = await fetch(`${API_URL}/api/notifications/unread-count`, {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-        },
+        credentials: 'include',
       });
 
       if (response.ok) {
@@ -129,12 +123,9 @@ const NotificationPanel: React.FC = () => {
   // Mark notification as read
   const markAsRead = async (id: string) => {
     try {
-      const token = localStorage.getItem('token');
       const response = await fetch(`${API_URL}/api/notifications/${id}/read`, {
         method: 'PATCH',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-        },
+        credentials: 'include',
       });
 
       if (response.ok) {
@@ -151,12 +142,9 @@ const NotificationPanel: React.FC = () => {
   // Mark all as read
   const markAllAsRead = async () => {
     try {
-      const token = localStorage.getItem('token');
       const response = await fetch(`${API_URL}/api/notifications/mark-all-read`, {
         method: 'PATCH',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-        },
+        credentials: 'include',
       });
 
       if (response.ok) {
@@ -171,12 +159,9 @@ const NotificationPanel: React.FC = () => {
   // Delete notification
   const deleteNotification = async (id: string) => {
     try {
-      const token = localStorage.getItem('token');
       const response = await fetch(`${API_URL}/api/notifications/${id}`, {
         method: 'DELETE',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-        },
+        credentials: 'include',
       });
 
       if (response.ok) {

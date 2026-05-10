@@ -13,18 +13,25 @@ const state = {
   lastKnownFile: "unknown",
   linesAdded: 0,
   linesRemoved: 0,
+  terminalCommandCount: 0,
+  terminalGitCommitCount: 0,
+  lastTerminalCommandCount: 0,
+  lastTerminalGitCommitCount: 0,
+  activeTerminalCount: vscode.window.terminals.length,
+  lastTerminalCommand: "unknown",
   isPaused: false,
   pauseTimeoutMs: 2 * 60 * 1000, // 2 minutes in milliseconds
 };
 
 // Track previous line counts per file
 const lineCounts = new Map();
+let telemetryInitialized = false;
 
 // --------- config helpers ----------
 function getCfg() {
   const cfg = vscode.workspace.getConfiguration("codetrackr");
   return {
-    apiBase: cfg.get("apiBase", "https://codetrackr-backend-uckp.onrender.com"),
+    apiBase: cfg.get("apiBase") || "http://127.0.0.1:5050",
     userId: cfg.get("userId") || safeUsername(),
     apiKey: cfg.get("apiKey") || "",
     // flush every 30 seconds
@@ -32,8 +39,8 @@ function getCfg() {
     // minimum 0.1 minute (6 seconds) of coding before flush
     minFlushMinutes: 0.1,
   };
-}
-
+}      
+        
 function safeUsername() {
   try {
     return os.userInfo().username || "unknown";
@@ -87,23 +94,70 @@ function initLineCountForDocument(doc) {
   }
 }
 
+function isGitCommitCommand(commandLine) {
+  return /^\s*git\s+commit\b/i.test(commandLine);
+}
+
+function initializeTelemetry(context) {
+  if (telemetryInitialized) return;
+  telemetryInitialized = true;
+
+  state.activeTerminalCount = vscode.window.terminals.length;
+
+  context.subscriptions.push(
+    vscode.window.onDidOpenTerminal(() => {
+      state.activeTerminalCount += 1;
+      console.log(`CodeTrackr: Terminal opened (active=${state.activeTerminalCount})`);
+    }),
+    vscode.window.onDidCloseTerminal(() => {
+      state.activeTerminalCount = Math.max(0, state.activeTerminalCount - 1);
+      console.log(`CodeTrackr: Terminal closed (active=${state.activeTerminalCount})`);
+    })
+  );
+
+  if (typeof vscode.window.onDidStartTerminalShellExecution === "function") {
+    context.subscriptions.push(
+      vscode.window.onDidStartTerminalShellExecution((event) => {
+        const commandLine = event?.execution?.commandLine?.value?.trim() || "";
+        if (!commandLine) return;
+
+        state.terminalCommandCount += 1;
+        state.lastTerminalCommand = commandLine;
+        console.log(`🖥️ Terminal command tracked: ${commandLine}`);
+
+        if (isGitCommitCommand(commandLine)) {
+          state.terminalGitCommitCount += 1;
+          console.log(
+            `🧾 Git commit command counted (${state.terminalGitCommitCount}): ${commandLine}`
+          );
+        }
+      })
+    );
+  }
+}
+
+function getFlushAnalysis() {
+  const terminalCommandDelta = Math.max(
+    0,
+    state.terminalCommandCount - state.lastTerminalCommandCount
+  );
+  const terminalGitCommitDelta = Math.max(
+    0,
+    state.terminalGitCommitCount - state.lastTerminalGitCommitCount
+  );
+
+  return {
+    terminalCommandCount: terminalCommandDelta,
+    gitCommitCount: terminalGitCommitDelta,
+    terminalGitCommitCount: terminalGitCommitDelta,
+    activeTerminalCount: state.activeTerminalCount,
+    lastTerminalCommand: state.lastTerminalCommand,
+  };
+}
+
 // --------- backend calls ----------
 async function sendActivity(minutes, fileOpened) {
-  const { apiBase, apiKey } = getCfg();
-
-  // Check if API key is configured
-  if (!apiKey) {
-    console.warn("⚠️ CodeTrackr: No API key configured. Please set your API key in settings.");
-    vscode.window.showWarningMessage(
-      "CodeTrackr: No API key configured. Click to set up.",
-      "Configure"
-    ).then((selection) => {
-      if (selection === "Configure") {
-        promptForApiKey();
-      }
-    });
-    return;
-  }
+  const { apiBase } = getCfg();
 
   const fullPath =
     fileOpened ||
@@ -120,22 +174,25 @@ async function sendActivity(minutes, fileOpened) {
     duration: Number((minutes * 60).toFixed(0)), // Convert to seconds
     linesAdded: state.linesAdded,
     linesRemoved: state.linesRemoved,
+    analysis: getFlushAnalysis(),
   };
 
   const headers = {
-    "x-api-key": apiKey,
     "Content-Type": "application/json"
   };
 
   console.log("CodeTrackr: Preparing to send payload:", JSON.stringify(payload, null, 2));
   console.log("CodeTrackr: Using API base:", apiBase);
-  console.log("CodeTrackr: API key configured:", apiKey ? "Yes" : "No");
+  console.log("CodeTrackr: Authentication disabled (testing mode)");
 
   try {
     const res = await axios.post(`${apiBase}/api/extension/track`, payload, {
       headers,
     });
-    console.log("✅ Flushed:", res.data);
+    console.log("✅ Flushed:", {
+      response: res.data,
+      analysis: getFlushAnalysis(),
+    });
     vscode.window.setStatusBarMessage("CodeTrackr: Activity tracked ✅", 2000);
   } catch (err) {
     const errorMsg = err?.response?.data?.message || err?.message || err;
@@ -144,16 +201,7 @@ async function sendActivity(minutes, fileOpened) {
     console.error("❌ Status code:", statusCode);
     console.error("❌ Full error:", err?.response?.data || err);
     
-    if (err?.response?.status === 401) {
-      vscode.window.showErrorMessage(
-        "CodeTrackr: Invalid API key. Please update your API key in settings.",
-        "Configure"
-      ).then((selection) => {
-        if (selection === "Configure") {
-          promptForApiKey();
-        }
-      });
-    } else if (err?.response?.status === 400) {
+    if (err?.response?.status === 400) {
       vscode.window.showErrorMessage(
         `CodeTrackr: ${errorMsg}`,
         "OK"
@@ -170,6 +218,8 @@ async function sendActivity(minutes, fileOpened) {
     // Reset line counters after flush
     state.linesAdded = 0;
     state.linesRemoved = 0;
+    state.lastTerminalCommandCount = state.terminalCommandCount;
+    state.lastTerminalGitCommitCount = state.terminalGitCommitCount;
   }
 }
 
@@ -415,28 +465,9 @@ async function verifyApiKey(apiKey) {
 }
 
 async function showApiKeyInfo() {
-  const { apiKey } = getCfg();
-  
-  if (!apiKey) {
-    const action = await vscode.window.showInformationMessage(
-      "CodeTrackr: No API key configured. Get your API key from CodeTrackr dashboard.",
-      "Open Dashboard",
-      "Enter API Key"
-    );
-    
-    if (action === "Open Dashboard") {
-      vscode.env.openExternal(vscode.Uri.parse("https://code-trackr-frontend.vercel.app/profile"));
-    } else if (action === "Enter API Key") {
-      await promptForApiKey();
-    }
-  } else {
-    const verified = await verifyApiKey(apiKey);
-    if (verified) {
-      vscode.window.showInformationMessage(
-        `CodeTrackr: Connected as ${verified.user.name} (${verified.user.email})`
-      );
-    }
-  }
+  await vscode.window.showInformationMessage(
+    "CodeTrackr: Authentication is disabled for testing. Activity tracking runs without API keys."
+  );
 }
 
 // Store context globally for access in promptForApiKey
@@ -446,6 +477,8 @@ let globalContext = null;
 function activate(context) {
   console.log("💻 CodeTrackr extension activated");
   globalContext = context;
+
+  initializeTelemetry(context);
 
   // Register commands
   const cmdStart = vscode.commands.registerCommand("codetrackr.start", () =>
@@ -458,7 +491,9 @@ function activate(context) {
     flushNow()
   );
   const cmdSetupApiKey = vscode.commands.registerCommand("codetrackr.setupApiKey", () =>
-    promptForApiKey()
+    vscode.window.showInformationMessage(
+      "CodeTrackr: API key setup is disabled because authentication is turned off for testing."
+    )
   );
   const cmdShowInfo = vscode.commands.registerCommand("codetrackr.showInfo", () =>
     showApiKeyInfo()
@@ -466,56 +501,11 @@ function activate(context) {
 
   context.subscriptions.push(cmdStart, cmdStop, cmdFlush, cmdSetupApiKey, cmdShowInfo);
 
-  // Check if API key is configured
-  const { apiKey } = getCfg();
-  if (!apiKey) {
-    vscode.window.showWarningMessage(
-      "CodeTrackr: Welcome! Please configure your API key to start tracking.",
-      "Get API Key",
-      "Enter API Key"
-    ).then((selection) => {
-      if (selection === "Get API Key") {
-        vscode.env.openExternal(vscode.Uri.parse("https://code-trackr-frontend.vercel.app/profile"));
-      } else if (selection === "Enter API Key") {
-        promptForApiKey();
-      }
-    });
-  } else {
-    // Verify API key on startup with retry
-    let retries = 0;
-    const maxRetries = 3;
-    
-    const tryVerify = async () => {
-      const verified = await verifyApiKey(apiKey);
-      if (verified) {
-        vscode.window.setStatusBarMessage(
-          `CodeTrackr: Connected as ${verified.user.name}`,
-          5000
-        );
-        // Auto-start tracking
-        start(context);
-      } else if (retries < maxRetries) {
-        retries++;
-        console.log(`CodeTrackr: Verification failed, retrying (${retries}/${maxRetries})...`);
-        setTimeout(tryVerify, 2000); // Retry after 2 seconds
-      } else {
-        vscode.window.showWarningMessage(
-          "CodeTrackr: Could not verify API key. Please check your backend is running and API key is correct.",
-          "Retry",
-          "Reconfigure"
-        ).then((selection) => {
-          if (selection === "Retry") {
-            retries = 0;
-            tryVerify();
-          } else if (selection === "Reconfigure") {
-            promptForApiKey();
-          }
-        });
-      }
-    };
-    
-    tryVerify();
-  }
+  vscode.window.setStatusBarMessage(
+    "CodeTrackr: Auth disabled (testing mode)",
+    4000
+  );
+  start(context);
 }
 
 function deactivate() {

@@ -2,7 +2,6 @@ import { useState, useEffect } from 'react';
 import { Trophy, Users } from 'lucide-react';
 import { useTheme } from '../contexts/ThemeContext';
 import GradientText from '../components/GradientText';
-import TextType from '../components/TextType';
 import { API_URL } from '../config';
 
 interface LeaderboardEntry {
@@ -108,16 +107,7 @@ export default function Leaderboard() {
       <div className="mb-8">
         <h1 className="text-4xl font-bold mb-2 flex items-center gap-3">
           <Trophy className="w-10 h-10" style={{ color: theme.colors.accent }} />
-          <TextType
-            text={["Global Leaderboard"]}
-            typingSpeed={75}
-            pauseDuration={1500}
-            showCursor={true}
-            cursorCharacter="|"
-            loop={false}
-            textColors={[theme.colors.primary]}
-            className="inline-block"
-          />
+          <GradientText animationSpeed={6}>Global Leaderboard</GradientText>
         </h1>
         <p style={{ color: theme.colors.textSecondary }}>Team performance metrics and rankings</p>
       </div>

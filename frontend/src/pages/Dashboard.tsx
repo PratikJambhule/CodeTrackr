@@ -1,8 +1,8 @@
 import { useState, useEffect, useCallback } from 'react';
-import { BarChart3, Clock, Code, TrendingUp, Calendar, ArrowLeft } from 'lucide-react';
+import { BarChart3, Clock, Code, TrendingUp, Calendar, ArrowLeft, Terminal, CheckCircle, XCircle, Hammer, GitBranch, Timer } from 'lucide-react';
 import { Chart as ChartJS, CategoryScale, LinearScale, BarElement, LineElement, PointElement, Title, Tooltip, Legend, ArcElement } from 'chart.js';
 import ChartDataLabels from 'chartjs-plugin-datalabels';
-import { Line, Pie } from 'react-chartjs-2';
+import { Line, Pie, Bar } from 'react-chartjs-2';
 import { useTheme } from '../contexts/ThemeContext';
 import GradientText from '../components/GradientText';
 import TextType from '../components/TextType';
@@ -146,6 +146,58 @@ export default function Dashboard({ user }: { user: any }) {
 
   const currentData = viewMode === 'weekly' ? weeklyAnalytics : analytics;
 
+  const terminalSummary = currentData?.terminalSummary || {
+    totalCommands: 0,
+    terminalErrorCount: 0,
+    successfulCommands: 0,
+    failedCommands: 0,
+    successRate: 0,
+    buildRuns: 0,
+    testRuns: 0,
+    successfulBuilds: 0,
+    failedBuilds: 0,
+    buildSuccessRate: 0,
+    debuggingSessions: 0,
+    commandUsage: {
+      git: 0,
+      npm: 0,
+      node: 0,
+      python: 0,
+      docker: 0,
+      gcc: 0,
+      java: 0,
+      pip: 0,
+      misc: 0,
+    },
+    gitActivity: {
+      commits: 0,
+      pushes: 0,
+      pulls: 0,
+      checkouts: 0,
+      merges: 0,
+      clones: 0,
+    },
+    repeatedFailedCommands: []
+  };
+
+  const terminalTimeline = currentData?.terminalTimeline || [];
+
+  const commandUsageEntries = Object.entries(terminalSummary.commandUsage || {})
+    .map(([label, value]) => ({ label, value: Number(value) || 0 }))
+    .sort((a, b) => b.value - a.value)
+    .slice(0, 8);
+
+  const terminalStats = [
+    { label: 'Total Commands', value: terminalSummary.totalCommands || 0, icon: <Terminal className="w-6 h-6" />, color: 'from-teal-500 to-cyan-500' },
+    { label: 'Terminal Errors', value: terminalSummary.terminalErrorCount || 0, icon: <XCircle className="w-6 h-6" />, color: 'from-rose-500 to-orange-500' },
+    { label: 'Success Rate', value: `${terminalSummary.successRate || 0}%`, icon: <CheckCircle className="w-6 h-6" />, color: 'from-emerald-500 to-lime-500' },
+    { label: 'Build Runs', value: terminalSummary.buildRuns || 0, icon: <Hammer className="w-6 h-6" />, color: 'from-amber-500 to-yellow-500' },
+    { label: 'Build Success', value: `${terminalSummary.buildSuccessRate || 0}%`, icon: <TrendingUp className="w-6 h-6" />, color: 'from-amber-500 to-lime-500' },
+    { label: 'Test Runs', value: terminalSummary.testRuns || 0, icon: <BarChart3 className="w-6 h-6" />, color: 'from-indigo-500 to-sky-500' },
+    { label: 'Git Commits', value: terminalSummary.gitActivity?.commits || 0, icon: <GitBranch className="w-6 h-6" />, color: 'from-purple-500 to-pink-500' },
+    { label: 'Debug Sessions', value: terminalSummary.debuggingSessions || 0, icon: <Timer className="w-6 h-6" />, color: 'from-slate-500 to-zinc-500' },
+  ];
+
   const dailyData = {
     labels: currentData?.dailyActivity?.map((d: any) => d.day) || [],
     datasets: [{
@@ -186,6 +238,90 @@ export default function Dashboard({ user }: { user: any }) {
       ],
       borderWidth: 3,
     }]
+  };
+
+  const terminalSuccessFailureData = {
+    labels: terminalTimeline.map((t: any) => t.hour || t.day),
+    datasets: [
+      {
+        label: 'Success',
+        data: terminalTimeline.map((t: any) => t.success || 0),
+        backgroundColor: `${theme.colors.primary}aa`,
+        borderColor: theme.colors.primary,
+        borderWidth: 1,
+      },
+      {
+        label: 'Failed',
+        data: terminalTimeline.map((t: any) => t.failed || 0),
+        backgroundColor: `${theme.colors.accent}aa`,
+        borderColor: theme.colors.accent,
+        borderWidth: 1,
+      }
+    ]
+  };
+
+  const commandUsageData = {
+    labels: commandUsageEntries.map((entry) => entry.label),
+    datasets: [
+      {
+        label: 'Commands',
+        data: commandUsageEntries.map((entry) => entry.value),
+        backgroundColor: `${theme.colors.primary}99`,
+        borderColor: theme.colors.primary,
+        borderWidth: 1,
+        borderRadius: 8,
+      }
+    ]
+  };
+
+  const buildTimeline = currentData?.buildTimeline || [];
+  const gitTimeline = currentData?.gitTimeline || [];
+
+  const buildTrendData = {
+    labels: buildTimeline.map((t: any) => t.hour || t.day),
+    datasets: [
+      {
+        label: 'Successful Builds',
+        data: buildTimeline.map((t: any) => t.success || 0),
+        backgroundColor: `${theme.colors.primary}aa`,
+        borderColor: theme.colors.primary,
+        borderWidth: 1,
+      },
+      {
+        label: 'Failed Builds',
+        data: buildTimeline.map((t: any) => t.failed || 0),
+        backgroundColor: `${theme.colors.accent}aa`,
+        borderColor: theme.colors.accent,
+        borderWidth: 1,
+      }
+    ]
+  };
+
+  const gitTrendData = {
+    labels: gitTimeline.map((t: any) => t.hour || t.day),
+    datasets: [
+      {
+        label: 'Commits',
+        data: gitTimeline.map((t: any) => t.commits || 0),
+        backgroundColor: `${theme.colors.primary}aa`,
+        borderColor: theme.colors.primary,
+        borderWidth: 1,
+      },
+      {
+        label: 'Pushes',
+        data: gitTimeline.map((t: any) => t.pushes || 0),
+        backgroundColor: `${theme.colors.accent}aa`,
+        borderColor: theme.colors.accent,
+        borderWidth: 1,
+      },
+      {
+        label: 'Pulls',
+        data: gitTimeline.map((t: any) => t.pulls || 0),
+        backgroundColor: `${theme.colors.secondary}aa`,
+        borderColor: theme.colors.secondary,
+        borderWidth: 1,
+      }
+    ]
   };
 
   const lineChartOptions = {
@@ -239,6 +375,44 @@ export default function Dashboard({ user }: { user: any }) {
         }
       }
     }
+  };
+
+  const terminalBarOptions = {
+    responsive: true,
+    maintainAspectRatio: false,
+    plugins: {
+      legend: {
+        labels: {
+          color: theme.colors.text,
+          font: { size: 12 }
+        }
+      },
+      tooltip: {
+        backgroundColor: `${theme.colors.surface}ee`,
+        titleColor: theme.colors.text,
+        bodyColor: theme.colors.text,
+        borderColor: theme.colors.primary,
+        borderWidth: 1,
+        padding: 12,
+        displayColors: true,
+      },
+      datalabels: { display: false }
+    },
+    scales: {
+      x: {
+        grid: { color: `${theme.colors.border}30` },
+        ticks: { color: theme.colors.textSecondary, font: { size: 11 } }
+      },
+      y: {
+        grid: { color: `${theme.colors.border}30` },
+        ticks: { color: theme.colors.textSecondary, font: { size: 11 } }
+      }
+    }
+  };
+
+  const commandUsageOptions = {
+    ...terminalBarOptions,
+    indexAxis: 'y' as const
   };
 
   const pieChartOptions = {
@@ -452,6 +626,39 @@ export default function Dashboard({ user }: { user: any }) {
                 Productivity
               </div>
             </div>
+          </div>
+
+          {/* Time Slot Terminal Snapshot */}
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
+            {[
+              { label: 'Commands', value: timeSlotData?.terminalSummary?.totalCommands || 0, icon: <Terminal className="w-5 h-5" /> },
+              { label: 'Failures', value: timeSlotData?.terminalSummary?.failedCommands || 0, icon: <XCircle className="w-5 h-5" /> },
+              { label: 'Success Rate', value: `${timeSlotData?.terminalSummary?.successRate || 0}%`, icon: <CheckCircle className="w-5 h-5" /> },
+              { label: 'Build Success', value: `${timeSlotData?.terminalSummary?.buildSuccessRate || 0}%`, icon: <Hammer className="w-5 h-5" /> }
+            ].map((item, idx) => (
+              <div
+                key={idx}
+                className="backdrop-blur-lg rounded-xl p-5 border transition-all duration-300"
+                style={{
+                  backgroundColor: `${theme.colors.surface}80`,
+                  borderColor: theme.colors.border,
+                }}
+              >
+                <div className="inline-flex p-2 rounded-lg mb-3" style={{
+                  background: `linear-gradient(to right, ${theme.colors.primary}, ${theme.colors.accent})`
+                }}>
+                  {item.icon}
+                </div>
+                <div className="text-2xl font-bold mb-1">
+                  <GradientText animationSpeed={5}>
+                    {item.value}
+                  </GradientText>
+                </div>
+                <div className="text-xs" style={{ color: theme.colors.textSecondary }}>
+                  {item.label}
+                </div>
+              </div>
+            ))}
           </div>
 
           {/* Time Slot Charts */}
@@ -786,6 +993,158 @@ export default function Dashboard({ user }: { user: any }) {
           </h2>
           <div style={{ height: '300px' }}>
             <Pie data={languageData} options={pieChartOptions} />
+          </div>
+        </div>
+      </div>
+
+      {/* Terminal Analytics */}
+      <div className="mb-8">
+        <h2 className="text-2xl font-bold mb-4">
+          <GradientText animationSpeed={7}>
+            Terminal Analytics
+          </GradientText>
+        </h2>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 mb-6">
+          {terminalStats.map((stat, index) => (
+            <div
+              key={index}
+              className="backdrop-blur-lg rounded-xl p-5 hover:scale-105 transition-all duration-300 border"
+              style={{
+                backgroundColor: `${theme.colors.surface}80`,
+                borderColor: theme.colors.border,
+              }}
+            >
+              <div
+                className="inline-flex p-3 rounded-lg mb-4"
+                style={{
+                  background: `linear-gradient(to right, ${theme.colors.primary}, ${theme.colors.accent})`,
+                }}
+              >
+                {stat.icon}
+              </div>
+              <div className="text-2xl font-bold mb-1">
+                <GradientText animationSpeed={5}>
+                  {stat.value}
+                </GradientText>
+              </div>
+              <div className="text-sm" style={{ color: theme.colors.textSecondary }}>
+                {stat.label}
+              </div>
+            </div>
+          ))}
+        </div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+          <div
+            className="backdrop-blur-lg rounded-xl p-6 border transition-all duration-300"
+            style={{
+              backgroundColor: `${theme.colors.surface}80`,
+              borderColor: theme.colors.border,
+            }}
+          >
+            <h3 className="text-xl font-bold mb-4">
+              <GradientText animationSpeed={7}>
+                Success vs Failure
+              </GradientText>
+            </h3>
+            <div style={{ height: '300px' }}>
+              <Bar data={terminalSuccessFailureData} options={terminalBarOptions} />
+            </div>
+          </div>
+
+          <div
+            className="backdrop-blur-lg rounded-xl p-6 border transition-all duration-300"
+            style={{
+              backgroundColor: `${theme.colors.surface}80`,
+              borderColor: theme.colors.border,
+            }}
+          >
+            <h3 className="text-xl font-bold mb-4">
+              <GradientText animationSpeed={7}>
+                Most Used Commands
+              </GradientText>
+            </h3>
+            <div style={{ height: '300px' }}>
+              <Bar data={commandUsageData} options={commandUsageOptions} />
+            </div>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <div
+            className="backdrop-blur-lg rounded-xl p-6 border transition-all duration-300"
+            style={{
+              backgroundColor: `${theme.colors.surface}80`,
+              borderColor: theme.colors.border,
+            }}
+          >
+            <h3 className="text-xl font-bold mb-4">
+              <GradientText animationSpeed={7}>
+                Build Trends
+              </GradientText>
+            </h3>
+            <div style={{ height: '300px' }}>
+              <Bar data={buildTrendData} options={terminalBarOptions} />
+            </div>
+          </div>
+
+          <div
+            className="backdrop-blur-lg rounded-xl p-6 border transition-all duration-300"
+            style={{
+              backgroundColor: `${theme.colors.surface}80`,
+              borderColor: theme.colors.border,
+            }}
+          >
+            <h3 className="text-xl font-bold mb-4">
+              <GradientText animationSpeed={7}>
+                Git Activity Trends
+              </GradientText>
+            </h3>
+            <div style={{ height: '300px' }}>
+              <Bar data={gitTrendData} options={terminalBarOptions} />
+            </div>
+          </div>
+        </div>
+
+        <div className="mt-6">
+          <div
+            className="backdrop-blur-lg rounded-xl p-6 border transition-all duration-300"
+            style={{
+              backgroundColor: `${theme.colors.surface}80`,
+              borderColor: theme.colors.border,
+            }}
+          >
+            <h3 className="text-xl font-bold mb-4">
+              <GradientText animationSpeed={7}>
+                Repeated Failures
+              </GradientText>
+            </h3>
+            {terminalSummary.repeatedFailedCommands && terminalSummary.repeatedFailedCommands.length > 0 ? (
+              <div className="space-y-3">
+                {terminalSummary.repeatedFailedCommands.map((entry: any, idx: number) => (
+                  <div
+                    key={idx}
+                    className="rounded-lg px-4 py-3 border"
+                    style={{
+                      backgroundColor: `${theme.colors.surface}70`,
+                      borderColor: `${theme.colors.accent}55`,
+                    }}
+                  >
+                    <div className="text-sm font-semibold" style={{ color: theme.colors.text }}>
+                      {entry.command}
+                    </div>
+                    <div className="text-xs" style={{ color: theme.colors.textSecondary }}>
+                      Failed {entry.count} times in the last 10 minutes
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="text-sm" style={{ color: theme.colors.textSecondary }}>
+                No repeated failures detected.
+              </div>
+            )}
           </div>
         </div>
       </div>

@@ -119,7 +119,7 @@ All notable changes to the CodeTrackr VS Code extension will be documented in th
 
 #### Fixed
 - Improved error handling for network failures
-- Better handling of missing API key
+- Better handling of missing API key  
 - More accurate time tracking
 - Fixed line counting edge cases
 

@@ -22,13 +22,43 @@ const activitySchema = new mongoose.Schema({
         type: Number,
         default: 0
     },
-    analysis: {
-        errorCount: { type: Number, default: 0 },
-        gitCommitCount: { type: Number, default: 0 },
-        terminalCommandCount: { type: Number, default: 0 },
-        terminalGitCommitCount: { type: Number, default: 0 },
-        activeTerminalCount: { type: Number, default: 0 },
-        lastTerminalCommand: { type: String, default: "unknown" }
+    terminalAnalytics: {
+        totalCommands: { type: Number, default: 0 },
+        terminalErrorCount: { type: Number, default: 0 },
+        successfulCommands: { type: Number, default: 0 },
+        failedCommands: { type: Number, default: 0 },
+        successRate: { type: Number, default: 0 },
+        buildRuns: { type: Number, default: 0 },
+        testRuns: { type: Number, default: 0 },
+        successfulBuilds: { type: Number, default: 0 },
+        failedBuilds: { type: Number, default: 0 },
+        buildSuccessRate: { type: Number, default: 0 },
+        debuggingSessions: { type: Number, default: 0 },
+        commandUsage: {
+            git: { type: Number, default: 0 },
+            npm: { type: Number, default: 0 },
+            node: { type: Number, default: 0 },
+            python: { type: Number, default: 0 },
+            docker: { type: Number, default: 0 },
+            gcc: { type: Number, default: 0 },
+            java: { type: Number, default: 0 },
+            pip: { type: Number, default: 0 },
+            misc: { type: Number, default: 0 }
+        },
+        gitActivity: {
+            commits: { type: Number, default: 0 },
+            pushes: { type: Number, default: 0 },
+            pulls: { type: Number, default: 0 },
+            checkouts: { type: Number, default: 0 },
+            merges: { type: Number, default: 0 },
+            clones: { type: Number, default: 0 }
+        },
+        repeatedFailedCommands: [{
+            command: { type: String, default: "" },
+            count: { type: Number, default: 0 }
+        }],
+        lastCommand: { type: String, default: "unknown" },
+        lastCommandTimestamp: { type: Date, default: null }
     },
     timestamp: {
         type: Date,

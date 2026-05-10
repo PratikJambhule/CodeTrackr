@@ -1,16 +1,16 @@
 /**
  * CodeTrackr VS Code Extension - Main Entry Point (TypeScript)
- * Integrates activity tracking, debug monitoring, git tracking, and terminal error reporting
+ * Integrates activity tracking, debug monitoring, git tracking, and error reporting
  */
 
 import * as vscode from "vscode";
-import * as axios from "axios";
+import axios from "axios";
 import * as os from "os";
 import * as path from "path";
 import { EventLogger, createEventLogger } from "./logger";
 import { SyncService, createSyncService } from "./syncService";
 import { DebugTracker, createDebugTracker } from "./debugTracker";
-import { GitTracker, createGitTracker } from "./gitTracker";
+import { TerminalTracker, createTerminalTracker } from "./terminalTracker";
 import { ActivityEvent } from "./types";
 import { v4 as uuidv4 } from "uuid";
 
@@ -23,10 +23,7 @@ interface AppState {
   lastKnownFile: string;
   linesAdded: number;
   linesRemoved: number;
-  terminalCommandCount: number;
-  terminalGitCommitCount: number;
   activeTerminalCount: number;
-  lastTerminalCommand: string;
   isPaused: boolean;
   pauseTimeoutMs: number;
 }
@@ -37,10 +34,7 @@ const state: AppState = {
   lastKnownFile: "unknown",
   linesAdded: 0,
   linesRemoved: 0,
-  terminalCommandCount: 0,
-  terminalGitCommitCount: 0,
   activeTerminalCount: vscode.window.terminals.length,
-  lastTerminalCommand: "unknown",
   isPaused: false,
   pauseTimeoutMs: 2 * 60 * 1000, // 2 minutes
 };
@@ -53,18 +47,15 @@ let telemetryInitialized = false;
 let logger: EventLogger;
 let syncService: SyncService;
 let debugTracker: DebugTracker;
-let gitTracker: GitTracker;
-let terminalErrorCount = 0;
+let terminalTracker: TerminalTracker;
 
 // --------- Config Helpers ----------
 function getCfg() {
   const cfg = vscode.workspace.getConfiguration("codetrackr");
   return {
-    apiBase: cfg.get<string>(
-      "apiBase",
-      "https://codetrackr-backend-uckp.onrender.com"
-    ),
+    apiBase: cfg.get<string>("apiBase") || "http://127.0.0.1:5050",
     userId: cfg.get<string>("userId") || safeUsername(),
+    apiKey: cfg.get<string>("apiKey") || "",
     flushIntervalSeconds: 30,
     minFlushMinutes: 0.1,
   };
@@ -124,10 +115,6 @@ function minutesSince(ms: number): number {
   return (Date.now() - ms) / 60000;
 }
 
-function isGitCommitCommand(commandLine: string): boolean {
-  return /^\s*git\s+commit\b/i.test(commandLine);
-}
-
 function initializeTelemetry(context: vscode.ExtensionContext): void {
   if (telemetryInitialized) return;
   telemetryInitialized = true;
@@ -149,50 +136,7 @@ function initializeTelemetry(context: vscode.ExtensionContext): void {
     })
   );
 
-  if (typeof vscode.window.onDidStartTerminalShellExecution === "function") {
-    context.subscriptions.push(
-      vscode.window.onDidStartTerminalShellExecution((event) => {
-        const commandLine = event.execution.commandLine.value.trim();
-        if (!commandLine) return;
-
-        state.terminalCommandCount += 1;
-        state.lastTerminalCommand = commandLine;
-        console.log(`🖥️ Terminal command tracked: ${commandLine}`);
-
-        if (isGitCommitCommand(commandLine)) {
-          state.terminalGitCommitCount += 1;
-          console.log(
-            `🧾 Git commit command counted (${state.terminalGitCommitCount}): ${commandLine}`
-          );
-        }
-      })
-    );
-  }
-
-  if (typeof vscode.window.onDidEndTerminalShellExecution === "function") {
-    context.subscriptions.push(
-      vscode.window.onDidEndTerminalShellExecution((event) => {
-        if (event.exitCode !== undefined && event.exitCode !== 0) {
-          terminalErrorCount += 1;
-          console.log(
-            `❌ Terminal command failed (exit=${event.exitCode}). Total=${terminalErrorCount}`
-          );
-        }
-      })
-    );
-  }
-}
-
-function getFlushAnalysis(): {
-  terminalErrorCount: number;
-  terminalCommandCount: number;
-  terminalGitCommitCount: number;
-} {
-  return {
-    terminalErrorCount,
-    terminalCommandCount: state.terminalCommandCount,
-    terminalGitCommitCount: state.terminalGitCommitCount,
-  };
+  // terminal command tracking handled by TerminalTracker
 }
 
 // --------- Activity Tracking ----------
@@ -200,7 +144,7 @@ async function sendActivity(
   minutes: number,
   fileOpened?: string
 ): Promise<void> {
-  const { apiBase } = getCfg();
+  const { apiBase, apiKey } = getCfg();
 
   const fullPath =
     fileOpened ||
@@ -222,10 +166,44 @@ async function sendActivity(
     },
   };
 
-  const analysis = getFlushAnalysis();
+  const terminalAnalytics = terminalTracker?.consumeInterval() || {
+    totalCommands: 0,
+    terminalErrorCount: 0,
+    successfulCommands: 0,
+    failedCommands: 0,
+    successRate: 0,
+    buildRuns: 0,
+    testRuns: 0,
+    successfulBuilds: 0,
+    failedBuilds: 0,
+    buildSuccessRate: 0,
+    debuggingSessions: 0,
+    commandUsage: {
+      git: 0,
+      npm: 0,
+      node: 0,
+      python: 0,
+      docker: 0,
+      pip: 0,
+      java: 0,
+      gcc: 0,
+      misc: 0,
+    },
+    gitActivity: {
+      commits: 0,
+      pushes: 0,
+      pulls: 0,
+      checkouts: 0,
+      merges: 0,
+      clones: 0,
+    },
+    repeatedFailedCommands: [],
+    lastCommand: "unknown",
+    lastCommandTimestamp: null,
+  };
 
   logger.log(event);
-  console.log("CodeTrackr: Preparing to send payload:", {
+  const payload = {
     timestamp: new Date().toISOString(),
     fileName: path.basename(fullPath),
     fileType: fileType || "unknown",
@@ -234,16 +212,32 @@ async function sendActivity(
     duration: Number((minutes * 60).toFixed(0)),
     linesAdded: state.linesAdded,
     linesRemoved: state.linesRemoved,
-    terminalErrorCount: analysis.terminalErrorCount,
-    terminalCommandCount: analysis.terminalCommandCount,
-    terminalGitCommitCount: analysis.terminalGitCommitCount,
-    analysis,
-  });
-  console.log("✅ Flushed:", {
-    response: { success: true, message: "Activity tracked successfully" },
-    analysis,
-  });
-  console.log("CodeTrackr: Activity logged and queued for sync");
+    terminalAnalytics,
+  };
+
+  console.log("CodeTrackr: Preparing to send payload:", payload);
+  try {
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+    };
+    if (apiKey) {
+      headers["x-api-key"] = apiKey;
+    }
+
+    await axios.post(`${apiBase}/api/extension/track`, payload, { headers });
+    console.log("✅ Flushed:", {
+      response: { success: true, message: "Activity tracked successfully" },
+      terminalAnalytics,
+    });
+    vscode.window.setStatusBarMessage("CodeTrackr: Activity tracked ✅", 2000);
+  } catch (err: any) {
+    const errorMsg = err?.response?.data?.message || err?.message || err;
+    const statusCode = err?.response?.status || "Unknown";
+    console.error("❌ Upload failed:", errorMsg);
+    console.error("❌ Status code:", statusCode);
+    console.error("❌ Full error:", err?.response?.data || err);
+    vscode.window.setStatusBarMessage(`CodeTrackr: flush failed (${statusCode}) 🔁`, 3000);
+  }
 
   // Reset line counters
   state.linesAdded = 0;
@@ -416,14 +410,14 @@ export async function activate(
     syncService = createSyncService(logger, apiBase);
     await syncService.restoreFailedBatches(context);
     syncService.start();
-    console.log("🔄 Sync service started");
+    console.log(`🔄 Sync service started`);
 
     // Initialize trackers
     debugTracker = createDebugTracker(logger);
     debugTracker.start(context);
 
-    gitTracker = createGitTracker(logger);
-    await gitTracker.start(context);
+    terminalTracker = createTerminalTracker();
+    terminalTracker.start(context);
 
     // Register commands
     const cmdStart = vscode.commands.registerCommand("codetrackr.start", () =>
@@ -459,7 +453,7 @@ export async function activate(
     start(context);
 
     vscode.window.setStatusBarMessage(
-      "CodeTrackr: Initialized (tracking activity, debug, git, terminal errors)",
+      "CodeTrackr: Initialized (tracking activity, debug, git, errors)",
       4000
     );
   } catch (err) {
@@ -477,7 +471,7 @@ export async function deactivate(): Promise<void> {
     stop();
 
     debugTracker?.stop();
-    gitTracker?.stop();
+    terminalTracker?.stop();
 
     syncService?.stop();
     await syncService?.persistFailedBatches({
@@ -496,8 +490,7 @@ function showStats(): void {
   const loggerStats = logger.getStats();
   const syncStats = syncService.getStats();
   const debugSessions = debugTracker.getActiveSessions();
-  const gitRepos = gitTracker.getRepositories();
-  const analysis = getFlushAnalysis();
+  const terminalSnapshot = terminalTracker?.getIntervalSnapshot();
 
   const message = `
 CodeTrackr Statistics
@@ -505,10 +498,8 @@ CodeTrackr Statistics
 Logger: ${loggerStats.queueSize} queued, ${loggerStats.sentEventCount} sent
 Sync: ${syncStats.isRunning ? "Running" : "Stopped"}, ${syncStats.failedBatchCount} failed batches
 Debug Sessions: ${debugSessions.length} active
-Git Repositories: ${gitRepos.length} tracked
-Terminal Errors: ${analysis.terminalErrorCount}
-Terminal Commands: ${state.terminalCommandCount}
-Git Commit Commands: ${state.terminalGitCommitCount}
+Terminal Commands: ${terminalSnapshot?.totalCommands ?? 0}
+Terminal Errors: ${terminalSnapshot?.terminalErrorCount ?? 0}
   `;
 
   vscode.window.showInformationMessage(message);
