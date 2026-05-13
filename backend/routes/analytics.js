@@ -232,65 +232,6 @@ router.get('/:userId', async (req, res) => {
             .map(([_id, hours]) => ({ _id, hours: parseFloat(hours.toFixed(2)) }))
             .sort((a, b) => b.hours - a.hours);
 
-        const terminalSummary = buildTerminalSummary(activities);
-
-        const terminalDailyMap = {};
-        const buildDailyMap = {};
-        const gitDailyMap = {};
-
-        activities.forEach(activity => {
-            const date = new Date(activity.timestamp);
-            const dayKey = date.toISOString().split('T')[0];
-            const terminal = activity.terminalAnalytics || {};
-
-            if (!terminalDailyMap[dayKey]) {
-                terminalDailyMap[dayKey] = { success: 0, failed: 0 };
-            }
-            if (!buildDailyMap[dayKey]) {
-                buildDailyMap[dayKey] = { success: 0, failed: 0 };
-            }
-            if (!gitDailyMap[dayKey]) {
-                gitDailyMap[dayKey] = { commits: 0, pushes: 0, pulls: 0 };
-            }
-
-            terminalDailyMap[dayKey].success += Number(terminal.successfulCommands) || 0;
-            terminalDailyMap[dayKey].failed += Number(terminal.failedCommands) || 0;
-
-            buildDailyMap[dayKey].success += Number(terminal.successfulBuilds) || 0;
-            buildDailyMap[dayKey].failed += Number(terminal.failedBuilds) || 0;
-
-            gitDailyMap[dayKey].commits += Number(terminal?.gitActivity?.commits) || 0;
-            gitDailyMap[dayKey].pushes += Number(terminal?.gitActivity?.pushes) || 0;
-            gitDailyMap[dayKey].pulls += Number(terminal?.gitActivity?.pulls) || 0;
-        });
-
-        const terminalTimeline = [];
-        const buildTimeline = [];
-        const gitTimeline = [];
-        for (let i = 6; i >= 0; i--) {
-            const date = new Date();
-            date.setDate(date.getDate() - i);
-            const dayKey = date.toISOString().split('T')[0];
-            const dayName = date.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
-
-            terminalTimeline.push({
-                day: dayName,
-                success: terminalDailyMap[dayKey]?.success || 0,
-                failed: terminalDailyMap[dayKey]?.failed || 0
-            });
-            buildTimeline.push({
-                day: dayName,
-                success: buildDailyMap[dayKey]?.success || 0,
-                failed: buildDailyMap[dayKey]?.failed || 0
-            });
-            gitTimeline.push({
-                day: dayName,
-                commits: gitDailyMap[dayKey]?.commits || 0,
-                pushes: gitDailyMap[dayKey]?.pushes || 0,
-                pulls: gitDailyMap[dayKey]?.pulls || 0
-            });
-        }
-
         const terminalSummary = buildTerminalSummary(todayActivities);
 
         const terminalHourlyMap = {};
