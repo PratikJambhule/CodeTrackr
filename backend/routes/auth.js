@@ -6,11 +6,11 @@ const router = express.Router();
 // Route to start Google authentication
 router.get('/google', (req, res, next) => {
   console.log('Google OAuth triggered');
-  passport.authenticate('google', { scope: ['profile', 'email'] })(req, res, next);
+    passport.authenticate('google', { scope: ['profile', 'email'], session: false })(req, res, next);
 });
 
 // Google auth callback
-router.get('/google/callback', passport.authenticate('google', { failureRedirect: '/login' }), (req, res) => {
+router.get('/google/callback', passport.authenticate('google', { failureRedirect: '/login', session: false }), (req, res) => {
     console.log("✅ Google callback HIT!", req.user);
 
     // Successful authentication, create a JWT with more user info
