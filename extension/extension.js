@@ -13,10 +13,9 @@ const state = {
   lastKnownFile: "unknown",
   linesAdded: 0,
   linesRemoved: 0,
+  errorCount: 0,
   terminalCommandCount: 0,
   terminalGitCommitCount: 0,
-  lastTerminalCommandCount: 0,
-  lastTerminalGitCommitCount: 0,
   activeTerminalCount: vscode.window.terminals.length,
   lastTerminalCommand: "unknown",
   isPaused: false,
@@ -25,6 +24,7 @@ const state = {
 
 // Track previous line counts per file
 const lineCounts = new Map();
+const diagnosticState = new Map();
 let telemetryInitialized = false;
 
 // --------- config helpers ----------
@@ -98,11 +98,66 @@ function isGitCommitCommand(commandLine) {
   return /^\s*git\s+commit\b/i.test(commandLine);
 }
 
+function recomputeErrorCount() {
+  let total = 0;
+  for (const messages of diagnosticState.values()) {
+    total += messages.size;
+  }
+  state.errorCount = total;
+}
+
+function trackDiagnosticsForUri(uri) {
+  const currentDiagnostics = vscode.languages
+    .getDiagnostics(uri)
+    .filter((diagnostic) => diagnostic.severity === vscode.DiagnosticSeverity.Error);
+
+  const uriKey = uri.toString();
+  const previousMessages = diagnosticState.get(uriKey) || new Set();
+  const currentMessages = new Set();
+
+  currentDiagnostics.forEach((diagnostic) => {
+    const diagnosticKey = `${diagnostic.source || "unknown"}|${diagnostic.message}|${diagnostic.range.start.line}|${diagnostic.range.start.character}`;
+    currentMessages.add(diagnosticKey);
+
+    if (!previousMessages.has(diagnosticKey)) {
+      const source = diagnostic.source || "unknown";
+      console.log(`❌ Error detected: ${source} - ${diagnostic.message.substring(0, 50)}`);
+    }
+  });
+
+  previousMessages.forEach((diagnosticKey) => {
+    if (!currentMessages.has(diagnosticKey)) {
+      console.log(`✅ Error resolved in ${uri.fsPath}`);
+    }
+  });
+
+  if (currentMessages.size > 0) {
+    diagnosticState.set(uriKey, currentMessages);
+  } else {
+    diagnosticState.delete(uriKey);
+  }
+
+  recomputeErrorCount();
+}
+
 function initializeTelemetry(context) {
   if (telemetryInitialized) return;
   telemetryInitialized = true;
 
   state.activeTerminalCount = vscode.window.terminals.length;
+
+  try {
+    const existingDiagnostics = vscode.languages.getDiagnostics();
+    existingDiagnostics.forEach(([uri]) => trackDiagnosticsForUri(uri));
+  } catch {
+    // ignore
+  }
+
+  context.subscriptions.push(
+    vscode.languages.onDidChangeDiagnostics((event) => {
+      event.uris.forEach((uri) => trackDiagnosticsForUri(uri));
+    })
+  );
 
   context.subscriptions.push(
     vscode.window.onDidOpenTerminal(() => {
@@ -137,19 +192,10 @@ function initializeTelemetry(context) {
 }
 
 function getFlushAnalysis() {
-  const terminalCommandDelta = Math.max(
-    0,
-    state.terminalCommandCount - state.lastTerminalCommandCount
-  );
-  const terminalGitCommitDelta = Math.max(
-    0,
-    state.terminalGitCommitCount - state.lastTerminalGitCommitCount
-  );
-
   return {
-    terminalCommandCount: terminalCommandDelta,
-    gitCommitCount: terminalGitCommitDelta,
-    terminalGitCommitCount: terminalGitCommitDelta,
+    errorCount: state.errorCount,
+    terminalCommandCount: state.terminalCommandCount,
+    gitCommitCount: state.terminalGitCommitCount,
     activeTerminalCount: state.activeTerminalCount,
     lastTerminalCommand: state.lastTerminalCommand,
   };
@@ -218,8 +264,6 @@ async function sendActivity(minutes, fileOpened) {
     // Reset line counters after flush
     state.linesAdded = 0;
     state.linesRemoved = 0;
-    state.lastTerminalCommandCount = state.terminalCommandCount;
-    state.lastTerminalGitCommitCount = state.terminalGitCommitCount;
   }
 }
 

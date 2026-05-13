@@ -1,3 +1,4 @@
+const jwt = require('jsonwebtoken');
 const User = require('../models/user');
 const Activity = require('../models/Activity');
 
@@ -57,15 +58,46 @@ const resolveTestingUser = async (req) => {
     return user;
 };
 
+const resolveJwtUser = async (req) => {
+    const token = req.cookies?.token;
+    if (!token) {
+        return null;
+    }
+
+    try {
+        const decoded = jwt.verify(token, process.env.JWT_SECRET || 'your_jwt_secret');
+        if (!decoded?.id) {
+            return null;
+        }
+        return await User.findById(decoded.id);
+    } catch (error) {
+        return null;
+    }
+};
+
 const isAuthenticated = async (req, res, next) => {
     try {
-        req.user = await resolveTestingUser(req);
-        next();
+        const bypassAuth = process.env.AUTH_BYPASS === 'true';
+        if (bypassAuth) {
+            req.user = await resolveTestingUser(req);
+            return next();
+        }
+
+        const jwtUser = await resolveJwtUser(req);
+        if (!jwtUser) {
+            return res.status(401).json({
+                success: false,
+                message: 'Unauthorized'
+            });
+        }
+
+        req.user = jwtUser;
+        return next();
     } catch (error) {
-        console.error('Auth bypass user resolution error:', error);
-        res.status(500).json({ 
-            success: false, 
-            message: 'Failed to initialize test user context' 
+        console.error('Auth check error:', error);
+        return res.status(500).json({
+            success: false,
+            message: 'Failed to authenticate user'
         });
     }
 };

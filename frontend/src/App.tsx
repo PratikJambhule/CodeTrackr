@@ -17,6 +17,7 @@ import Goals from './pages/Goals';
 import Groups from './pages/Groups';
 import Onboarding from './pages/Onboarding';
 import Profile from './pages/Profile';
+import Login from './pages/Login';
 
 function App() {
   const { theme } = useTheme();
@@ -24,11 +25,7 @@ function App() {
     id: string;
     name: string;
     email: string;
-  }>({
-    id: 'test-user',
-    name: 'Test User',
-    email: 'test@local.codetrackr',
-  });
+  } | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -44,10 +41,15 @@ function App() {
         const data = await res.json();
         if (data?.user?.id) {
           setUser(data.user);
+        } else {
+          setUser(null);
         }
+      } else {
+        setUser(null);
       }
     } catch (error) {
-      console.error('Profile fetch failed, continuing with test user:', error);
+      console.error('Profile fetch failed, redirecting to login:', error);
+      setUser(null);
     } finally {
       setLoading(false);
     }
@@ -69,6 +71,17 @@ function App() {
           Loading...
         </div>
       </div>
+    );
+  }
+
+  if (!user) {
+    return (
+      <Router>
+        <Routes>
+          <Route path="/login" element={<Login />} />
+          <Route path="*" element={<Navigate to="/login" />} />
+        </Routes>
+      </Router>
     );
   }
 
@@ -151,6 +164,7 @@ function App() {
           </nav>
 
           <Routes>
+            <Route path="/login" element={<Navigate to="/dashboard" />} />
             <Route path="/onboarding" element={<Onboarding />} />
             <Route path="/dashboard" element={<Dashboard user={user} />} />
             <Route path="/leaderboard" element={<Leaderboard />} />
