@@ -2,6 +2,8 @@
 const express = require("express");
 const mongoose = require("mongoose");
 const cors = require("cors");
+const cookieParser = require('cookie-parser');
+const passport = require('passport');
 require("dotenv").config();
 
 const app = express();
@@ -29,6 +31,8 @@ app.use(cors({
   credentials: true
 }));
 app.use(express.json());
+app.use(cookieParser());
+app.use(passport.initialize());
 
 // Helper: convert a Date (or date-like) to an ISO string in IST (+05:30)
 function toIstIsoString(date) {
@@ -54,6 +58,7 @@ mongoose.connect(process.env.MONGO_URI, {
 
 // Use Activity model from models folder (not duplicated here)
 const Activity = require('./models/Activity');
+require('./config/passport');
 
 // Routes
 const analyticsRoutes = require('./routes/analytics');
@@ -64,6 +69,7 @@ const groupRoutes = require('./routes/groups');
 const userRoutes = require('./routes/user');
 const extensionRoutes = require('./routes/extension');
 const notificationRoutes = require('./routes/notifications');
+const authRoutes = require('./routes/auth');
 
 console.log('📍 Mounting routes...');
 app.use('/api/analytics', analyticsRoutes);
@@ -74,6 +80,7 @@ app.use('/api/groups', groupRoutes);
 app.use('/api/user', userRoutes);
 app.use('/api/extension', extensionRoutes);
 app.use('/api/notifications', notificationRoutes);
+app.use('/auth', authRoutes);
 
 
 app.post("/api/user-activity", async (req, res) => {
