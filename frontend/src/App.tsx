@@ -55,6 +55,19 @@ function App() {
     }
   };
 
+  const handleLogout = async () => {
+    try {
+      await fetch(`${API_URL}/auth/logout`, {
+        method: 'POST',
+        credentials: 'include'
+      });
+    } catch (error) {
+      console.error('Logout failed:', error);
+    } finally {
+      setUser(null);
+    }
+  };
+
   if (loading) {
     return (
       <div 
@@ -158,6 +171,25 @@ function App() {
                       Hi, {user.name}!
                     </GradientText>
                   </span>
+                  <button
+                    type="button"
+                    onClick={handleLogout}
+                    className="cursor-target px-3 py-1 rounded-lg transition-all duration-200"
+                    style={{
+                      color: theme.colors.textSecondary,
+                      border: `1px solid ${theme.colors.primary}55`
+                    }}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.color = theme.colors.text;
+                      e.currentTarget.style.backgroundColor = `${theme.colors.primary}20`;
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.color = theme.colors.textSecondary;
+                      e.currentTarget.style.backgroundColor = 'transparent';
+                    }}
+                  >
+                    Logout
+                  </button>
                 </div>
               </div>
             </div>
