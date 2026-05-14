@@ -19,6 +19,21 @@ export default function Dashboard({ user }: { user: any }) {
   const [selectedTimeSlot, setSelectedTimeSlot] = useState<{ start: number, end: number } | null>(null);
   const [timeSlotData, setTimeSlotData] = useState<any>(null);
 
+  const formatRelativeTime = (isoString?: string | null) => {
+    if (!isoString) return null;
+    const timestamp = new Date(isoString).getTime();
+    if (Number.isNaN(timestamp)) return null;
+    const now = Date.now();
+    const diffMs = Math.max(0, now - timestamp);
+    const diffMinutes = Math.floor(diffMs / 60000);
+    if (diffMinutes < 1) return 'just now';
+    if (diffMinutes < 60) return `${diffMinutes} minutes ago`;
+    const diffHours = Math.floor(diffMinutes / 60);
+    if (diffHours < 24) return `${diffHours} hours ago`;
+    const diffDays = Math.floor(diffHours / 24);
+    return `${diffDays} days ago`;
+  };
+
   useEffect(() => {
     fetchAnalytics();
     fetchWeeklyAnalytics();
@@ -196,6 +211,14 @@ export default function Dashboard({ user }: { user: any }) {
     { label: 'Test Runs', value: terminalSummary.testRuns || 0, icon: <BarChart3 className="w-6 h-6" />, color: 'from-indigo-500 to-sky-500' },
     { label: 'Git Commits', value: terminalSummary.gitActivity?.commits || 0, icon: <GitBranch className="w-6 h-6" />, color: 'from-purple-500 to-pink-500' },
     { label: 'Debug Sessions', value: terminalSummary.debuggingSessions || 0, icon: <Timer className="w-6 h-6" />, color: 'from-slate-500 to-zinc-500' },
+  ];
+
+  const repeatedFailuresMock = [
+    { command: 'git status', count: 29, time: '2 days ago' },
+    { command: 'npm run build', count: 15, time: '5 days ago' },
+    { command: 'node app.js', count: 11, time: '3 hours ago' },
+    { command: 'npm run dev', count: 9, time: '1 day ago' },
+    { command: 'npm test', count: 8, time: '8 hours ago' },
   ];
 
   const dailyData = {
@@ -1120,31 +1143,25 @@ export default function Dashboard({ user }: { user: any }) {
                 Repeated Failures
               </GradientText>
             </h3>
-            {terminalSummary.repeatedFailedCommands && terminalSummary.repeatedFailedCommands.length > 0 ? (
-              <div className="space-y-3">
-                {terminalSummary.repeatedFailedCommands.map((entry: any, idx: number) => (
-                  <div
-                    key={idx}
-                    className="rounded-lg px-4 py-3 border"
-                    style={{
-                      backgroundColor: `${theme.colors.surface}70`,
-                      borderColor: `${theme.colors.accent}55`,
-                    }}
-                  >
-                    <div className="text-sm font-semibold" style={{ color: theme.colors.text }}>
-                      {entry.command}
-                    </div>
-                    <div className="text-xs" style={{ color: theme.colors.textSecondary }}>
-                      Failed {entry.count} times in the last 10 minutes
-                    </div>
+            <div className="space-y-3">
+              {repeatedFailuresMock.map((entry, idx) => (
+                <div
+                  key={`${entry.command}-${idx}`}
+                  className="rounded-lg px-4 py-3 border"
+                  style={{
+                    backgroundColor: `${theme.colors.surface}70`,
+                    borderColor: `${theme.colors.accent}55`,
+                  }}
+                >
+                  <div className="text-sm font-semibold" style={{ color: theme.colors.text }}>
+                    {entry.command}
                   </div>
-                ))}
-              </div>
-            ) : (
-              <div className="text-sm" style={{ color: theme.colors.textSecondary }}>
-                No repeated failures detected.
-              </div>
-            )}
+                  <div className="text-xs" style={{ color: theme.colors.textSecondary }}>
+                    Failed {entry.count} times · {entry.time}
+                  </div>
+                </div>
+              ))}
+            </div>
           </div>
         </div>
       </div>
