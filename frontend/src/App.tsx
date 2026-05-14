@@ -143,7 +143,7 @@ function App() {
                     <Code2 className="w-8 h-8" />
                     <span className="text-xl font-bold">
                       <GradientText animationSpeed={6}>
-                        CodeTrackr
+                        Codex
                       </GradientText>
                     </span>
                   </Link>
