@@ -218,6 +218,7 @@ export default function Dashboard({ user }: { user: any }) {
     { command: 'npm run dev', count: 4, time: '8 hours ago' },
     { command: 'node app.js', count: 3, time: '3 hours ago' },
     { command: 'npm test', count: 2, time: '1 hour ago' },
+    { command: 'npm run build', count: 5, time: '6 hours ago' },
   ];
 
   const repeatedFailuresWeekly = [
