@@ -213,13 +213,24 @@ export default function Dashboard({ user }: { user: any }) {
     { label: 'Debug Sessions', value: terminalSummary.debuggingSessions || 0, icon: <Timer className="w-6 h-6" />, color: 'from-slate-500 to-zinc-500' },
   ];
 
-  const repeatedFailuresMock = [
+  const repeatedFailuresDaily = [
+    { command: 'git status', count: 6, time: '4 hours ago' },
+    { command: 'npm run dev', count: 4, time: '8 hours ago' },
+    { command: 'node app.js', count: 3, time: '3 hours ago' },
+    { command: 'npm test', count: 2, time: '1 hour ago' },
+  ];
+
+  const repeatedFailuresWeekly = [
     { command: 'git status', count: 29, time: '2 days ago' },
     { command: 'npm run build', count: 15, time: '5 days ago' },
     { command: 'node app.js', count: 11, time: '3 hours ago' },
     { command: 'npm run dev', count: 9, time: '1 day ago' },
     { command: 'npm test', count: 8, time: '8 hours ago' },
   ];
+
+  const repeatedFailuresMock = viewMode === 'weekly'
+    ? repeatedFailuresWeekly
+    : repeatedFailuresDaily;
 
   const dailyData = {
     labels: currentData?.dailyActivity?.map((d: any) => d.day) || [],
