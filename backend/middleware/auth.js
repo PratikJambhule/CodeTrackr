@@ -104,7 +104,40 @@ const isAuthenticated = async (req, res, next) => {
 
 // API key validation is intentionally bypassed in testing mode.
 const verifyApiKey = async (req, res, next) => {
-    return isAuthenticated(req, res, next);
+    try {
+        const bypassAuth = process.env.AUTH_BYPASS === 'true';
+        if (bypassAuth) {
+            req.user = await resolveTestingUser(req);
+            return next();
+        }
+
+        const apiKeyHeader = req.headers['x-api-key'];
+        const apiKey = typeof apiKeyHeader === 'string' ? apiKeyHeader.trim() : '';
+
+        if (!apiKey) {
+            return res.status(401).json({
+                success: false,
+                message: 'API key is required'
+            });
+        }
+
+        const user = await User.findOne({ apiKey });
+        if (!user) {
+            return res.status(401).json({
+                success: false,
+                message: 'Invalid API key'
+            });
+        }
+
+        req.user = user;
+        return next();
+    } catch (error) {
+        console.error('API key check error:', error);
+        return res.status(500).json({
+            success: false,
+            message: 'Failed to authenticate API key'
+        });
+    }
 };
 
 module.exports = { isAuthenticated, verifyApiKey };
