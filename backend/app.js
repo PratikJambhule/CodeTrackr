@@ -69,6 +69,7 @@ const groupRoutes = require('./routes/groups');
 const userRoutes = require('./routes/user');
 const extensionRoutes = require('./routes/extension');
 const notificationRoutes = require('./routes/notifications');
+const metricsRoutes = require('./routes/metrics');
 const authRoutes = require('./routes/auth');
 
 console.log('📍 Mounting routes...');
@@ -80,6 +81,7 @@ app.use('/api/groups', groupRoutes);
 app.use('/api/user', userRoutes);
 app.use('/api/extension', extensionRoutes);
 app.use('/api/notifications', notificationRoutes);
+app.use('/api/metrics', metricsRoutes);
 app.use('/auth', authRoutes);
 
 
