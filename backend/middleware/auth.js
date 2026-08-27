@@ -1,6 +1,25 @@
 const jwt = require('jsonwebtoken');
+const { isBypassAllowed } = require('../services/authorization');
 const User = require('../models/user');
 const Activity = require('../models/Activity');
+
+let bypassWarningLogged = false;
+
+/**
+ * AUTH_BYPASS turns off authentication entirely and attaches the most active
+ * real user. Refused outright in production regardless of the env var.
+ */
+function bypassEnabled() {
+    const allowed = isBypassAllowed(process.env);
+    if (allowed && !bypassWarningLogged) {
+        bypassWarningLogged = true;
+        console.warn('⚠️  AUTH_BYPASS is ON — all authentication is disabled. Never use this in production.');
+    }
+    if (!allowed && process.env.AUTH_BYPASS === 'true') {
+        console.error('❌ AUTH_BYPASS was requested but refused because NODE_ENV=production.');
+    }
+    return allowed;
+}
 
 // For testing mode, bypass all auth and attach a usable user context.
 const resolveTestingUser = async (req) => {
@@ -77,8 +96,7 @@ const resolveJwtUser = async (req) => {
 
 const isAuthenticated = async (req, res, next) => {
     try {
-        const bypassAuth = process.env.AUTH_BYPASS === 'true';
-        if (bypassAuth) {
+        if (bypassEnabled()) {
             req.user = await resolveTestingUser(req);
             return next();
         }
@@ -105,8 +123,7 @@ const isAuthenticated = async (req, res, next) => {
 // API key validation is intentionally bypassed in testing mode.
 const verifyApiKey = async (req, res, next) => {
     try {
-        const bypassAuth = process.env.AUTH_BYPASS === 'true';
-        if (bypassAuth) {
+        if (bypassEnabled()) {
             req.user = await resolveTestingUser(req);
             return next();
         }
