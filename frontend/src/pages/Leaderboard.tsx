@@ -35,7 +35,7 @@ export default function Leaderboard() {
 
   const fetchLeaderboard = async () => {
     try {
-      const res = await fetch(`${API_URL}/api/leaderboard`);
+      const res = await fetch(`${API_URL}/api/leaderboard`, { credentials: 'include' });
       if (res.ok) {
         const data = await res.json();
         console.log('Leaderboard data:', data);

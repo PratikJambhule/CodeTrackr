@@ -3,6 +3,24 @@ const router = express.Router();
 const Activity = require('../models/Activity');
 const mongoose = require('mongoose');
 const { isAuthenticated } = require('../middleware/auth');
+const { assertOwnership } = require('../services/authorization');
+
+/**
+ * Verifies the caller owns :userId. Returns the id to query, or null when a
+ * response has already been sent.
+ *
+ * The :userId param is retained for compatibility with the deployed dashboard
+ * but is now verified against the session rather than trusted (H-1).
+ */
+function resolveOwnedUserId(req, res) {
+    const sessionUserId = req.user && req.user._id ? req.user._id.toString() : null;
+    const verdict = assertOwnership(req.params.userId, sessionUserId);
+    if (!verdict.ok) {
+        res.status(verdict.status).json({ message: verdict.message });
+        return null;
+    }
+    return req.params.userId || sessionUserId;
+}
 
 function mergeCountMap(target, incoming) {
     if (!incoming) return;
@@ -161,13 +179,14 @@ async function computeStreak(userIdStr, timezoneOffset) {
 }
 
 // GET user's analytics data - Daily view with hourly breakdown
-router.get('/:userId', async (req, res) => {
+router.get('/:userId', isAuthenticated, async (req, res) => {
     try {
         const { userId } = req.params;
         const { timezone } = req.query; // Get timezone offset from query (in minutes)
         console.log('Daily analytics request for userId:', userId, 'timezone offset:', timezone);
 
-        const userIdStr = userId.toString();
+        const userIdStr = resolveOwnedUserId(req, res);
+        if (!userIdStr) return;
 
         // Get today's date boundaries in user's timezone
         const now = new Date();
@@ -343,14 +362,15 @@ router.get('/:userId', async (req, res) => {
 });
 
 // GET user's weekly analytics data - day-wise breakdown for last 7 days
-router.get('/weekly/:userId', async (req, res) => {
+router.get('/weekly/:userId', isAuthenticated, async (req, res) => {
     try {
         const { userId } = req.params;
         const { timezone } = req.query;
         const timezoneOffset = timezone ? parseInt(timezone) : 0;
         console.log('Weekly analytics request for userId:', userId);
 
-        const userIdStr = userId.toString();
+        const userIdStr = resolveOwnedUserId(req, res);
+        if (!userIdStr) return;
 
         // Get activities from the last 7 days
         const sevenDaysAgo = new Date();
@@ -500,7 +520,8 @@ router.get('/summary/:userId', isAuthenticated, async (req, res) => {
         const { userId } = req.params;
 
         // userId is stored as String in Activity model
-        const userIdStr = userId.toString();
+        const userIdStr = resolveOwnedUserId(req, res);
+        if (!userIdStr) return;
 
         // Daily total hours (duration is in seconds, so we divide by 3600)
         const dailyTotals = await Activity.aggregate([
@@ -534,14 +555,15 @@ router.get('/summary/:userId', isAuthenticated, async (req, res) => {
 });
 
 // GET time slot detailed analytics
-router.get('/timeslot/:userId', async (req, res) => {
+router.get('/timeslot/:userId', isAuthenticated, async (req, res) => {
     try {
         const { userId } = req.params;
         const { start, end, timezone } = req.query;
         
         console.log(`Time slot analytics request for userId: ${userId}, ${start}:00 - ${end}:00, timezone offset: ${timezone}`);
 
-        const userIdStr = userId.toString();
+        const userIdStr = resolveOwnedUserId(req, res);
+        if (!userIdStr) return;
         const startHour = parseInt(start);
         const endHour = parseInt(end);
         const timezoneOffset = timezone ? parseInt(timezone) : 0;

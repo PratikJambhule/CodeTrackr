@@ -2,9 +2,10 @@ const express = require('express');
 const router = express.Router();
 const Activity = require('../models/Activity');
 const User = require('../models/user');
+const { isAuthenticated } = require('../middleware/auth');
 
 // GET global leaderboard data
-router.get('/', async (req, res) => {
+router.get('/', isAuthenticated, async (req, res) => {
     try {
         // First, get all users
         const allUsers = await User.find({}).select('_id name email profilePictureUrl').lean();

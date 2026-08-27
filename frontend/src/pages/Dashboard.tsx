@@ -55,6 +55,7 @@ export default function Dashboard({ user }: { user: any }) {
       // Get user's timezone offset in minutes (negative for IST)
       const timezoneOffset = new Date().getTimezoneOffset();
       const res = await fetch(`${API_URL}/api/analytics/${user.id}?timezone=${timezoneOffset}`, {
+        credentials: 'include',
         cache: 'no-cache',
         headers: {
           'Cache-Control': 'no-cache',
@@ -82,6 +83,7 @@ export default function Dashboard({ user }: { user: any }) {
     try {
       const timezoneOffset = new Date().getTimezoneOffset();
       const res = await fetch(`${API_URL}/api/analytics/weekly/${user.id}?timezone=${timezoneOffset}`, {
+        credentials: 'include',
         cache: 'no-cache',
         headers: {
           'Cache-Control': 'no-cache',
@@ -101,6 +103,7 @@ export default function Dashboard({ user }: { user: any }) {
     try {
       const timezoneOffset = new Date().getTimezoneOffset();
       const res = await fetch(`${API_URL}/api/analytics/timeslot/${user.id}?start=${startHour}&end=${endHour}&timezone=${timezoneOffset}`, {
+        credentials: 'include',
         cache: 'no-cache',
         headers: {
           'Cache-Control': 'no-cache',

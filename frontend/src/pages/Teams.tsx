@@ -14,7 +14,7 @@ export default function Teams({ user }: { user: any }) {
 
   const fetchTeams = async () => {
     try {
-      const res = await fetch(`${API_URL}/api/teams`);
+      const res = await fetch(`${API_URL}/api/teams`, { credentials: 'include' });
       if (res.ok) {
         const data = await res.json();
         setTeams(data);
