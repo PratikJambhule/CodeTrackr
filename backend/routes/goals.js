@@ -40,7 +40,9 @@ router.get('/', isAuthenticated, async (req, res) => {
 router.get('/:goalId/progress', isAuthenticated, async (req, res) => {
     try {
         const { goalId } = req.params;
-        const goal = await Goal.findById(goalId);
+        // Scope by owner: findById leaked another user's goal title,
+        // description, targetHours and deadline (H-11).
+        const goal = await Goal.findOne({ _id: goalId, userId: req.user.id });
 
         if (!goal) {
             return res.status(404).json({ message: 'Goal not found' });

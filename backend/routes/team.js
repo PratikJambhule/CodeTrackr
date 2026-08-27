@@ -4,6 +4,7 @@ const Team = require('../models/Team');
 const User = require('../models/user');
 const mongoose = require('mongoose');
 const { isAuthenticated } = require('../middleware/auth');
+const { sameUser } = require('../services/authorization');
 
 // Create a new team
 router.post('/create', isAuthenticated, async (req, res) => {
@@ -43,6 +44,13 @@ router.get('/:teamId', isAuthenticated, async (req, res) => {
         if (!team) {
             return res.status(404).json({ message: 'Team not found' });
         }
+
+        // Membership check: this returns every member's name and email (H-11).
+        const isMember = (team.members || []).some((m) => sameUser(m && m._id ? m._id : m, req.user.id));
+        if (!isMember) {
+            return res.status(403).json({ message: 'You must be a team member to view this team' });
+        }
+
         res.json(team);
     } catch (error) {
         res.status(500).json({ message: 'Error fetching team details', error: error.message });
