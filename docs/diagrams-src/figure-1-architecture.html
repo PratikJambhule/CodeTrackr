@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Figure 1 - CodeTrackr System Architecture</title>
+<style>
+  body {
+    margin: 0;
+    background: #f6f8fb;
+    font-family: "Segoe UI", Arial, sans-serif;
+    color: #1f2a37;
+  }
+  .wrap {
+    width: 1200px;
+    height: 800px;
+    margin: 0 auto;
+  }
+  .title {
+    font-size: 24px;
+    font-weight: 600;
+    text-anchor: middle;
+  }
+  .label {
+    font-size: 16px;
+    font-weight: 600;
+    text-anchor: middle;
+  }
+  .small {
+    font-size: 13px;
+    text-anchor: middle;
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+<svg width="1200" height="800" viewBox="0 0 1200 800" role="img" aria-label="CodeTrackr system architecture">
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#4f6d8a"></path>
+    </marker>
+  </defs>
+
+  <rect x="40" y="40" width="1120" height="720" rx="20" fill="#ffffff" stroke="#d6e0ea" />
+  <text x="600" y="90" class="title">Figure 1: CodeTrackr System Architecture Diagram</text>
+
+  <rect x="80" y="130" width="1040" height="120" rx="16" fill="#f3f6fb" stroke="#e2e8f0" />
+  <rect x="80" y="270" width="1040" height="140" rx="16" fill="#f6f9ff" stroke="#e2e8f0" />
+  <rect x="80" y="430" width="1040" height="120" rx="16" fill="#f3f6fb" stroke="#e2e8f0" />
+  <rect x="80" y="570" width="1040" height="120" rx="16" fill="#f6f9ff" stroke="#e2e8f0" />
+
+  <text x="140" y="195" class="label">User Layer</text>
+  <text x="140" y="355" class="label">Application Layer</text>
+  <text x="140" y="495" class="label">Data Layer</text>
+  <text x="140" y="635" class="label">Output Layer</text>
+
+  <rect x="260" y="155" width="220" height="70" rx="12" fill="#ffffff" stroke="#4f8ef7" />
+  <text x="370" y="198" class="label">Developer</text>
+  <text x="370" y="220" class="small">Uses VS Code</text>
+
+  <rect x="520" y="155" width="250" height="70" rx="12" fill="#eaf2ff" stroke="#4f8ef7" />
+  <text x="645" y="195" class="label">VS Code Extension</text>
+  <text x="645" y="218" class="small">Tracks activity</text>
+
+  <rect x="820" y="155" width="250" height="70" rx="12" fill="#ffffff" stroke="#4f8ef7" />
+  <text x="945" y="195" class="label">Google OAuth</text>
+  <text x="945" y="218" class="small">Login tokens</text>
+
+  <rect x="260" y="305" width="260" height="90" rx="12" fill="#ffffff" stroke="#4f8ef7" />
+  <text x="390" y="350" class="label">Backend API</text>
+  <text x="390" y="372" class="small">Node.js + Express</text>
+
+  <rect x="560" y="305" width="260" height="90" rx="12" fill="#ffffff" stroke="#4f8ef7" />
+  <text x="690" y="350" class="label">Request Validator</text>
+  <text x="690" y="372" class="small">API key auth</text>
+
+  <rect x="860" y="305" width="210" height="90" rx="12" fill="#ffffff" stroke="#4f8ef7" />
+  <text x="965" y="350" class="label">Sync Service</text>
+  <text x="965" y="372" class="small">Batch uploads</text>
+
+  <rect x="260" y="455" width="260" height="70" rx="12" fill="#ffffff" stroke="#7aa2c8" />
+  <text x="390" y="495" class="label">MongoDB Atlas</text>
+  <text x="390" y="517" class="small">Activities, users</text>
+
+  <rect x="560" y="455" width="260" height="70" rx="12" fill="#ffffff" stroke="#7aa2c8" />
+  <text x="690" y="495" class="label">Analytics Store</text>
+  <text x="690" y="517" class="small">Goals, groups</text>
+
+  <rect x="260" y="595" width="260" height="70" rx="12" fill="#eaf2ff" stroke="#4f8ef7" />
+  <text x="390" y="635" class="label">Web Dashboard</text>
+  <text x="390" y="657" class="small">Charts and goals</text>
+
+  <rect x="560" y="595" width="260" height="70" rx="12" fill="#eaf2ff" stroke="#4f8ef7" />
+  <text x="690" y="635" class="label">Reports API</text>
+  <text x="690" y="657" class="small">Usage summaries</text>
+
+  <line x1="480" y1="190" x2="520" y2="190" stroke="#4f6d8a" stroke-width="3" marker-end="url(#arrow)" />
+  <line x1="770" y1="190" x2="820" y2="190" stroke="#4f6d8a" stroke-width="3" marker-end="url(#arrow)" />
+
+  <line x1="645" y1="225" x2="390" y2="305" stroke="#4f6d8a" stroke-width="2" marker-end="url(#arrow)" />
+  <line x1="945" y1="225" x2="690" y2="305" stroke="#4f6d8a" stroke-width="2" marker-end="url(#arrow)" />
+
+  <line x1="520" y1="350" x2="560" y2="350" stroke="#4f6d8a" stroke-width="2" marker-end="url(#arrow)" />
+  <line x1="820" y1="350" x2="860" y2="350" stroke="#4f6d8a" stroke-width="2" marker-end="url(#arrow)" />
+
+  <line x1="390" y1="395" x2="390" y2="455" stroke="#4f6d8a" stroke-width="2" marker-end="url(#arrow)" />
+  <line x1="690" y1="395" x2="690" y2="455" stroke="#4f6d8a" stroke-width="2" marker-end="url(#arrow)" />
+
+  <line x1="390" y1="525" x2="390" y2="595" stroke="#4f6d8a" stroke-width="2" marker-end="url(#arrow)" />
+  <line x1="690" y1="525" x2="690" y2="595" stroke="#4f6d8a" stroke-width="2" marker-end="url(#arrow)" />
+
+  <text x="455" y="180" class="small">Setup</text>
+  <text x="795" y="180" class="small">Login</text>
+  <text x="525" y="336" class="small">Validate</text>
+  <text x="835" y="336" class="small">Queue</text>
+  <text x="415" y="430" class="small">Write</text>
+  <text x="715" y="430" class="small">Read</text>
+  <text x="415" y="580" class="small">Render</text>
+  <text x="715" y="580" class="small">Summaries</text>
+</svg>
+</div>
+</body>
+</html>

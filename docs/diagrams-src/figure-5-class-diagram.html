@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Figure 5 - Class Diagram</title>
+<style>
+  body {
+    margin: 0;
+    background: #f6f8fb;
+    font-family: "Segoe UI", Arial, sans-serif;
+    color: #1f2a37;
+  }
+  .wrap { width: 1200px; height: 800px; margin: 0 auto; }
+  .title { font-size: 24px; font-weight: 600; text-anchor: middle; }
+  .label { font-size: 14px; font-weight: 600; text-anchor: middle; }
+  .small { font-size: 12px; text-anchor: start; }
+</style>
+</head>
+<body>
+<div class="wrap">
+<svg width="1200" height="800" viewBox="0 0 1200 800" role="img" aria-label="Class diagram">
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#4f6d8a"></path>
+    </marker>
+  </defs>
+
+  <rect x="40" y="40" width="1120" height="720" rx="20" fill="#ffffff" stroke="#d6e0ea" />
+  <text x="600" y="90" class="title">Figure 5: Class Diagram</text>
+
+  <rect x="110" y="160" width="260" height="200" rx="12" fill="#ffffff" stroke="#4f8ef7" />
+  <line x1="110" y1="200" x2="370" y2="200" stroke="#4f8ef7" />
+  <text x="240" y="185" class="label">User</text>
+  <text x="130" y="225" class="small">id</text>
+  <text x="130" y="245" class="small">name</text>
+  <text x="130" y="265" class="small">email</text>
+  <text x="130" y="285" class="small">apiKey</text>
+
+  <rect x="450" y="140" width="280" height="230" rx="12" fill="#ffffff" stroke="#4f8ef7" />
+  <line x1="450" y1="180" x2="730" y2="180" stroke="#4f8ef7" />
+  <text x="590" y="165" class="label">Activity</text>
+  <text x="470" y="205" class="small">id</text>
+  <text x="470" y="225" class="small">fileName</text>
+  <text x="470" y="245" class="small">language</text>
+  <text x="470" y="265" class="small">duration</text>
+  <text x="470" y="285" class="small">linesAdded</text>
+  <text x="470" y="305" class="small">linesRemoved</text>
+  <text x="470" y="325" class="small">timestamp</text>
+
+  <rect x="820" y="160" width="260" height="200" rx="12" fill="#ffffff" stroke="#4f8ef7" />
+  <line x1="820" y1="200" x2="1080" y2="200" stroke="#4f8ef7" />
+  <text x="950" y="185" class="label">Goal</text>
+  <text x="840" y="225" class="small">id</text>
+  <text x="840" y="245" class="small">title</text>
+  <text x="840" y="265" class="small">targetHours</text>
+  <text x="840" y="285" class="small">deadline</text>
+  <text x="840" y="305" class="small">status</text>
+
+  <rect x="280" y="430" width="260" height="180" rx="12" fill="#ffffff" stroke="#4f8ef7" />
+  <line x1="280" y1="470" x2="540" y2="470" stroke="#4f8ef7" />
+  <text x="410" y="455" class="label">Group</text>
+  <text x="300" y="495" class="small">id</text>
+  <text x="300" y="515" class="small">name</text>
+  <text x="300" y="535" class="small">visibility</text>
+
+  <rect x="640" y="430" width="260" height="180" rx="12" fill="#ffffff" stroke="#4f8ef7" />
+  <line x1="640" y1="470" x2="900" y2="470" stroke="#4f8ef7" />
+  <text x="770" y="455" class="label">GroupMember</text>
+  <text x="660" y="495" class="small">groupId</text>
+  <text x="660" y="515" class="small">userId</text>
+  <text x="660" y="535" class="small">joinedAt</text>
+
+  <line x1="370" y1="250" x2="450" y2="250" stroke="#4f6d8a" stroke-width="2" marker-end="url(#arrow)" />
+  <text x="390" y="235" class="small">1..*</text>
+
+  <line x1="370" y1="300" x2="820" y2="250" stroke="#4f6d8a" stroke-width="2" marker-end="url(#arrow)" />
+  <text x="560" y="235" class="small">0..*</text>
+
+  <line x1="370" y1="330" x2="280" y2="470" stroke="#4f6d8a" stroke-width="2" marker-end="url(#arrow)" />
+  <text x="300" y="395" class="small">0..*</text>
+
+  <line x1="540" y1="520" x2="640" y2="520" stroke="#4f6d8a" stroke-width="2" marker-end="url(#arrow)" />
+  <text x="565" y="505" class="small">1..*</text>
+
+  <line x1="640" y1="500" x2="370" y2="280" stroke="#4f6d8a" stroke-width="2" marker-end="url(#arrow)" />
+  <text x="520" y="360" class="small">1</text>
+</svg>
+</div>
+</body>
+</html>

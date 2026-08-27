@@ -1,0 +1,45 @@
+# Dependencies and lockfiles (everything is bundled into dist/extension.js)
+node_modules/**
+package-lock.json
+pnpm-lock.yaml
+yarn.lock
+
+# VS Code and editor metadata
+.vscode/**
+.idea/**
+.DS_Store
+
+# Git
+.git/**
+.gitignore
+
+# TypeScript sources and build config (we ship the bundle only)
+src/**
+*.ts
+tsconfig.json
+**/*.map
+
+# Legacy v1 entry point, superseded by src/extension.ts
+extension.js
+
+# Tests
+tests/**
+**/*.test.js
+coverage/**
+
+# Developer scripts and internal docs
+test-api-key.js
+test-extension.js
+index.html
+check-extension.md
+INSTALL_GUIDE.md
+PUBLISHING_GUIDE.md
+
+# Package outputs and logs
+*.vsix
+*.log
+npm-debug.log
+
+# Secrets
+.env
+*.local
