@@ -67,6 +67,35 @@ const activitySchema = new mongoose.Schema({
     date: {
         type: Date,
         default: Date.now
+    },
+    editorAnalytics: {
+        charsInserted: { type: Number, default: 0 },
+        charsDeleted: { type: Number, default: 0 },
+        linesInserted: { type: Number, default: 0 },
+        linesDeleted: { type: Number, default: 0 },
+        churnLines: { type: Number, default: 0 },
+        undoCount: { type: Number, default: 0 },
+        redoCount: { type: Number, default: 0 },
+        saveCount: { type: Number, default: 0 },
+        fileSwitches: { type: Number, default: 0 },
+        uniqueFiles: { type: Number, default: 0 },
+        readMs: { type: Number, default: 0 },
+        writeMs: { type: Number, default: 0 },
+        largeInsertCount: { type: Number, default: 0 },
+        largeInsertChars: { type: Number, default: 0 }
+    },
+    focusAnalytics: {
+        focusedMs: { type: Number, default: 0 },
+        blurredMs: { type: Number, default: 0 },
+        blurEvents: { type: Number, default: 0 },
+        flowBlocksMs: { type: [Number], default: [] },
+        longestBlockMs: { type: Number, default: 0 }
+    },
+    gitAnalytics: {
+        commits: { type: Number, default: 0 },
+        filesChanged: { type: Number, default: 0 },
+        uncommittedFiles: { type: Number, default: 0 },
+        uncommittedAgeMs: { type: Number, default: 0 }
     }
 }, { timestamps: true });
 

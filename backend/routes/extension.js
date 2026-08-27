@@ -2,6 +2,11 @@ const express = require('express');
 const router = express.Router();
 const Activity = require('../models/Activity');
 const { verifyApiKey } = require('../middleware/auth');
+const {
+    normalizeEditorAnalytics,
+    normalizeFocusAnalytics,
+    normalizeGitAnalytics
+} = require('../services/activityNormalizers');
 
 function normalizeTerminalAnalytics(body) {
     const source = body?.terminalAnalytics || body?.analysis || body || {};
@@ -98,6 +103,9 @@ router.post('/track', verifyApiKey, async (req, res) => {
             linesAdded: Number(linesAdded) || 0,
             linesRemoved: Number(linesRemoved) || 0,
             terminalAnalytics: terminalPayload,
+            editorAnalytics: normalizeEditorAnalytics(req.body),
+            focusAnalytics: normalizeFocusAnalytics(req.body),
+            gitAnalytics: normalizeGitAnalytics(req.body),
             timestamp: when,
             date: when
         });
@@ -149,6 +157,9 @@ router.post('/track/batch', verifyApiKey, async (req, res) => {
             linesAdded: Number(activity.linesAdded) || 0,
             linesRemoved: Number(activity.linesRemoved) || 0,
             terminalAnalytics: normalizeTerminalAnalytics(activity),
+            editorAnalytics: normalizeEditorAnalytics(activity),
+            focusAnalytics: normalizeFocusAnalytics(activity),
+            gitAnalytics: normalizeGitAnalytics(activity),
             timestamp: when,
             date: when
           };
