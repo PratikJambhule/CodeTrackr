@@ -2,6 +2,27 @@
 
 All notable changes to the CodeTrackr VS Code extension will be documented in this file.
 
+## [2.1.0] - 2026-08-28
+
+### Added
+- **Editor analytics**: gross characters and lines inserted/deleted, churn (lines written
+  then deleted within 10 minutes), undo/redo counts, saves, file switches, unique files,
+  and a read-vs-write attention split.
+- **Focus analytics**: real window focus/blur time and completed "flow blocks", so the
+  shape of a session is recorded rather than just its total.
+- **Git analytics**: commits are now detected through the built-in Git extension, so
+  commits made from the Source Control panel or any GUI are counted.
+
+### Fixed
+- `linesAdded`/`linesRemoved` were net `lineCount` deltas, so any replace-in-place edit
+  (most refactoring) recorded as zero activity. They are now gross counters.
+
+### Privacy
+- No file contents, diffs, commit messages or absolute paths are transmitted.
+
+---
+
+
 ## [2.0.11] - 2026-08-27
 
 ### Fixed

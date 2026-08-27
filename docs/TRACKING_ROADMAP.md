@@ -224,7 +224,10 @@ This uses **data you already collect** and needs no new tracking at all — the 
 
 ## Part 4 — Suggested phasing
 
-**Phase A — fix + cheap wins.** F-1, F-2, then Tier A signals. Derived: Deep Work Ratio, flow-block distribution, true peak window, consistency index, estimation calibration (#18 needs no new tracking).
+**Phase A — ✅ DONE 2026-08-28 (extension 2.1.0).** Implemented via `superpowers/plans/2026-08-28-tracking-phase-a.md`.
+Verified by 32 extension assertions and 33 backend assertions. Next up: Phase B.
+
+**Phase A (original scope) — fix + cheap wins.** F-1, F-2, then Tier A signals. Derived: Deep Work Ratio, flow-block distribution, true peak window, consistency index, estimation calibration (#18 needs no new tracking).
 
 **Phase B — the friction layer.** Tier B signals. Derived: churn ratio, error density and resolution time, MTTG, feedback-loop latency, rework hotspots.
 

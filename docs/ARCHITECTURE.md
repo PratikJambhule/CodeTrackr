@@ -1,12 +1,12 @@
 # CodeTrackr — Architecture & Data Flow
 
-_Reverse-engineered from the codebase (no assumptions from filenames). Last verified: 2026-08-27._
+_Reverse-engineered from the codebase (no assumptions from filenames). Last verified: 2026-08-28 (extension 2.1.0)._
 
 ## 1. Components
 
 | Layer | Location | Stack |
 |---|---|---|
-| VS Code extension | `extension/src/*.ts` → `dist/extension.js` | TypeScript, axios, esbuild. Published as `CodeTrackr-ext.codetrackr-vscode` v2.0.10 |
+| VS Code extension | `extension/src/*.ts` → `dist/extension.js` | TypeScript, axios, esbuild. Published as `CodeTrackr-ext.codetrackr-vscode`; source at v2.1.0 |
 | Backend API | `backend/` | Express 5, Mongoose 8, Passport (Google OAuth), JWT in httpOnly cookie |
 | Database | MongoDB Atlas | 7 collections (below) |
 | Web dashboard | `frontend/src/` | React 19 + Vite + TS + Tailwind, React Router |
@@ -19,7 +19,8 @@ _Reverse-engineered from the codebase (no assumptions from filenames). Last veri
 `extension/src/extension.ts`:
 
 - `activate()` → `start(context)` registers listeners on `onDidChangeTextDocument`, `onDidOpenTextDocument`, `onDidSaveTextDocument`, `onDidChangeActiveTextEditor`. Each calls `markActivity()`, updating `state.lastActivityMs`.
-- Line deltas are computed from `doc.lineCount` diffs against a `Map<file, lineCount>` — so `linesAdded`/`linesRemoved` are **net line-count changes, not edit volume**.
+- Edit volume is accumulated by `EditorTracker` from `event.contentChanges`: gross characters and lines inserted/deleted, churn, undo/redo, saves, file switches and a read-vs-write attention split. (Before 2.1.0 this was a net `doc.lineCount` delta that recorded zero for replace-in-place edits.)
+- `FocusTracker` records real window focus/blur time and completed flow blocks; `GitStateTracker` reads commits from the `vscode.git` extension API.
 - A `setInterval` ticks every 30s. On each tick:
   - idle ≥ 2 min → flush remaining active time, set `isPaused`, stop accumulating.
   - otherwise → `flushIfNeeded()` sends if buffered ≥ `minFlushMinutes`.
@@ -28,9 +29,18 @@ _Reverse-engineered from the codebase (no assumptions from filenames). Last veri
 
 **Transport:** `POST {apiBase}/api/extension/track` with header `x-api-key`. One document per flush.
 
-### Two pipelines exist; only one works
+Since 2.1.0 the flush also carries `editorAnalytics`, `focusAnalytics` and `gitAnalytics`.
+Commits come from the built-in Git extension API (`vscode.git`), not terminal parsing, so
+commits made through the Source Control panel are counted. Edit volume is gross insert/delete
+from `contentChanges`; the net `doc.lineCount` delta has been removed. Derived metrics are
+served by `GET /api/metrics` (session identity only).
 
-`extension.ts` calls **both** `logger.log(event)` (the `EventLogger`/`SyncService` batching pipeline) and the direct `axios.post(/api/extension/track)`. The `SyncService` posts batches to `POST /api/extension/events` — **that route does not exist on the backend**, and `SyncService` sends **no `x-api-key` header**. Every 30s it retries 3× with exponential backoff, then parks the batch in an in-memory `failedBatches[]` that grows unboundedly. `deactivate()` calls `persistFailedBatches()` with a **fake stub context** whose `update()` is a no-op, so nothing is ever persisted. The entire `logger.ts` + `syncService.ts` path is dead weight: wasted network, wasted memory, zero data.
+### Removed in 2.0.11
+
+An `EventLogger`/`SyncService` pipeline used to post batches to `POST /api/extension/events` —
+a route that does not exist — with no API key, retaining every failed batch in memory. It never
+delivered any data and has been deleted. Debug session counts, which only fed that pipeline,
+now ride along in `terminalAnalytics.debuggingSessions`.
 
 ## 3. Storage
 
@@ -49,6 +59,15 @@ terminalAnalytics { totalCommands, successfulCommands, failedCommands,
 timestamp    Date               // real event time — use this
 date         Date               // written as a "YYYY-MM-DD" string by /track → UTC midnight
 ```
+**Added in extension 2.1.0** (additive; older documents lack these and read as zero):
+```
+editorAnalytics { charsInserted, charsDeleted, linesInserted, linesDeleted, churnLines,
+                  undoCount, redoCount, saveCount, fileSwitches, uniqueFiles,
+                  readMs, writeMs, largeInsertCount, largeInsertChars }
+focusAnalytics  { focusedMs, blurredMs, blurEvents, flowBlocksMs[], longestBlockMs }
+gitAnalytics    { commits, filesChanged, uncommittedFiles, uncommittedAgeMs }
+```
+
 Indexes: `{userId:1,date:-1}`, `{userId:1,projectName:1}`, `{userId:1,language:1}`, `{userId:1}`.
 
 Other models: `User` (googleId, email, `apiKey` — 32 random bytes hex, sparse unique), `Group` (name, description, visibility, **plaintext password**, createdBy), `GroupMember` (groupId+userId, unique compound), `Goal` (targetHours, techStack, deadline, status), `Team` (embedded `members[]`), `Notification`.
@@ -78,6 +97,7 @@ Other models: `User` (googleId, email, `apiKey` — 32 random bytes hex, sparse 
 | `/api/teams/*` | isAuthenticated | `GET /:teamId` has no membership check |
 | `/api/notifications/*` | isAuthenticated | correctly scoped by `req.user._id` |
 | `POST /api/user-activity`, `GET /api/user-stats/:id` | **none** | legacy, in `app.js` |
+| `GET /api/metrics` | isAuthenticated | derived metrics, session identity only (no `:userId`) |
 
 ## 6. Analytics computation
 
