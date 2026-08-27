@@ -9,6 +9,7 @@ import axios from "axios";
 import * as path from "path";
 import { DebugTracker, createDebugTracker } from "./debugTracker";
 import { TerminalTracker, createTerminalTracker } from "./terminalTracker";
+import { EditorTracker, createEditorTracker } from "./editorTracker";
 
 // Production endpoints. These are the fallbacks used when the user has not
 // overridden `codetrackr.apiBase`; the manifest default must match.
@@ -569,3 +570,6 @@ export async function deactivate(): Promise<void> {
     console.error("❌ Error during deactivation:", err);
   }
 }
+
+// Re-exported so tests can exercise the trackers through the built bundle.
+export { EditorTracker };
