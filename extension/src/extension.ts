@@ -10,6 +10,7 @@ import * as path from "path";
 import { DebugTracker, createDebugTracker } from "./debugTracker";
 import { TerminalTracker, createTerminalTracker } from "./terminalTracker";
 import { EditorTracker, createEditorTracker } from "./editorTracker";
+import { FocusTracker, createFocusTracker } from "./focusTracker";
 
 // Production endpoints. These are the fallbacks used when the user has not
 // overridden `codetrackr.apiBase`; the manifest default must match.
@@ -572,4 +573,4 @@ export async function deactivate(): Promise<void> {
 }
 
 // Re-exported so tests can exercise the trackers through the built bundle.
-export { EditorTracker };
+export { EditorTracker, FocusTracker };

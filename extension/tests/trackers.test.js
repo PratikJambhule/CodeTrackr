@@ -4,7 +4,7 @@ const { createVscodeStub, installVscodeStub } = require('./helpers/vscodeStub');
 
 const stub = createVscodeStub();
 const restore = installVscodeStub(stub.vscode);
-const { EditorTracker } = require(path.join(__dirname, '..', 'dist', 'extension.js'));
+const { EditorTracker, FocusTracker } = require(path.join(__dirname, '..', 'dist', 'extension.js'));
 
 let passed = 0;
 let failed = 0;
@@ -37,16 +37,16 @@ check('a replace-in-place edit is not invisible (regression: net lineCount delta
 
 check('counts lines written then deleted within 10 min as churn', () => {
   const t = new EditorTracker();
-  t.recordChange({ text: 'a\nb\nc\nd', rangeLength: 0 }, undefined, 1_000_000);
-  t.recordChange({ text: '', rangeLength: 8, linesRemoved: 3 }, undefined, 1_060_000); // 1 min later
+  t.recordChange({ text: 'a\nb\nc\nd', rangeLength: 0 }, undefined, 1000000);
+  t.recordChange({ text: '', rangeLength: 8, linesRemoved: 3 }, undefined, 1060000); // 1 min later
   const s = t.consumeInterval();
   assert.strictEqual(s.churnLines, 3);
 });
 
 check('deletions after the 10 minute window are not churn', () => {
   const t = new EditorTracker();
-  t.recordChange({ text: 'a\nb\nc\nd', rangeLength: 0 }, undefined, 1_000_000);
-  t.recordChange({ text: '', rangeLength: 8, linesRemoved: 3 }, undefined, 1_700_000); // 11.6 min later
+  t.recordChange({ text: 'a\nb\nc\nd', rangeLength: 0 }, undefined, 1000000);
+  t.recordChange({ text: '', rangeLength: 8, linesRemoved: 3 }, undefined, 1700000); // 11.6 min later
   const s = t.consumeInterval();
   assert.strictEqual(s.churnLines, 0);
 });
@@ -95,6 +95,55 @@ check('consumeInterval resets the counters', () => {
   t.recordSave();
   assert.strictEqual(t.consumeInterval().saveCount, 1);
   assert.strictEqual(t.consumeInterval().saveCount, 0);
+});
+
+console.log('\nFocusTracker');
+
+check('accumulates focused and blurred time', () => {
+  const t = new FocusTracker();
+  t.setFocused(true, 0);
+  t.setFocused(false, 10000);
+  t.setFocused(true, 25000);
+  t.tick(30000);
+  const s = t.consumeInterval();
+  assert.strictEqual(s.focusedMs, 15000);
+  assert.strictEqual(s.blurredMs, 15000);
+  assert.strictEqual(s.blurEvents, 1);
+});
+
+check('closes a flow block after 2 minutes idle', () => {
+  const t = new FocusTracker();
+  t.setFocused(true, 0);
+  t.noteActivity(0);
+  t.noteActivity(60000);        // 1 min of work
+  t.tick(200000);               // >2 min since last activity -> close
+  const s = t.consumeInterval();
+  assert.deepStrictEqual(s.flowBlocksMs, [60000]);
+  assert.strictEqual(s.longestBlockMs, 60000);
+});
+
+check('a gap starts a new block rather than extending the old one', () => {
+  const t = new FocusTracker();
+  t.setFocused(true, 0);
+  t.noteActivity(0);
+  t.noteActivity(30000);
+  t.tick(200000);               // closes block 1 (30s)
+  t.noteActivity(300000);       // new block starts
+  t.noteActivity(360000);
+  t.tick(500000);               // closes block 2 (60s)
+  const s = t.consumeInterval();
+  assert.deepStrictEqual(s.flowBlocksMs, [30000, 60000]);
+  assert.strictEqual(s.longestBlockMs, 60000);
+});
+
+check('an open block is not emitted until it closes', () => {
+  const t = new FocusTracker();
+  t.setFocused(true, 0);
+  t.noteActivity(0);
+  t.noteActivity(60000);
+  assert.deepStrictEqual(t.consumeInterval().flowBlocksMs, []);   // still active
+  t.tick(300000);
+  assert.deepStrictEqual(t.consumeInterval().flowBlocksMs, [60000]);
 });
 
 restore();
