@@ -5,6 +5,7 @@ const GroupMember = require('../models/GroupMember');
 const User = require('../models/user');
 const Activity = require('../models/Activity');
 const { isAuthenticated } = require('../middleware/auth');
+const { hashPassword, verifyPassword, isHashed } = require('../services/passwordHash');
 
 // Create a new group
 router.post('/create', isAuthenticated, async (req, res) => {
@@ -24,7 +25,7 @@ router.post('/create', isAuthenticated, async (req, res) => {
             name: groupName,
             description: groupDescription,
             visibility,
-            password: visibility === 'private' ? password : null,
+            password: visibility === 'private' ? await hashPassword(password) : null,
             createdBy: req.user._id
         });
 
@@ -37,10 +38,11 @@ router.post('/create', isAuthenticated, async (req, res) => {
         });
         await groupMember.save();
 
-        res.status(201).json({ 
-            success: true, 
-            message: 'Group created successfully', 
-            group 
+        const { password: _omitCreate, ...safeGroup } = group.toObject();
+        res.status(201).json({
+            success: true,
+            message: 'Group created successfully',
+            group: safeGroup
         });
     } catch (error) {
         console.error('Error creating group:', error);
@@ -54,6 +56,7 @@ router.get('/my-groups', isAuthenticated, async (req, res) => {
         const memberships = await GroupMember.find({ userId: req.user._id })
             .populate({
                 path: 'groupId',
+                select: '-password',
                 populate: { path: 'createdBy', select: 'name email' }
             });
 
@@ -85,6 +88,7 @@ router.get('/discover', isAuthenticated, async (req, res) => {
         }
 
         const groups = await Group.find(query)
+            .select('-password')
             .populate('createdBy', 'name email')
             .sort({ createdAt: -1 });
 
@@ -200,7 +204,7 @@ router.post('/:groupId/join', isAuthenticated, async (req, res) => {
         const { groupId } = req.params;
         const { password } = req.body;
 
-        const group = await Group.findById(groupId);
+        const group = await Group.findById(groupId).select('+password');
         if (!group) {
             return res.status(404).json({ message: 'Group not found' });
         }
@@ -220,8 +224,14 @@ router.post('/:groupId/join', isAuthenticated, async (req, res) => {
             if (!password) {
                 return res.status(400).json({ message: 'Password is required for private groups' });
             }
-            if (password !== group.password) {
+            const ok = await verifyPassword(password, group.password);
+            if (!ok) {
                 return res.status(401).json({ message: 'Incorrect password' });
+            }
+            // Opportunistic migration off legacy plaintext (H-9).
+            if (!isHashed(group.password)) {
+                group.password = await hashPassword(password);
+                await group.save();
             }
         }
 
@@ -232,10 +242,11 @@ router.post('/:groupId/join', isAuthenticated, async (req, res) => {
         });
         await groupMember.save();
 
-        res.json({ 
-            success: true, 
+        const { password: _omitJoin, ...safeJoined } = group.toObject();
+        res.json({
+            success: true,
             message: 'Successfully joined the group',
-            group 
+            group: safeJoined
         });
     } catch (error) {
         console.error('Error joining group:', error);

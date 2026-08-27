@@ -16,9 +16,13 @@ const groupSchema = new mongoose.Schema({
         required: true,
         default: 'public'
     },
+    // scrypt hash in the form scrypt$<salt>$<hash>. Legacy rows may still hold
+    // plaintext; services/passwordHash.js accepts both and routes/groups.js
+    // upgrades on the next successful join. Never returned to clients.
     password: {
         type: String,
-        default: null
+        default: null,
+        select: false
     },
     createdBy: {
         type: mongoose.Schema.Types.ObjectId,
