@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate, Link } from 'react-router-dom';
-import { Code2, LayoutDashboard, Trophy, Target, Users2, UserCircle } from 'lucide-react';
+import { Code2, LayoutDashboard, Trophy, Target, Users2, UserCircle, Sparkles } from 'lucide-react';
 import './index.css';
 import Orb from './components/Orb';
 import TargetCursor from './components/TargetCursor';
@@ -12,6 +12,7 @@ import { API_URL } from './config';
 
 // Pages
 import Dashboard from './pages/Dashboard';
+import Insights from './pages/Insights';
 import Leaderboard from './pages/Leaderboard';
 import Goals from './pages/Goals';
 import Groups from './pages/Groups';
@@ -149,6 +150,7 @@ function App() {
                   </Link>
                   <div className="hidden md:flex space-x-4">
                     <NavLink to="/dashboard" icon={<LayoutDashboard className="w-4 h-4" />}>Dashboard</NavLink>
+                    <NavLink to="/insights" icon={<Sparkles className="w-4 h-4" />}>Insights</NavLink>
                     <NavLink to="/leaderboard" icon={<Trophy className="w-4 h-4" />}>Leaderboard</NavLink>
                     <NavLink to="/goals" icon={<Target className="w-4 h-4" />}>Goals</NavLink>
                     <NavLink to="/groups" icon={<Users2 className="w-4 h-4" />}>Groups</NavLink>
@@ -199,6 +201,7 @@ function App() {
             <Route path="/login" element={<Navigate to="/dashboard" />} />
             <Route path="/onboarding" element={<Onboarding />} />
             <Route path="/dashboard" element={<Dashboard user={user} />} />
+            <Route path="/insights" element={<Insights />} />
             <Route path="/leaderboard" element={<Leaderboard />} />
             <Route path="/goals" element={<Goals />} />
             <Route path="/groups" element={<Groups user={user} />} />
