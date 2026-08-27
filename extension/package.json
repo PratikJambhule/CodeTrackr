@@ -129,7 +129,7 @@
     "build": "npm run typecheck && npm run esbuild-base -- --minify",
     "watch": "npm run esbuild-base -- --sourcemap --watch",
     "package": "vsce package",
-    "test": "node tests/activation.test.js",
+    "test": "node tests/trackers.test.js && node tests/activation.test.js",
     "pretest": "npm run build"
   },
   "devDependencies": {

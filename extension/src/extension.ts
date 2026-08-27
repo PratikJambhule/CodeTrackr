@@ -32,8 +32,6 @@ interface AppState {
   startedMs?: number;
   bufferedMinutes: number;
   lastKnownFile: string;
-  linesAdded: number;
-  linesRemoved: number;
   activeTerminalCount: number;
   isPaused: boolean;
 }
@@ -42,14 +40,10 @@ const state: AppState = {
   lastActivityMs: Date.now(),
   bufferedMinutes: 0,
   lastKnownFile: "unknown",
-  linesAdded: 0,
-  linesRemoved: 0,
   activeTerminalCount: vscode.window.terminals.length,
   isPaused: false,
 };
 
-// Track previous line counts per file
-const lineCounts = new Map<string, number>();
 let telemetryInitialized = false;
 
 // Only nag about a missing/rejected API key once per session.
@@ -58,6 +52,9 @@ let authWarningShown = false;
 // Trackers
 let debugTracker: DebugTracker;
 let terminalTracker: TerminalTracker;
+let editorTracker: EditorTracker;
+let focusTracker: FocusTracker;
+let gitStateTracker: GitStateTracker;
 
 // --------- Config Helpers ----------
 function getCfg() {
@@ -93,6 +90,7 @@ function getFileMeta(filePath: string | undefined) {
 
 function markActivity(fileNameMaybe?: string): void {
   state.lastActivityMs = Date.now();
+  focusTracker?.noteActivity(state.lastActivityMs);
 
   if (state.isPaused) {
     state.isPaused = false;
@@ -107,15 +105,6 @@ function markActivity(fileNameMaybe?: string): void {
   } else {
     const active = vscode.window.activeTextEditor?.document?.fileName;
     if (active) state.lastKnownFile = active;
-  }
-}
-
-function initLineCountForDocument(doc: vscode.TextDocument | undefined): void {
-  if (!doc || !doc.fileName) return;
-  try {
-    lineCounts.set(doc.fileName, doc.lineCount);
-  } catch {
-    // ignore
   }
 }
 
@@ -193,36 +182,36 @@ function warnAboutAuth(message: string): void {
     });
 }
 
-// --------- Activity Tracking ----------
-async function sendActivity(minutes: number, fileOpened?: string): Promise<void> {
-  const { apiBase, apiKey } = getCfg();
+function emptyEditorAnalytics() {
+  return {
+    charsInserted: 0, charsDeleted: 0, linesInserted: 0, linesDeleted: 0,
+    churnLines: 0, undoCount: 0, redoCount: 0, saveCount: 0,
+    fileSwitches: 0, uniqueFiles: 0, readMs: 0, writeMs: 0,
+    largeInsertCount: 0, largeInsertChars: 0,
+  };
+}
 
-  const durationSeconds = Math.round(minutes * 60);
+function emptyFocusAnalytics() {
+  return {
+    focusedMs: 0, blurredMs: 0, blurEvents: 0,
+    flowBlocksMs: [] as number[], longestBlockMs: 0,
+  };
+}
 
-  // Below one second the backend treats the duration as missing and 400s, so
-  // keep the buffered lines and let the next flush carry them.
-  if (!Number.isFinite(durationSeconds) || durationSeconds < MIN_FLUSH_SECONDS) {
-    return;
-  }
-  if (durationSeconds > MAX_FLUSH_SECONDS) {
-    console.warn(
-      `CodeTrackr: implausible duration ${durationSeconds}s (clock jump?), skipping flush`
-    );
-    state.linesAdded = 0;
-    state.linesRemoved = 0;
-    return;
-  }
+function emptyGitAnalytics() {
+  return { commits: 0, filesChanged: 0, uncommittedFiles: 0, uncommittedAgeMs: 0 };
+}
 
-  if (!apiKey) {
-    warnAboutAuth("no API key is configured, so your activity is not being saved.");
-    return;
-  }
-
+/** Composes the flush payload. Exported for tests via buildPayloadForTest. */
+function buildPayload(durationSeconds: number, fileOpened?: string) {
   const fullPath =
     fileOpened || vscode.window.activeTextEditor?.document?.fileName || "unknown";
   const { fileType, projectName, language } = getFileMeta(fullPath);
 
   const terminalAnalytics = terminalTracker?.consumeInterval() || emptyTerminalAnalytics();
+  const editorAnalytics = editorTracker?.consumeInterval() || emptyEditorAnalytics();
+  const focusAnalytics = focusTracker?.consumeInterval() || emptyFocusAnalytics();
+  const gitAnalytics = gitStateTracker?.consumeInterval() || emptyGitAnalytics();
 
   // Debug sessions used to be logged into a pipeline that never reached the
   // backend; fold them into the field the Activity schema already stores.
@@ -231,7 +220,7 @@ async function sendActivity(minutes: number, fileOpened?: string): Promise<void>
     terminalAnalytics.debuggingSessions += debugCounts.debugSessions;
   }
 
-  const payload = {
+  return {
     // The flush covers the interval that just ended, so stamp it with the
     // interval's start. Stamping "now" pushed every session forward and
     // skewed hour-of-day analytics.
@@ -241,10 +230,45 @@ async function sendActivity(minutes: number, fileOpened?: string): Promise<void>
     projectName: projectName || "unknown",
     language: language || "unknown",
     duration: durationSeconds,
-    linesAdded: state.linesAdded,
-    linesRemoved: state.linesRemoved,
+    // Kept for backend compatibility, now sourced from gross counters.
+    linesAdded: editorAnalytics.linesInserted,
+    linesRemoved: editorAnalytics.linesDeleted,
     terminalAnalytics,
+    editorAnalytics,
+    focusAnalytics,
+    gitAnalytics,
   };
+}
+
+/** Test seam: build a payload without performing the network call. */
+export function buildPayloadForTest(durationSeconds: number) {
+  return buildPayload(durationSeconds);
+}
+
+// --------- Activity Tracking ----------
+async function sendActivity(minutes: number, fileOpened?: string): Promise<void> {
+  const { apiBase, apiKey } = getCfg();
+
+  const durationSeconds = Math.round(minutes * 60);
+
+  // Below one second the backend treats the duration as missing and 400s, so
+  // hold the buffered counters and let the next flush carry them.
+  if (!Number.isFinite(durationSeconds) || durationSeconds < MIN_FLUSH_SECONDS) {
+    return;
+  }
+  if (durationSeconds > MAX_FLUSH_SECONDS) {
+    console.warn(
+      `CodeTrackr: implausible duration ${durationSeconds}s (clock jump?), skipping flush`
+    );
+    return;
+  }
+
+  if (!apiKey) {
+    warnAboutAuth("no API key is configured, so your activity is not being saved.");
+    return;
+  }
+
+  const payload = buildPayload(durationSeconds, fileOpened);
 
   try {
     await axios.post(`${apiBase}/api/extension/track`, payload, {
@@ -271,10 +295,6 @@ async function sendActivity(minutes: number, fileOpened?: string): Promise<void>
       );
     }
   }
-
-  // Reset line counters
-  state.linesAdded = 0;
-  state.linesRemoved = 0;
 }
 
 async function flushIfNeeded(force: boolean = false): Promise<void> {
@@ -316,44 +336,16 @@ function start(context: vscode.ExtensionContext): void {
   state.startedMs = Date.now();
   markActivity();
 
-  vscode.workspace.textDocuments.forEach(initLineCountForDocument);
-
   context.subscriptions.push(
-    vscode.workspace.onDidOpenTextDocument((doc) => {
-      initLineCountForDocument(doc);
-      markActivity(doc.fileName);
-    }),
-    vscode.workspace.onDidSaveTextDocument((doc) => {
-      initLineCountForDocument(doc);
-      markActivity(doc.fileName);
-    }),
+    vscode.workspace.onDidOpenTextDocument((doc) => markActivity(doc.fileName)),
+    vscode.workspace.onDidSaveTextDocument((doc) => markActivity(doc.fileName)),
     vscode.window.onDidChangeActiveTextEditor((ed) => {
-      if (ed?.document) {
-        initLineCountForDocument(ed.document);
-        markActivity(ed.document.fileName);
-      }
+      if (ed?.document) markActivity(ed.document.fileName);
     }),
     vscode.workspace.onDidChangeTextDocument((event) => {
-      try {
-        const doc = event.document;
-        const file = doc.fileName;
-        const prev = lineCounts.get(file) ?? doc.lineCount;
-        const now = doc.lineCount;
-        const delta = now - prev;
-
-        if (delta > 0) state.linesAdded += delta;
-        else if (delta < 0) state.linesRemoved += Math.abs(delta);
-
-        lineCounts.set(file, now);
-      } catch {
-        for (const c of event.contentChanges || []) {
-          const newLines = (c.text.match(/\n/g) || []).length;
-          const removedLines = c.range ? c.range.end.line - c.range.start.line : 0;
-          const net = newLines - removedLines;
-          if (net > 0) state.linesAdded += net;
-          else if (net < 0) state.linesRemoved += Math.abs(net);
-        }
-      }
+      // Edit volume is accumulated by EditorTracker; this only refreshes idle
+      // state. The previous net doc.lineCount delta recorded zero for any
+      // replace-in-place edit and has been removed.
       markActivity(event.document.fileName);
     })
   );
@@ -488,6 +480,8 @@ function showStats(): void {
   const debugSessions = debugTracker?.getActiveSessions() ?? [];
   const debugSnapshot = debugTracker?.getIntervalSnapshot();
   const terminalSnapshot = terminalTracker?.getIntervalSnapshot();
+  const editorSnapshot = editorTracker?.getIntervalSnapshot();
+  const focusSnapshot = focusTracker?.getIntervalSnapshot();
   const { apiBase } = getCfg();
 
   const pending = state.startedMs
@@ -497,7 +491,11 @@ function showStats(): void {
   vscode.window.showInformationMessage(
     `CodeTrackr — Backend: ${apiBase} · ` +
       `${state.isPaused ? "Paused (idle)" : state.timer ? "Tracking" : "Stopped"} · ` +
-      `Pending: ${pending} min · Lines +${state.linesAdded}/-${state.linesRemoved} · ` +
+      `Pending: ${pending} min · ` +
+      `Lines +${editorSnapshot?.linesInserted ?? 0}/-${editorSnapshot?.linesDeleted ?? 0} ` +
+      `(churn ${editorSnapshot?.churnLines ?? 0}) · ` +
+      `Focus: ${Math.round((focusSnapshot?.focusedMs ?? 0) / 60000)} min, ` +
+      `longest block ${Math.round((focusSnapshot?.longestBlockMs ?? 0) / 60000)} min · ` +
       `Terminal: ${terminalSnapshot?.totalCommands ?? 0} commands, ` +
       `${terminalSnapshot?.terminalErrorCount ?? 0} errors · ` +
       `Debug: ${debugSessions.length} active, ${debugSnapshot?.debugSessions ?? 0} this interval`
@@ -516,6 +514,15 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
     terminalTracker = createTerminalTracker();
     terminalTracker.start(context);
+
+    editorTracker = createEditorTracker();
+    editorTracker.start(context);
+
+    focusTracker = createFocusTracker();
+    focusTracker.start(context);
+
+    gitStateTracker = createGitStateTracker();
+    gitStateTracker.start(context);
 
     context.subscriptions.push(
       vscode.commands.registerCommand("codetrackr.start", () => start(context)),
@@ -568,6 +575,9 @@ export async function deactivate(): Promise<void> {
     stop();
     debugTracker?.stop();
     terminalTracker?.stop();
+    editorTracker?.stop();
+    focusTracker?.stop();
+    gitStateTracker?.stop();
   } catch (err) {
     console.error("❌ Error during deactivation:", err);
   }

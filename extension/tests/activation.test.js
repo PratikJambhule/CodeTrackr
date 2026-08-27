@@ -19,75 +19,11 @@ const MANIFEST = require('../package.json');
 
 assert.ok(fs.existsSync(BUNDLE), 'dist/extension.js not found — run `npm run build` first');
 
-// ---- vscode stub ----------------------------------------------------------
-const disposable = { dispose() {} };
-const listener = () => disposable;
-
-const registeredCommands = [];
-const warnings = [];
-const infos = [];
-
-const settings = {
-  apiBase: 'https://example.invalid',
-  apiKey: '', // deliberately empty: must not perform any network call
-  flushIntervalSeconds: 30,
-  minFlushMinutes: 0.5,
-  debug: false,
-};
-
-const vscodeStub = {
-  window: {
-    terminals: [],
-    activeTextEditor: undefined,
-    setStatusBarMessage: () => disposable,
-    showInformationMessage: (msg) => { infos.push(msg); return Promise.resolve(undefined); },
-    showWarningMessage: (msg) => { warnings.push(msg); return Promise.resolve(undefined); },
-    showErrorMessage: (msg) => { warnings.push(msg); return Promise.resolve(undefined); },
-    showInputBox: () => Promise.resolve(undefined),
-    createOutputChannel: () => ({ appendLine() {}, show() {}, dispose() {} }),
-    onDidOpenTerminal: listener,
-    onDidCloseTerminal: listener,
-    onDidChangeActiveTextEditor: listener,
-    onDidStartTerminalShellExecution: listener,
-    onDidEndTerminalShellExecution: listener,
-  },
-  workspace: {
-    name: 'test-workspace',
-    rootPath: '/tmp/test-workspace',
-    textDocuments: [],
-    getConfiguration: () => ({
-      get: (key, fallback) => (key in settings ? settings[key] : fallback),
-      update: (key, value) => { settings[key] = value; return Promise.resolve(); },
-    }),
-    onDidOpenTextDocument: listener,
-    onDidSaveTextDocument: listener,
-    onDidChangeTextDocument: listener,
-    onDidChangeConfiguration: listener,
-  },
-  commands: {
-    registerCommand: (id, handler) => {
-      registeredCommands.push(id);
-      assert.strictEqual(typeof handler, 'function', `handler for ${id} must be a function`);
-      return disposable;
-    },
-    executeCommand: () => Promise.resolve(),
-  },
-  debug: {
-    onDidStartDebugSession: listener,
-    onDidTerminateDebugSession: listener,
-    onDidChangeBreakpoints: listener,
-  },
-  env: { openExternal: () => Promise.resolve(true) },
-  Uri: { parse: (u) => ({ toString: () => u }) },
-  ConfigurationTarget: { Global: 1, Workspace: 2 },
-};
-
-// Intercept require('vscode') for the bundle.
-const originalLoad = Module._load;
-Module._load = function (request, parent, isMain) {
-  if (request === 'vscode') return vscodeStub;
-  return originalLoad.apply(this, arguments);
-};
+// ---- vscode stub (shared helper) ------------------------------------------
+const { createVscodeStub, installVscodeStub } = require("./helpers/vscodeStub");
+const stub = createVscodeStub();
+const { vscode: vscodeStub, registeredCommands, warnings, infos, settings } = stub;
+const restoreLoader = installVscodeStub(vscodeStub);
 
 // Fail loudly if activation performs a network call with no API key configured.
 let networkCalls = 0;
@@ -181,6 +117,29 @@ function check(name, fn) {
 
   check('main points at the bundle', () => {
     assert.strictEqual(MANIFEST.main, './dist/extension.js');
+  });
+
+  console.log('\npayload composition');
+  check('buildPayloadForTest includes the three new analytics blocks', () => {
+    assert.strictEqual(typeof ext.buildPayloadForTest, 'function');
+    const payload = ext.buildPayloadForTest(120);
+    for (const key of ['terminalAnalytics', 'editorAnalytics', 'focusAnalytics', 'gitAnalytics']) {
+      assert.ok(payload[key], `payload.${key} missing`);
+    }
+    assert.strictEqual(payload.duration, 120);
+  });
+
+  check('payload carries gross line counts, not net deltas', () => {
+    const payload = ext.buildPayloadForTest(60);
+    assert.ok('linesAdded' in payload && 'linesRemoved' in payload, 'backend contract fields kept');
+    assert.ok('linesInserted' in payload.editorAnalytics, 'gross insert count present');
+    assert.ok('churnLines' in payload.editorAnalytics, 'churn present');
+  });
+
+  check('payload contains no file contents or absolute paths', () => {
+    const payload = ext.buildPayloadForTest(60);
+    const json = JSON.stringify(payload);
+    assert.ok(!json.includes('/tmp/test-workspace'), 'absolute workspace path leaked');
   });
 
   await ext.deactivate();
