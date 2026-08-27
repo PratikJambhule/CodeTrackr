@@ -4,7 +4,7 @@ const { createVscodeStub, installVscodeStub } = require('./helpers/vscodeStub');
 
 const stub = createVscodeStub();
 const restore = installVscodeStub(stub.vscode);
-const { EditorTracker, FocusTracker } = require(path.join(__dirname, '..', 'dist', 'extension.js'));
+const { EditorTracker, FocusTracker, GitStateTracker } = require(path.join(__dirname, '..', 'dist', 'extension.js'));
 
 let passed = 0;
 let failed = 0;
@@ -144,6 +144,47 @@ check('an open block is not emitted until it closes', () => {
   assert.deepStrictEqual(t.consumeInterval().flowBlocksMs, []);   // still active
   t.tick(300000);
   assert.deepStrictEqual(t.consumeInterval().flowBlocksMs, [60000]);
+});
+
+console.log('\nGitStateTracker');
+
+check('counts a commit when HEAD moves', () => {
+  const t = new GitStateTracker();
+  t.handleStateChange({ HEAD: { commit: 'aaa' }, workingTreeChanges: [], indexChanges: [] }, 0);
+  t.handleStateChange({ HEAD: { commit: 'bbb' }, workingTreeChanges: [], indexChanges: [] }, 1000);
+  assert.strictEqual(t.consumeInterval().commits, 1);
+});
+
+check('does not double-count an unchanged HEAD', () => {
+  const t = new GitStateTracker();
+  t.handleStateChange({ HEAD: { commit: 'aaa' }, workingTreeChanges: [], indexChanges: [] }, 0);
+  t.handleStateChange({ HEAD: { commit: 'aaa' }, workingTreeChanges: [], indexChanges: [] }, 1000);
+  t.handleStateChange({ HEAD: { commit: 'aaa' }, workingTreeChanges: [], indexChanges: [] }, 2000);
+  assert.strictEqual(t.consumeInterval().commits, 0);
+});
+
+check('tracks uncommitted work age while the tree stays dirty', () => {
+  const t = new GitStateTracker();
+  t.handleStateChange({ HEAD: { commit: 'a' }, workingTreeChanges: [{}, {}], indexChanges: [] }, 1000000);
+  t.handleStateChange({ HEAD: { commit: 'a' }, workingTreeChanges: [{}, {}], indexChanges: [] }, 1060000);
+  const s = t.consumeInterval();
+  assert.strictEqual(s.uncommittedFiles, 2);
+  assert.strictEqual(s.uncommittedAgeMs, 60000);
+});
+
+check('resets uncommitted age when the tree goes clean', () => {
+  const t = new GitStateTracker();
+  t.handleStateChange({ HEAD: { commit: 'a' }, workingTreeChanges: [{}], indexChanges: [] }, 0);
+  t.handleStateChange({ HEAD: { commit: 'a' }, workingTreeChanges: [], indexChanges: [] }, 60000);
+  const s = t.consumeInterval();
+  assert.strictEqual(s.uncommittedFiles, 0);
+  assert.strictEqual(s.uncommittedAgeMs, 0);
+});
+
+check('start() is a no-op when the Git extension is unavailable', () => {
+  const t = new GitStateTracker();
+  t.start({ subscriptions: [] });   // stub has no vscode.git extension
+  assert.strictEqual(t.consumeInterval().commits, 0);
 });
 
 restore();
