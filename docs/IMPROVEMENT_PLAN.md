@@ -25,6 +25,21 @@ routed into the activity payload, activity stamped with interval start.
 ⚠️ **Unverified assumption:** the production backend URL was taken from CHANGELOG 2.0.6
 (`https://codetrackr-backend-uckp.onrender.com`). Confirm it is current before publishing.
 
+**Batch 3 — security + Insights page (H-1, H-2, H-9, H-10, H-11): DONE 2026-08-28.**
+Branch `feat/security-and-insights`. Verified by 57 backend assertions across six suites,
+including a new `routeGuards.test.js` that statically scans route source and fails if any
+sensitive route loses its auth middleware. Group passwords use Node's built-in `crypto.scrypt`
+rather than bcrypt — no native dependency, which keeps the Vercel build simple and lets the
+tests run without `npm install`. Legacy plaintext passwords still verify and are upgraded to a
+hash on the next successful join. A new `/insights` page surfaces the five Phase A metrics.
+
+**New finding — the frontend does not compile.** `npm run build` runs `tsc -b && vite build`,
+and `tsc -b` reports **29 pre-existing TypeScript errors** (16 in `Goals.tsx`, 5 in
+`TextType.tsx`, 3 each in `Groups.tsx`/`Dashboard.tsx`, 1 each in `Teams.tsx`/`Profile.tsx`).
+These predate all work in this session — the new `Insights.tsx` and the `App.tsx` edits add
+zero errors. Mostly unused imports/variables plus two `Type string is not assignable to never`
+issues. Worth fixing before the next frontend deploy. Filed as **M-13**.
+
 **A backfill is still outstanding for H-5:** rows written before this fix have `date` set to
 their ingest day. Recompute with `date = timestamp` before anything starts trusting `date`.
 Read paths all query `timestamp`, so nothing is broken in the meantime.
@@ -33,14 +48,14 @@ Read paths all query `timestamp`, so nothing is broken in the meantime.
 
 ## HIGH — correctness, security, data accuracy, scalability
 
-### H-1. Analytics and leaderboard endpoints are unauthenticated
+### H-1. Analytics and leaderboard endpoints are unauthenticated — ✅ FIXED 2026-08-28
 **Problem:** `GET /api/analytics/:userId`, `/weekly/:userId`, `/timeslot/:userId` and `GET /api/leaderboard` have no auth middleware. Anyone with a user's `_id` (which the leaderboard hands out in plaintext) can read that user's full coding history, projects, languages and hours. `/api/analytics/summary/:userId` requires a session but never checks that `:userId === req.user.id`.
 **Why:** Auth was added per-route as features shipped; the analytics routes predate it and the dashboard fetches them without `credentials:'include'`, so adding auth was never forced.
 **Fix:** Add `isAuthenticated` to all analytics routes plus an ownership guard (`req.params.userId === req.user._id.toString()`, else 403). Drop `:userId` from the path and read from `req.user` — that removes the IDOR class entirely. Send `credentials:'include'` from `Dashboard.tsx`.
 **Files:** `backend/routes/analytics.js`, `backend/routes/leaderboard.js`, `frontend/src/pages/Dashboard.tsx`.
 **Risk:** Breaks any caller relying on the open endpoints. Keep the `:userId` param accepted-but-verified for one release for backward compatibility.
 
-### H-2. Legacy unauthenticated write + read endpoints in `app.js`
+### H-2. Legacy unauthenticated write + read endpoints in `app.js` — ✅ FIXED 2026-08-28
 **Problem:** `POST /api/user-activity` lets anyone insert activity for **any** `userId` — leaderboard fraud in one curl. `GET /api/user-stats/:id` dumps a user's entire activity history unauthenticated and unpaginated.
 **Fix:** Delete both, or gate behind `verifyApiKey` and force `userId = req.user._id`. Nothing in `extension/src/` or `frontend/src/` calls them.
 **Files:** `backend/app.js`.
@@ -79,18 +94,18 @@ Read paths all query `timestamp`, so nothing is broken in the meantime.
 **Fix:** Time-window it, `$group` + `$sort` in Mongo, drop the pointless `Promise.all`.
 **Files:** `backend/routes/groups.js:120-175`.
 
-### H-9. Private group passwords stored and compared in plaintext
+### H-9. Private group passwords stored and compared in plaintext — ✅ FIXED 2026-08-28
 **Problem:** `Group.password` is saved raw and checked with `password !== group.password`.
 **Fix:** `bcrypt` hash on create, `bcrypt.compare` on join. Also strip `password` from every group response (`/discover` currently returns full group documents).
 **Files:** `backend/models/Group.js`, `backend/routes/groups.js`.
 **Risk:** Existing private groups need a migration or a forced password reset.
 
-### H-10. `AUTH_BYPASS` is a full authentication kill switch
+### H-10. `AUTH_BYPASS` is a full authentication kill switch — ✅ FIXED 2026-08-28
 **Problem:** When `AUTH_BYPASS=true`, both `isAuthenticated` and `verifyApiKey` return "the user with the most tracked activity" — i.e. any request authenticates as your most active real user. One env var away from total compromise, and it will silently create users in a production DB.
 **Fix:** Refuse to honour it when `NODE_ENV === 'production'`; log a loud warning on boot otherwise.
 **Files:** `backend/middleware/auth.js`.
 
-### H-11. IDOR on goals and teams
+### H-11. IDOR on goals and teams — ✅ FIXED 2026-08-28
 **Problem:** `GET /api/goals/:goalId/progress` fetches the goal by ID with no ownership check (it then computes progress against *your* activity, but leaks the goal's title, description, targetHours and deadline). `GET /api/teams/:teamId` returns any team's full member list, names and emails to any logged-in user.
 **Fix:** Add `userId: req.user.id` to the goal query; add a membership check to the team query.
 **Files:** `backend/routes/goals.js:44`, `backend/routes/team.js:38`.
@@ -121,6 +136,7 @@ Read paths all query `timestamp`, so nothing is broken in the meantime.
 - **M-9. `JWT_SECRET` falls back to the literal `'your_jwt_secret'`** in `routes/auth.js` and `middleware/auth.js`. Fail fast on a missing secret instead.
 - **M-10. No error-handling middleware.** Every route try/catches and echoes `error.message` to the client, leaking internals. Add a central error handler.
 - **M-11. Dashboard fires 3 requests on mount, one redundant** (`useEffect([])` + `useEffect([viewMode])` both call `fetchAnalytics`). `frontend/src/pages/Dashboard.tsx:37-49`.
+- **M-13. The frontend does not typecheck.** 29 pre-existing errors mean `npm run build` fails at the `tsc -b` stage. Mostly unused imports and variables; two are real type errors (`Type string is not assignable to never` in `Dashboard.tsx:847` and `Goals.tsx:332`). Note `@tanstack/react-query` is already a dependency but unused, which would also address M-12.
 - **M-12. No client-side caching or request dedup.** Every navigation refetches with `cache:'no-cache'`. React Query (or a small SWR-style hook) would remove most of the traffic.
 
 ---

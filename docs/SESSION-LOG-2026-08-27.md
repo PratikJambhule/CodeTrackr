@@ -202,6 +202,84 @@ Checklist confirmed: `grep -rn "lineCounts" extension/src/` returns nothing; `.v
 
 ---
 
+## 8. Security batch + Insights page (2026-08-28)
+
+Plan: `docs/superpowers/plans/2026-08-28-security-and-insights.md`, 8 tasks.
+Branch `feat/security-and-insights`, cut from `feat/tracking-phase-a`.
+
+### Commits
+```
+d5171e3  fix(security): remove unauthenticated legacy activity endpoints (H-2)
+3877208  fix(security): require auth and ownership on analytics and leaderboard (H-1)
+0eb6987  fix(security): scope goal progress and team reads to the caller (H-11)
+df38d6e  fix(security): hash group passwords with scrypt (H-9)
+0acbb5f  feat(frontend): add Insights page for the five derived metrics
+```
+(plus the AUTH_BYPASS commit for H-10 and the docs commit)
+
+### What was closed
+
+| Finding | Fix |
+|---|---|
+| H-10 | `AUTH_BYPASS` refused outright when `NODE_ENV=production`; loud warning otherwise |
+| H-2 | `POST /api/user-activity` and `GET /api/user-stats/:id` deleted — `app.js` went from 216 to 86 lines |
+| H-1 | All four analytics routes plus the leaderboard now require a session; `:userId` is verified against it rather than trusted |
+| H-11 | Goal progress looks up by `{ _id, userId }`; single-team read checks membership |
+| H-9 | Group passwords salted-scrypt hashed, `select: false`, stripped from every response |
+
+### Decisions and why
+
+**scrypt, not bcrypt.** bcrypt is a native dependency. Backend `node_modules` is not installed
+in this environment, and native modules complicate the Vercel serverless build. `crypto.scrypt`
+is built into Node, is a legitimate password KDF, and keeps every test dependency-free.
+
+**Legacy plaintext passwords still verify.** Existing groups hold plaintext; refusing them would
+lock members out. `verifyPassword` accepts a constant-time plaintext match, and the join route
+upgrades the stored value to a hash on the next successful join. Groups nobody joins stay
+plaintext — a one-off migration script would close that faster.
+
+**`:userId` kept but verified, not removed.** The deployed dashboard sends it. Removing the
+param would have been cleaner but would break live clients; verifying it removes the vulnerability
+without a breaking change. It can be dropped in a later release.
+
+**Route protection verified by static source scanning.** `tests/routeGuards.test.js` parses each
+route file and asserts every declaration carries `isAuthenticated`. This runs without Express
+installed and fails if a future edit unprotects a route. **Limitation:** it proves the middleware
+is declared, not that it behaves correctly at runtime. A live smoke test is still worthwhile.
+
+**The frontend credentials coupling.** Locking the analytics routes would have broken the
+dashboard, because five `fetch` calls omitted `credentials: include` — they only worked
+because the endpoints were public. All five were fixed in the same commit as H-1, and a shell
+check now confirms no `API_URL` fetch lacks credentials.
+
+### New finding: the frontend does not compile
+
+Running `npx tsc -b` revealed **29 pre-existing TypeScript errors** across six files. `npm run
+build` is `tsc -b && vite build`, so the production build was already failing before any work in
+this session. Confirmed by stashing all changes and re-running: still 29. The new
+`Insights.tsx` and the `App.tsx` edits contribute **zero**. Filed as M-13.
+
+### Insights page
+
+`/insights` renders the five Phase A metrics plus four secondary friction figures. The one
+design decision worth recording: `deepWorkRatio` and `flowBlocks` are legitimately 0 for any
+activity recorded before extension 2.1.0, so the page uses `flowBlocks.blockCount === 0` to
+show "—" and an explanatory banner instead of a confident 0%. Showing 0% to someone who simply
+has not upgraded would be a lie. The page also states that these figures never reach the
+leaderboard.
+
+### Verification
+57 backend assertions across six suites; 32 extension assertions unchanged. Frontend typechecked
+with `npx tsc -b` — my files clean, pre-existing errors unchanged.
+
+### Still open after this batch
+- H-7 / H-8: leaderboard and group-details still scan the whole Activity collection
+- M-13: frontend does not typecheck
+- Legacy plaintext passwords in groups nobody has re-joined
+- No live smoke test against a deployed instance
+
+---
+
 ## Appendix A — Why this is a file and not claude-mem
 
 claude-mem was requested for context saving and was attempted repeatedly. Every call failed:

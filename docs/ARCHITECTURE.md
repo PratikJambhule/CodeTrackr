@@ -78,7 +78,7 @@ Other models: `User` (googleId, email, `apiKey` — 32 random bytes hex, sparse 
 
 - Browser: Google OAuth → `routes/auth.js` signs a JWT → httpOnly cookie `token` → `middleware/auth.js:isAuthenticated` verifies and loads `req.user`.
 - Extension: `x-api-key` header → `verifyApiKey` looks up `User.findOne({apiKey})`.
-- `AUTH_BYPASS=true` makes **both** middlewares skip all checks and attach "the user with the most activity" as `req.user`.
+- `AUTH_BYPASS=true` makes both middlewares skip all checks in non-production only; it is refused outright when `NODE_ENV=production`.
 
 ## 5. API surface
 
@@ -87,16 +87,16 @@ Other models: `User` (googleId, email, `apiKey` — 32 random bytes hex, sparse 
 | `POST /api/extension/track` | apiKey | main ingest |
 | `POST /api/extension/track/batch` | apiKey | exists, unused by extension |
 | `GET /api/extension/verify` | apiKey | |
-| `GET /api/analytics/:userId` | **none** | today's hourly breakdown + 7d fetch |
-| `GET /api/analytics/weekly/:userId` | **none** | 7-day daily breakdown |
-| `GET /api/analytics/timeslot/:userId` | **none** | 2-hour drilldown, 10-min slots |
-| `GET /api/analytics/summary/:userId` | isAuthenticated | no ownership check |
-| `GET /api/leaderboard` | **none** | global, full-collection scan |
+| `GET /api/analytics/:userId` | isAuthenticated + ownership | today's hourly breakdown + 7d fetch |
+| `GET /api/analytics/weekly/:userId` | isAuthenticated + ownership | 7-day daily breakdown |
+| `GET /api/analytics/timeslot/:userId` | isAuthenticated + ownership | 2-hour drilldown, 10-min slots |
+| `GET /api/analytics/summary/:userId` | isAuthenticated + ownership | |
+| `GET /api/leaderboard` | isAuthenticated | global, full-collection scan (H-7 unfixed) |
 | `/api/groups/*` | isAuthenticated | `:groupId/details` checks membership |
-| `/api/goals/*` | isAuthenticated | `:goalId/progress` has no ownership check |
-| `/api/teams/*` | isAuthenticated | `GET /:teamId` has no membership check |
+| `/api/goals/*` | isAuthenticated | `:goalId/progress` scoped to owner |
+| `/api/teams/*` | isAuthenticated | `GET /:teamId` checks membership |
 | `/api/notifications/*` | isAuthenticated | correctly scoped by `req.user._id` |
-| `POST /api/user-activity`, `GET /api/user-stats/:id` | **none** | legacy, in `app.js` |
+
 | `GET /api/metrics` | isAuthenticated | derived metrics, session identity only (no `:userId`) |
 
 ## 6. Analytics computation
