@@ -2,7 +2,18 @@
 
 All notable changes to the CodeTrackr VS Code extension will be documented in this file.
 
-## [2.1.0] - 2026-08-28
+## [2.2.0] - 2026-08-28
+
+> **Why 2.2.0 and not 2.1.0?** A build was published as `2.1.0` on 2026-05-08, before
+> `2.0.10`. Because the Marketplace serves the highest *version number* rather than the most
+> recent upload, that May build has been served as "latest" ever since — and the `2.0.11`
+> fixes never reached anyone. This release supersedes it.
+
+### Fixed
+- **Terminal analytics recorded almost nothing.** The build being served as latest predated the
+  terminal tracker entirely: it reported a cumulative `terminalErrorCount` that was never reset
+  and left every other terminal field at zero. Command counts, build/test runs, per-tool usage
+  and git activity now populate correctly, and counters reset each flush.
 
 ### Added
 - **Editor analytics**: gross characters and lines inserted/deleted, churn (lines written
