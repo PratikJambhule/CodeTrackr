@@ -8,3 +8,6 @@ dist/
 *.vsix
 .DS_Store
 Thumbs.db
+
+# One-off migration backups (may contain user data)
+backend/scripts/*-backup-*.json
