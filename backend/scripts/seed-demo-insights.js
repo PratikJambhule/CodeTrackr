@@ -79,7 +79,6 @@ function buildActivity(userId, dayOffset, hour, blockMs) {
         linesAdded: linesInserted,
         linesRemoved: Math.round(churnLines * 0.8),
         timestamp: when,
-        date: when,
         terminalAnalytics: {
             totalCommands,
             terminalErrorCount: failedCommands,
