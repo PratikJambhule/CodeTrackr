@@ -7,7 +7,7 @@
     "type": "git",
     "url": "https://github.com/Soham-Official/CodeTrackr.git"
   },
-  "version": "2.2.0",
+  "version": "2.3.0",
   "icon": "images/icon.png",
   "license": "MIT",
   "author": {
@@ -100,9 +100,9 @@
         },
         "codetrackr.minFlushMinutes": {
           "type": "number",
-          "default": 0.5,
+          "default": 2,
           "minimum": 0.1,
-          "description": "Minimum minutes before a record is sent."
+          "description": "Minimum minutes of active coding before a record is sent. Higher = fewer, coarser records."
         },
         "codetrackr.debug": {
           "type": "boolean",

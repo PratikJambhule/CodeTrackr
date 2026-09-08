@@ -72,7 +72,7 @@ function getCfg() {
       : 30,
     minFlushMinutes: Number.isFinite(minFlushMinutes)
       ? Math.max(0.1, minFlushMinutes)
-      : 0.5,
+      : 2,
   };
 }
 
@@ -110,6 +110,25 @@ function markActivity(fileNameMaybe?: string): void {
 
 function minutesSince(ms: number): number {
   return (Date.now() - ms) / 60000;
+}
+
+/**
+ * True if a built payload carries any real coding signal. Mirrors the backend
+ * `hasSignal` in services/activityBucket.js. A flush with no signal is held
+ * (the buffered time carries forward) rather than sent.
+ */
+export function payloadHasSignal(payload: any): boolean {
+  const e = payload?.editorAnalytics || {};
+  const t = payload?.terminalAnalytics || {};
+  const g = payload?.gitAnalytics || {};
+  const f = payload?.focusAnalytics || {};
+  const n = (v: any) => (Number.isFinite(Number(v)) && Number(v) > 0 ? Number(v) : 0);
+  return (
+    n(e.charsInserted) > 0 || n(e.charsDeleted) > 0 || n(e.saveCount) > 0 ||
+    n(e.linesInserted) > 0 || n(e.linesDeleted) > 0 ||
+    n(t.totalCommands) > 0 || n(g.commits) > 0 ||
+    (Array.isArray(f.flowBlocksMs) && f.flowBlocksMs.length > 0)
+  );
 }
 
 function emptyTerminalAnalytics() {
@@ -246,10 +265,10 @@ export function buildPayloadForTest(durationSeconds: number) {
 }
 
 // --------- Activity Tracking ----------
-async function sendActivity(minutes: number, fileOpened?: string): Promise<void> {
+async function sendActivity(payload: ReturnType<typeof buildPayload>): Promise<void> {
   const { apiBase, apiKey } = getCfg();
 
-  const durationSeconds = Math.round(minutes * 60);
+  const durationSeconds = payload.duration;
 
   // Below one second the backend treats the duration as missing and 400s, so
   // hold the buffered counters and let the next flush carry them.
@@ -267,8 +286,6 @@ async function sendActivity(minutes: number, fileOpened?: string): Promise<void>
     warnAboutAuth("no API key is configured, so your activity is not being saved.");
     return;
   }
-
-  const payload = buildPayload(durationSeconds, fileOpened);
 
   try {
     await axios.post(`${apiBase}/api/extension/track`, payload, {
@@ -315,8 +332,14 @@ async function flushIfNeeded(force: boolean = false): Promise<void> {
     state.lastKnownFile ||
     "unknown";
 
+  const payload = buildPayload(Math.round(totalBuffered * 60), fileOpened);
+
+  // Nothing happened this interval (window focused but no edits/commands/
+  // commits) — keep buffering so the time carries to the next real flush.
+  if (!force && !payloadHasSignal(payload)) return;
+
   try {
-    await sendActivity(totalBuffered, fileOpened);
+    await sendActivity(payload);
     state.startedMs = Date.now();
     state.bufferedMinutes = 0;
   } catch {
@@ -357,7 +380,13 @@ function start(context: vscode.ExtensionContext): void {
       if (state.startedMs) {
         const activeDurationMin = (state.lastActivityMs - state.startedMs) / 60000;
         if (activeDurationMin > getCfg().minFlushMinutes) {
-          sendActivity(activeDurationMin, state.lastKnownFile).catch(() => {});
+          const idlePayload = buildPayload(
+            Math.round(activeDurationMin * 60),
+            state.lastKnownFile
+          );
+          if (payloadHasSignal(idlePayload)) {
+            sendActivity(idlePayload).catch(() => {});
+          }
         }
       }
 

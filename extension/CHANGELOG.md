@@ -2,6 +2,21 @@
 
 All notable changes to the CodeTrackr VS Code extension will be documented in this file.
 
+## [2.3.0] - 2026-09-08
+
+### Changed
+- The backend now merges flushes into 10-minute activity records, so the extension
+  no longer needs to send one every 30 seconds. `minFlushMinutes` now defaults to
+  **2** (was 0.5) — fewer, coarser records, no change to reported totals.
+
+### Fixed
+- Flush intervals with no real activity (window focused but no edits, commands or
+  commits) are no longer sent. The buffered time carries to the next real flush,
+  which also stops sub-2-minute idle stretches from inflating coding time.
+
+---
+
+
 ## [2.2.0] - 2026-08-28
 
 > **Why 2.2.0 and not 2.1.0?** A build was published as `2.1.0` on 2026-05-08, before

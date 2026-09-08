@@ -119,6 +119,12 @@ function check(name, fn) {
     assert.strictEqual(MANIFEST.main, './dist/extension.js');
   });
 
+  check('minFlushMinutes default is 2', () => {
+    assert.strictEqual(
+      MANIFEST.contributes.configuration.properties['codetrackr.minFlushMinutes'].default, 2
+    );
+  });
+
   console.log('\npayload composition');
   check('buildPayloadForTest includes the three new analytics blocks', () => {
     assert.strictEqual(typeof ext.buildPayloadForTest, 'function');
@@ -140,6 +146,26 @@ function check(name, fn) {
     const payload = ext.buildPayloadForTest(60);
     const json = JSON.stringify(payload);
     assert.ok(!json.includes('/tmp/test-workspace'), 'absolute workspace path leaked');
+  });
+
+  console.log('\nskip signal-less flushes');
+  check('payloadHasSignal is exported', () => {
+    assert.strictEqual(typeof ext.payloadHasSignal, 'function');
+  });
+  check('payloadHasSignal: false for an all-zero payload', () => {
+    assert.strictEqual(ext.payloadHasSignal({
+      editorAnalytics: {}, terminalAnalytics: {}, gitAnalytics: {}, focusAnalytics: { flowBlocksMs: [] },
+    }), false);
+  });
+  check('payloadHasSignal: true when characters were inserted', () => {
+    assert.strictEqual(ext.payloadHasSignal({
+      editorAnalytics: { charsInserted: 5 }, terminalAnalytics: {}, gitAnalytics: {}, focusAnalytics: { flowBlocksMs: [] },
+    }), true);
+  });
+  check('payloadHasSignal: true when a terminal command ran', () => {
+    assert.strictEqual(ext.payloadHasSignal({
+      editorAnalytics: {}, terminalAnalytics: { totalCommands: 1 }, gitAnalytics: {}, focusAnalytics: { flowBlocksMs: [] },
+    }), true);
   });
 
   await ext.deactivate();
