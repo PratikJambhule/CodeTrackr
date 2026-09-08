@@ -182,7 +182,8 @@ ingest tokens, or OAuth device flow).
 
 | Collection | Key fields | Notes |
 |---|---|---|
-| **activities** | `userId: String` (hex of User._id, **not** an ObjectId ref), `fileName`, `fileType`, `projectName`, `language`, `duration: Number` **(SECONDS)**, `linesAdded`, `linesRemoved`, `timestamp`, `date`, `terminalAnalytics{}`, `editorAnalytics{}`, `focusAnalytics{ flowBlocksMs:[Number] }`, `gitAnalytics{}` | One doc **per flush** (~ every 0.5–2 min of active coding). Highest volume. `{ timestamps:true }`. |
+| **activities** | `userId: String` (hex of User._id, **not** an ObjectId ref), `fileName`, `fileType`, `projectName`, `language`, `duration: Number` **(SECONDS)**, `linesAdded`, `linesRemoved`, `timestamp`, `bucketStart`, `files:[String]`, `flushCount`, `terminalAnalytics{}`, `editorAnalytics{}`, `focusAnalytics{ flowBlocksMs:[Number] }`, `gitAnalytics{}` | **Since 2026‑09‑08:** one doc per **10‑minute `(userId, projectName, language)` window** — the ingest route `$inc`‑upserts the bucket (`services/activityBucket.js`); analytics sub‑docs are **sparse** (no `default:0`; only non‑zero leaves written). `ACTIVITY_BUCKET_MS=0` restores per‑flush inserts. Legacy per‑flush docs coexist. The dead `date` field was **removed**. Highest volume. `{ timestamps:true }`. |
+| **dailysummaries** | `userId`, `day` (YYYY‑MM‑DD UTC), `totalSeconds`, `totalLinesAdded/Removed`, `flushCount`, `bucketCount`, `languages:[{language,seconds}]`, `projects:[String]`, `editor/terminal/git` aggregates, `focus{}` | One per (user, UTC day). Written nightly by `scripts/rollup-daily.js` / the `initScheduler` cron from raw `activities`. Exists for the future all‑time‑read cutover (not yet consumed by any read). |
 | **users** | `googleId` (unique), `name`, `email` (unique), `profilePictureUrl`, `apiKey` (unique, sparse, **plaintext**), `lastLogin`, `isFirstLogin` | |
 | **groups** | `name`, `description`, `visibility: 'public'|'private'`, `password` (`select:false`, scrypt hash `scrypt$salt$hash`, legacy plaintext tolerated), `createdBy: ObjectId→User` | |
 | **groupmembers** | `groupId: ObjectId`, `userId: ObjectId`, `joinedAt` | Unique compound index `{groupId:1, userId:1}`. Join table. |
@@ -190,20 +191,21 @@ ingest tokens, or OAuth device flow).
 | **teams** | `name`, `description`, `createdBy: ObjectId`, `members: [ObjectId]` (embedded) | Backend routes exist; **frontend `Teams.tsx` is not routed in `App.tsx`** — orphaned. |
 | **notifications** | `userId: ObjectId`, `goalId: ObjectId`, `type: 'deadline_reminder'|'deadline_missed'|'goal_completed'`, `title`, `message`, `read` | Created by `notificationScheduler`. |
 
-### Indexes (defined in `models/Activity.js`)
+### Indexes (defined in `models/Activity.js`, as of 2026‑09‑08)
 
-`{ userId:1 }` (field-level), `{ userId:1, date:-1 }`, `{ userId:1, projectName:1 }`,
-`{ userId:1, language:1 }`.
-**Gap:** analytics/metrics/streak queries all filter on **`timestamp`**, but the compound
-index is on **`date`**. There is no `{ userId:1, timestamp:-1 }` index, so those queries fall
-back to the single-field `userId` index and filter `timestamp` in memory. Recommended
-addition. `date` itself is now written equal to `timestamp` (H‑5 fix) but pre-fix rows still
-carry the ingest day — backfill outstanding.
+`{ userId:1 }` (field-level), `{ userId:1, timestamp:-1 }`, `{ userId:1, projectName:1 }`,
+`{ userId:1, language:1 }`, `{ userId:1, projectName:1, language:1, bucketStart:1 }`
+(**unique**, `partialFilterExpression: { bucketStart: { $exists: true } }` — race-safe bucket
+merge, ignores legacy per‑flush docs), `{ createdAt:1 }` TTL **400 days** (safety net;
+tightening it + repointing all‑time reads at `dailysummaries` is the follow-up).
+The old `{ userId:1, date:-1 }` index and the `date` field were **removed** —
+`scripts/migrate-drop-date.js --apply` does it on the live DB.
 
 ### Consistency / concurrency
 
-- No transactions anywhere. Ingest is a single `Activity.create` (or `insertMany` for batch) — safe.
-- `groupmembers` unique compound index is the only hard concurrency guard (double-join → duplicate-key error, currently surfaced as a 500).
+- No transactions anywhere. Bucket ingest is an atomic `findOneAndUpdate` with `$inc`
+  (race-safe); `ACTIVITY_BUCKET_MS=0` falls back to a single `Activity.create`.
+- `groupmembers` unique compound index is a hard concurrency guard (double-join → duplicate-key error, currently surfaced as a 500). The new partial-unique `activities` bucket index is another.
 - `Team.members.push` + `save()` is read-modify-write — lost-update possible under concurrent adds.
 - `leaderboard` / group leaderboard recompute from scratch per request — always consistent, never cached.
 
@@ -224,8 +226,8 @@ everything into Node".
 
 | Method | Endpoint | Auth | Purpose |
 |---|---|---|---|
-| POST | `/api/extension/track` | `verifyApiKey` | **Main ingest.** One Activity doc per call. |
-| POST | `/api/extension/track/batch` | `verifyApiKey` | Bulk ingest via `insertMany`. **Exists; the extension never calls it.** |
+| POST | `/api/extension/track` | `verifyApiKey` | **Main ingest.** `$inc`-upserts a 10‑minute `(user, project, language)` bucket (201 `{bucket:{…}}`); 202 `{merged}` for a signal‑less flush; plain `Activity.create` when `ACTIVITY_BUCKET_MS=0`. |
+| POST | `/api/extension/track/batch` | `verifyApiKey` | Loops the same bucketing path per item. **Exists; the extension never calls it.** |
 | GET | `/api/extension/verify` | `verifyApiKey` | Key validity check for setup. |
 | GET | `/api/analytics/:userId` | `isAuthenticated` + ownership | Today's hourly breakdown; also pulls last 7 days. Aggregates in JS. |
 | GET | `/api/analytics/weekly/:userId` | `isAuthenticated` + ownership | 7-day daily breakdown. |
@@ -249,16 +251,20 @@ Legacy unauthenticated `POST /api/user-activity` / `GET /api/user-stats/:id` wer
 
 ## 9. VS Code extension — how it works
 
+*Current published-target version: **2.3.0** (packaged; Marketplace publish is manual).*
+
 - **Activation:** `onStartupFinished`. `activate()` creates the five trackers, registers 7
   commands, then calls `start()`.
 - **Loop:** `setInterval(flushIntervalSeconds * 1000)` (default **30 s**). Each tick:
   if idle ≥ 2 min → flush remaining active time, then pause (resumes on next edit/nav);
-  else `flushIfNeeded(false)` — if buffered minutes ≥ `minFlushMinutes` (default **0.5**),
-  build payload and POST.
+  else `flushIfNeeded(false)` — if buffered minutes ≥ `minFlushMinutes` (**default 2** since
+  2.3.0, was 0.5), build the payload and, **only if it carries real signal**
+  (`payloadHasSignal` — mirrors the backend), POST. A signal-less flush is held so the
+  buffered time carries to the next real flush.
 - **Active-time model:** buffers `(now - startedMs)` minutes of *active* time; edits/saves/
   editor-switches/opens call `markActivity()` which refreshes `lastActivityMs`. Idle < 2 min
-  still counts as active time (L‑7 — totals skew slightly high).
-- **Payload (one Activity doc):** `timestamp` (stamped at the **start** of the interval, not
+  no longer contributes a document (2.3.0 skip-empty), which also trims the old L‑7 skew.
+- **Payload (merged server-side into a 10-min bucket):** `timestamp` (stamped at the **start** of the interval, not
   upload time — H‑12 fix), `fileName` (basename only), `fileType`, `projectName`
   (`workspace.name`), `language` (`activeTextEditor.document.languageId`), `duration`
   (seconds), `linesAdded/Removed` (from gross editor counters), and
@@ -334,7 +340,8 @@ dependency-free functions) computes:
 3. Merge in Node, sort by `totalHours` desc, assign `rank = index + 1` (ties → array order).
 4. Scores `speed/quality/engagement/impact/overall/commitScore` are computed **relative to the
    current maximum** — so every user's score shifts whenever the top user codes more.
-   `commits` on the leaderboard is actually **activity-document count**, not git commits.
+   `commits` on the leaderboard is actually **`$sum $ifNull($flushCount, 1)`** (flush count,
+   not git commits — since 2026‑09‑08; was raw doc count).
 
 **Cost:** O(total activity documents + total users) per request, in application memory, no
 time window, no pagination, no cache. Fine for a class project; the first thing that breaks at
@@ -397,7 +404,8 @@ ownership (H‑1); legacy open write/read endpoints deleted (H‑2); group passw
 - Error responses echo `error.message` (M‑10).
 - Leaderboard exposes **every user's email**.
 - Extension stores the key in `settings.json`, not SecretStorage.
-- No replay protection / idempotency on ingest — a re-sent payload is stored again as new activity.
+- Ingest is still not idempotent, but a re-sent flush now `$inc`s the same bucket rather than
+  creating a second document — a same-window replay double-counts within one bucket, not a new row.
 - Client can send arbitrary `timestamp` on ingest (used, only sanity-checked for parseability).
 
 ---
@@ -437,9 +445,14 @@ cron never fires) — H‑13, unfixed. `app.js` calls `app.listen()` uncondition
 | trackers | `extension/tests/trackers.test.js` | unit vs built `dist/extension.js` + `vscodeStub` | EditorTracker / FocusTracker / GitStateTracker behaviour + regressions |
 | activation | `extension/tests/activation.test.js` | loads the real bundle vs stub | every contributed command is registered; no network without a key; payload shape; manifest sanity |
 
-**Total ≈ 57 backend assertions + the extension suites.** No test framework, **no
+Plus, since 2026‑09‑08: `activityBucket` (21 — bucket math, `hasSignal`, update shape,
+sparseness, `planActivityWrite`), `activityModel` (10 — schema/index shape), `ingestWiring`
+(9 — source scan that `/track` uses the planner + reads tolerate bucketed docs), `rollup`
+(7 — `buildDaySummary`). Extension `activation` gained `payloadHasSignal` + manifest checks.
+
+**Total ≈ 104 backend assertions across 10 suites + 37 extension.** No test framework, **no
 integration/API/DB/e2e tests, no frontend tests.** Nothing has been run against a real
-database.
+database — the bucketing/rollup logic is proven at the pure-function level only.
 
 ---
 
@@ -448,17 +461,21 @@ database.
 1. API key = plaintext, non-expiring, unscoped bearer credential.
 2. Leaderboard / group leaderboard: unbounded full-collection scan, no cache, no pagination; exposes emails.
 3. Analytics aggregate in JS, not MongoDB; daily endpoint pulls 7 days to show 1 (M‑1).
-4. Missing `{ userId:1, timestamp:-1 }` index; queries filter `timestamp` but index is on `date`.
-5. `node-cron` scheduler incompatible with serverless (H‑13).
-6. No helmet / rate limiting / request validation (M‑3/M‑4).
-7. Frontend does not typecheck — `npm run build` fails (M‑13).
-8. Dashboard "Repeated Failures" is mock data; Goals to-dos are non-persistent; Teams UI is orphaned.
-9. Idle < 2 min counts as active time (L‑7).
-10. `userId` is String on `activities`, ObjectId elsewhere → coercion gymnastics, blocks `$lookup` (M‑6).
-11. Extension has no offline queue; un-flushed time is lost on restart.
-12. No idempotency on ingest — duplicate payloads double-count.
-13. Insights recomputed every request, no cache.
-14. No CI/CD, no observability, no integration tests.
+4. `node-cron` scheduler incompatible with serverless (H‑13) — now also runs the nightly rollup.
+5. No helmet / rate limiting / request validation (M‑3/M‑4).
+6. Frontend does not typecheck — `npm run build` fails (M‑13).
+7. Dashboard "Repeated Failures" is mock data; Goals to-dos are non-persistent; Teams UI is orphaned.
+8. `userId` is String on `activities`, ObjectId elsewhere → coercion gymnastics, blocks `$lookup` (M‑6).
+9. Extension has no offline queue; un-flushed time is lost on restart.
+10. Ingest not idempotent — a same-window replay double-counts inside one bucket.
+11. Insights recomputed every request, no cache.
+12. No CI/CD, no observability, no integration tests.
+13. **DB write-reduction (2026‑09‑08):** time-of-day precision is now the 10-minute grid;
+    all-time reads (`/leaderboard`, `/summary`, `/metrics >90d`) still scan raw `activities`
+    — not yet repointed at `dailysummaries`; the 400-day TTL is a safety net only.
+
+*(Fixed 2026‑09‑08: the missing `{userId:1,timestamp:-1}` index; per-flush document
+explosion; the dead `date` field/index; idle < 2 min inflating totals.)*
 
 ---
 
@@ -467,14 +484,15 @@ database.
 **Short term:** hash API keys at rest (`keyId` + secret, prefix); add `helmet` +
 `express-rate-limit` on `/auth` and `/api/extension`; add `express-validator` bounds on
 ingest (`0 < duration ≤ 3600`); central error middleware; fix the 29 TS errors; wire the real
-`repeatedFailedCommands` into the dashboard; add `{ userId:1, timestamp:-1 }` index; move the
-scheduler to Vercel Cron / an external trigger.
+`repeatedFailedCommands` into the dashboard; move the scheduler to Vercel Cron / an external
+trigger. *(Done 2026‑09‑08: `{userId:1,timestamp:-1}` index; 10-min bucketing; drop `date`.)*
 
 **Medium term:** `UserStats` rollup collection updated on ingest → leaderboard reads N docs
-for N users; add `?period=` window + pagination; shared MongoDB aggregation service for
-analytics + metrics; adopt React Query for caching/dedup; migrate `activities.userId` to
-ObjectId with a compat window; extension offline queue (persist to `globalState`), idempotency
-key on ingest.
+for N users; **repoint `/leaderboard`, `/summary`, `/metrics >90d` at `dailysummaries` and
+tighten the raw TTL from 400d** (the explicit follow-up to the write-reduction batch); add
+`?period=` window + pagination; shared MongoDB aggregation service for analytics + metrics;
+adopt React Query for caching/dedup; migrate `activities.userId` to ObjectId with a compat
+window; extension offline queue (persist to `globalState`), idempotency key on ingest.
 
 **Long term:** ingest → queue (SQS/Kafka) → workers → time-series store / analytics warehouse;
 Redis cache for leaderboard + insights; the designed LLM narration layer with a
@@ -488,10 +506,18 @@ metrics, tracing); CI (typecheck + both test suites) + automated Marketplace pub
 
 - Branch: `feat/security-and-insights`. Security Batch 3 + Insights page **done**.
   Data-accuracy Batch 1 + extension Batch 2 (2.0.11 / 2.2.0) **done**.
+- **DB write-reduction batch (2026‑09‑08) done:** 10-minute bucket-on-write (`$inc` upsert),
+  skip signal-less flushes (extension 2.3.0), sparse analytics sub-docs, dropped the `date`
+  field/index, added `{userId:1,timestamp:-1}`, `DailySummary` + nightly rollup + 400d TTL.
+  Spec `docs/superpowers/specs/2026-09-08-db-write-reduction-design.md`, plan
+  `docs/superpowers/plans/2026-09-08-db-write-reduction.md`. `ACTIVITY_BUCKET_MS=0` = legacy.
+  **Follow-up open:** repoint all-time reads at `dailysummaries` + tighten the TTL (with `UserStats`).
 - `H-7`, `H-8` (leaderboard scans), `H-13` (serverless cron), most `MEDIUM`/`LOW` items **open**.
-- Extension packaged as `2.2.0`; Marketplace publication unverified.
+- Extension packaged as `2.3.0`; Marketplace publication is manual / unverified.
 - Frontend build is red (`tsc -b`); the deployed Vercel build predates the type regressions or skips the check.
-- No work has touched a live database.
+- No work has touched a live database. **Migrations to run on deploy:**
+  `node backend/scripts/migrate-drop-date.js --apply` then optionally
+  `node backend/scripts/rollup-daily.js --apply`.
 
 ---
 
@@ -501,5 +527,8 @@ metrics, tracing); CI (typecheck + both test suites) + automated Marketplace pub
 - Q&A bank: `docs/interview-preparation/CodeTrackr_Interview_QA.md`
 - Architecture deep-dive + diagrams: `docs/interview-preparation/CodeTrackr_Architecture.md`
 - Quick revision: `docs/interview-preparation/CodeTrackr_Interview_Cheat_Sheet.md`
+- DB write-reduction: `docs/interview-preparation/CodeTrackr_DB_Write_Reduction.md`,
+  spec `docs/superpowers/specs/2026-09-08-db-write-reduction-design.md`,
+  plan `docs/superpowers/plans/2026-09-08-db-write-reduction.md`
 - Pre-existing engineering docs: `docs/ARCHITECTURE.md`, `docs/IMPROVEMENT_PLAN.md`,
   `docs/SESSION-LOG-2026-08-27.md`, `docs/TRACKING_ROADMAP.md`

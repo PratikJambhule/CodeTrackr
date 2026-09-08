@@ -5,6 +5,19 @@ _Companion doc: `ARCHITECTURE.md`._
 
 ## Status
 
+**Write-reduction batch — DB write volume + redundancy: DONE 2026-09-08.**
+Levers #3 (10-minute bucket-on-write via atomic `$inc` upsert), #2 (skip signal-less flushes,
+extension 2.3.0), #4 (sparse analytics sub-docs + drop the dead `date` field/index), #6
+(`DailySummary` model + nightly `scripts/rollup-daily.js` + 400-day safety TTL on
+`activities.createdAt`), #1 (`minFlushMinutes` default 0.5 → 2). Also folds in the missing
+`{userId:1,timestamp:-1}` index. `ACTIVITY_BUCKET_MS=0` restores per-flush inserts.
+Verified by `activityBucket` (21), `activityModel` (10), `ingestWiring` (9), `rollup` (7)
+suites + extension `activation`. Spec/plan under `docs/superpowers/`.
+**Follow-up (bundle with `UserStats`):** tighten the raw TTL and repoint the all-time reads
+(`/leaderboard`, `/api/analytics/summary`, `/api/metrics` beyond 90d) at `dailysummaries`.
+Migrations to run on the live DB: `node backend/scripts/migrate-drop-date.js --apply`, then
+`node backend/scripts/rollup-daily.js --apply`.
+
 **Batch 1 — data accuracy (H-3, H-4, H-5, H-6, M-2): DONE 2026-08-27.**
 Verified by `backend/tests/streak.test.js` (9 assertions, run with `npm test` in `backend/`),
 which extracts the shipped helpers from `routes/analytics.js` and exercises them against a

@@ -4,6 +4,12 @@
 can hold your own in an interview. Everything here is how the code actually works, not how
 the project was described.*
 
+> **Changed 2026‑09‑08:** the extension still flushes counters every ~30s, but the backend now
+> **merges flushes into one record per 10-minute window** (`$inc` upsert) instead of one
+> record per flush. It also skips flushes with no real activity (extension 2.3.0). The "one
+> record per flush" / `Activity.create` mentions below are the old model — totals are
+> identical, only time-of-day detail is now 10-minute-grained.
+
 *Two labels are used throughout:*
 - ***REAL** = this is in the code right now.*
 - ***BETTER** = this is what you'd do to improve it (say it as a suggestion, not a claim).*

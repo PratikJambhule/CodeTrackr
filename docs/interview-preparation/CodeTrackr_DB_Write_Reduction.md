@@ -1,7 +1,18 @@
 # CodeTrackr — Reducing Database Write Volume & Redundancy
 
 *How to cut the number (and size) of documents written to the `activities` collection.
-Verified against the current code. Ordered cheapest → most involved.*
+Ordered cheapest → most involved.*
+
+> **IMPLEMENTED 2026-09-08** (branch `feat/security-and-insights`): levers **#3, #2, #4, #6
+> and #1 shipped.** `/track` now `$inc`-upserts a 10-minute `(userId, projectName, language)`
+> bucket (`services/activityBucket.js`); the extension (2.3.0) skips signal-less flushes and
+> defaults `minFlushMinutes` to 2; analytics sub-docs are sparse and the dead `date` field is
+> gone; `DailySummary` + `scripts/rollup-daily.js` + a 400-day TTL are in.
+> `ACTIVITY_BUCKET_MS=0` is the rollback lever. Spec:
+> `docs/superpowers/specs/2026-09-08-db-write-reduction-design.md`; plan:
+> `docs/superpowers/plans/2026-09-08-db-write-reduction.md`.
+> **Follow-up:** tighten the TTL and repoint the all-time reads at `dailysummaries` (with `UserStats`).
+> Text below describes the *pre-change* state and the reasoning — kept as the design rationale.
 
 ---
 

@@ -3,6 +3,15 @@
 *Reconstructed from the actual codebase on 2026-09-07 (branch `feat/security-and-insights`).
 Where this contradicts the informal project description, the code is authoritative.*
 
+> **Changed 2026‑09‑08:** the ingest write model. `POST /api/extension/track` no longer does
+> one `Activity.create` per flush — it **`$inc`-upserts a 10-minute `(userId, projectName,
+> language)` bucket** (`services/activityBucket.js` → `planActivityWrite`). The extension
+> (2.3.0) skips signal-less flushes. Analytics sub-docs are sparse; the `date` field is gone;
+> a `DailySummary` nightly rollup + 400-day TTL exist. `$inc.duration` is real seconds so
+> **every total is unchanged** — only time-of-day resolution drops to the 10-minute grid.
+> `ACTIVITY_BUCKET_MS=0` restores the old behaviour. Mentally substitute
+> "`Activity.create()`" → "bucket `$inc` upsert" below.
+
 ---
 
 ## 1. System overview
@@ -178,9 +187,12 @@ the sum of all trackers' `consumeInterval()` for that window.
 ```
 
 **Key properties of this path:**
-- **One document per flush** — no upsert/merge. A heavy day = dozens–hundreds of small docs.
-- **No idempotency** — if the same payload is delivered twice (retry, double flush), it is
-  stored twice and double-counted. There is no client-generated key, no dedupe window.
+- **One document per 10-minute `(user, project, language)` window** (since 2026‑09‑08) — an
+  atomic `findOneAndUpdate` with `$inc`. A heavy day = tens of docs, not hundreds.
+  `ACTIVITY_BUCKET_MS=0` → the old per-flush `Activity.create`.
+- **Not idempotent, but bounded** — a same-window replay `$inc`s the existing bucket rather
+  than creating a second row. There's still no client-generated key / dedupe window, so it
+  double-counts *within* the bucket.
 - **No server-side auth for the *content*** beyond "is the key valid" — a valid key can POST
   any `duration`/`language`/`timestamp` it likes (only parseability and truthiness are checked).
 - **Backdating works** — `timestamp` from the body is trusted, so a queued/late flush files

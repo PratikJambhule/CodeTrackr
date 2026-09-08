@@ -6,6 +6,15 @@
 >
 > Companion files: `CodeTrackr_Architecture.md` (diagrams + data flow), `CodeTrackr_Interview_QA.md`
 > (question bank), `CodeTrackr_Interview_Cheat_Sheet.md` (revision), `../../CODETRACKR_PROJECT_CONTEXT.md`.
+>
+> **⚠️ CHANGED 2026‑09‑08 — the ingest write model.** Where this doc says "one `Activity`
+> document per flush", the backend now **`$inc`-upserts a 10-minute `(user, project,
+> language)` bucket** (`services/activityBucket.js`), the extension (2.3.0) **skips
+> signal-less flushes** and defaults `minFlushMinutes` to 2, the analytics sub-docs are
+> **sparse**, the `date` field is **gone**, and there's a `DailySummary` nightly rollup +
+> 400-day TTL. Totals are unchanged (`$inc.duration` is real seconds); time-of-day precision
+> is now the 10-minute grid. `ACTIVITY_BUCKET_MS=0` restores the old per-flush inserts.
+> See `CodeTrackr_DB_Write_Reduction.md` and `docs/superpowers/{specs,plans}/2026-09-08-*`.
 
 ---
 
@@ -1515,15 +1524,20 @@ Each: **Decision → Reason → Alternative → Trade-off → When the alternati
   `sameSite:'none'`.
 - **Sessions win when:** you need instant logout-everywhere or per-session device management.
 
-### D5. One `Activity` document per flush (not upsert/merge per day)
+### D5. 10-minute bucket-on-write *(changed 2026‑09‑08 — was "one document per flush")*
 
-- **Reason:** simplest possible write; immutable; no read-modify-write races; keeps per-flush
-  granularity (10-minute drill-down needs it).
-- **Alternative:** daily/hourly bucket docs with `$inc` (the `server.js.old` approach); a
-  time-series collection.
-- **Trade-off:** document count explodes; reads must aggregate many small docs.
-- **Buckets win when:** storage/read cost matters — i.e. at scale, as a rollup *alongside* the
-  raw stream.
+- **Original reason for per-flush:** simplest write; immutable; no read-modify-write races.
+- **Why it changed:** document count grew ~1 per 30–90s of coding, and every doc repeated the
+  metadata + four mostly-zero analytics objects. The ingest route now does an atomic
+  `findOneAndUpdate` with `$inc` into a `(userId, projectName, language, 10-min window)`
+  document — race-safe because `$inc` in one update is atomic (unlike `server.js.old`'s
+  read-then-`.save()`). 10 minutes is the finest window any read uses, so no dashboard lost
+  resolution. `$inc.duration` is the real measured seconds — **totals are identical**.
+- **Trade-off accepted:** time-of-day precision is now the 10-minute grid; a `repeatedFailedCommands`
+  list is last-writer-wins per bucket.
+- **Kept:** `ACTIVITY_BUCKET_MS=0` still does the plain per-flush `Activity.create`.
+- **Still ahead:** a `DailySummary` rollup exists (nightly job); repointing the all-time reads
+  at it + tightening the raw 400-day TTL is the follow-up.
 
 ### D6. Aggregate analytics in Node (not MongoDB `$group`)
 

@@ -4,6 +4,11 @@
 > written to be **spoken**, not read aloud verbatim. `[ACTUAL]` = in the code today;
 > `[RECOMMENDED]` = what you'd do, clearly labelled so you never over-claim.
 >
+> **Changed 2026‑09‑08:** "one document per flush" → the backend now **`$inc`-upserts a
+> 10-minute `(user, project, language)` bucket**; extension 2.3.0 skips signal-less flushes,
+> `minFlushMinutes` default 2; sparse analytics sub-docs; `date` field dropped; `DailySummary`
+> nightly rollup + 400d TTL. Totals unchanged. `ACTIVITY_BUCKET_MS=0` = legacy per-flush.
+>
 > Categories: A Project · B Architecture · C Extension · D Backend · E MongoDB · F Auth/Key ·
 > G Frontend · H ML/Insights · I Leaderboard · J Groups · K Security · L Scalability ·
 > M Debugging · N Trick/follow-up · O Code-level · P HR/behavioural.

@@ -280,6 +280,49 @@ with `npx tsc -b` — my files clean, pre-existing errors unchanged.
 
 ---
 
+## 9. DB write-reduction (2026-09-08)
+
+Implemented levers #3/#2/#4/#6/#1 from `docs/interview-preparation/CodeTrackr_DB_Write_Reduction.md`
+via the superpowers brainstorm → spec → plan → execute flow.
+
+- Spec: `docs/superpowers/specs/2026-09-08-db-write-reduction-design.md`
+- Plan: `docs/superpowers/plans/2026-09-08-db-write-reduction.md`
+
+**What shipped (9 commits):** `services/activityBucket.js` (pure `planActivityWrite` — decides
+`legacy` create / `bucket` `$inc`-upsert / signal-less `merge`); `/track` and `/track/batch`
+persist through it; `Activity` schema lost its `default: 0` leaves and the dead `date`
+field/index, gained `bucketStart`/`files`/`flushCount`, a partial-unique
+`{userId,projectName,language,bucketStart}` index, `{userId,timestamp:-1}`, and a 400-day
+`createdAt` TTL; extension **2.3.0** skips signal-less flushes (buffered time carries forward)
+and defaults `minFlushMinutes` to 2; `DailySummary` model + `services/dailyRollup.js` +
+`scripts/rollup-daily.js` + a nightly `initScheduler` cron. Read touch-ups: `/timeslot`
+`fileCount` reads `files[]`; leaderboard `activityCount = $sum $ifNull($flushCount, 1)`.
+
+**Rollback lever:** `ACTIVITY_BUCKET_MS=0` → per-flush `Activity.create`, byte-for-byte as before.
+
+**Correctness:** `$inc.duration` is the real measured seconds, so `totalHours` and every
+other total are unchanged; only time-of-day precision drops to the 10-minute grid.
+
+**Tests:** 4 new backend suites (`activityBucket` 21, `activityModel` 10, `ingestWiring` 9,
+`rollup` 7) + extended `activation`. All 10 backend + 2 extension suites green. **Nothing run
+against a live DB** — the bucketing/rollup logic is pure-function-tested only (consistent with
+this repo's posture, §3).
+
+**Errors hit during execution:** `activityModel.test.js` OOM'd on the first run because
+`assert.strictEqual(mongooseSchemaType, undefined)` tries to deep-inspect the SchemaType's
+circular graph for the diff message. Fixed by reducing every operand to a primitive
+(`hasPath()` / `pathInstance()` / `pathDefault()` helpers) before asserting.
+
+**Migrations to run against the live DB:**
+`node backend/scripts/migrate-drop-date.js --apply`, then optionally
+`node backend/scripts/rollup-daily.js --apply`.
+
+**Follow-up open:** repoint the all-time reads (`/leaderboard`, `/api/analytics/summary`,
+`/api/metrics >90d`) at `dailysummaries` and tighten the raw 400-day TTL — bundle with the
+`UserStats` rollup (Quick Wins #9).
+
+---
+
 ## Appendix A — Why this is a file and not claude-mem
 
 claude-mem was requested for context saving and was attempted repeatedly. Every call failed:

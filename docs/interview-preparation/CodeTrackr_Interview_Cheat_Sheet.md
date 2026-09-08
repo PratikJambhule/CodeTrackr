@@ -2,6 +2,11 @@
 
 *Read this the hour before. Full detail: `CodeTrackr_Interview_Preparation.md`.*
 
+> **Changed 2026‑09‑08:** ingest now `$inc`-upserts a **10-minute `(user, project, language)`
+> bucket** (not one doc per flush); extension **2.3.0** skips signal-less flushes,
+> `minFlushMinutes` default **2**; sparse analytics sub-docs; `date` field dropped;
+> `DailySummary` nightly rollup + 400d TTL. Totals unchanged. `ACTIVITY_BUCKET_MS=0` = legacy.
+
 ---
 
 ## Architecture in 10 lines
@@ -30,7 +35,7 @@
 | Auth | Google OAuth → JWT cookie (web); random 64-hex API key (extension) | `JWT_SECRET` has unsafe fallback `'your_jwt_secret'` |
 | "ML" | pure JS stats — coefficient of variation, weighted score, medians | no model/training/inference/LLM/Python |
 | Deploy | Vercel + Render + Atlas | no Dockerfile, no CI, no observability |
-| Tests | plain `node:assert` — 6 backend suites (~57 assertions) + 2 extension suites | **zero frontend tests; nothing run vs a real DB** |
+| Tests | plain `node:assert` — 10 backend suites (~104 assertions) + 2 extension suites | **zero frontend tests; nothing run vs a real DB** |
 
 **Why MongoDB:** append-only, self-contained, schema-evolving docs; per-user-window access; no hot-path joins; free tier.
 **Where SQL wins:** groups/teams/goals relational integrity + transactions; the leaderboard `GROUP BY`.
@@ -40,19 +45,24 @@
 
 ## Data flow — one page
 
-**Ingest**
+**Ingest** *(bucketed since 2026‑09‑08)*
 ```
 VS Code event → tracker counters → timer tick (30s) →
-  idle ≥ 2min? pause : totalBuffered ≥ 0.5min? →
-  buildPayload(timestamp = interval START, basename only, duration in SECONDS,
-               terminalAnalytics/editorAnalytics/focusAnalytics/gitAnalytics) →
+  idle ≥ 2min? pause : totalBuffered ≥ 2min (minFlushMinutes)? →
+  buildPayload(timestamp = interval START, basename only, duration in SECONDS, 4 analytics blocks) →
+  payloadHasSignal? no → keep buffering (don't send)  |  yes ↓
   axios.post /api/extension/track  header x-api-key →
   verifyApiKey → User.findOne({apiKey}) → req.user →
-  validate (fileName && language && duration) → normalize*Analytics (default missing → 0) →
-  Activity.create({ userId: req.user._id.toString(), ..., timestamp: when, date: when }) → 201
+  validate (fileName && language && duration) → normalize*Analytics (missing → absent, not 0) →
+  planActivityWrite → bucketStart = floor(when, 10min) →
+  Activity.findOneAndUpdate({userId,project,language,bucketStart},
+     { $inc: {duration, lines, flushCount, ...non-zero leaves}, $max, $push $slice:-200, $addToSet files,
+       $setOnInsert: {...key, timestamp: bucketStart} }, { upsert:true, setDefaultsOnInsert:false }) → 201
+  (ACTIVITY_BUCKET_MS=0 → plain Activity.create, exactly as before)
 ```
 On failure: buffered minutes kept **in memory only** (no disk queue), retried next tick.
-**No idempotency** → duplicate payload double-counts.
+`$inc.duration` = real measured seconds → **totals unchanged**. A same-window replay
+double-counts *inside one bucket*, not as a new row.
 
 **Read (dashboard)**
 ```
@@ -186,7 +196,7 @@ fetch(/api/metrics?days=&timezone=)  // NO :userId — IDOR-proof by design →
 12. **JWT vs session?** → stateless, survives cold start; cost = no revocation.
 13. **Extension activation?** → `onStartupFinished`; passive tracking.
 14. **What's collected?** → time, file/lang/project, gross edits, churn, focus/flow, terminal commands, git commits, debug sessions.
-15. **Batched?** → no; one doc per flush; `/track/batch` unused.
+15. **Batched?** → no HTTP batching; but the backend *merges* flushes into one 10-min bucket doc (`$inc` upsert). `/track/batch` unused.
 16. **Idle?** → pause after 2 min, resume on edit.
 17. **Offline?** → buffer in memory, retry next tick; no disk queue; lost on restart.
 18. **Duplicate payload?** → double-counted; no idempotency.
@@ -219,6 +229,7 @@ fetch(/api/metrics?days=&timezone=)  // NO :userId — IDOR-proof by design →
 
 - Don't call Insights "AI" or "ML" — it's statistics. Say so first.
 - Don't say the leaderboard is "optimised" — it's an O(n) scan; know the rollup fix.
+- The write path buckets now (10-min `$inc` upsert) — say that, not "append-only per-flush". Totals are unchanged; time-of-day precision is a 10-min grid.
 - Don't say "the API key is just an identifier" — it's a credential.
 - Don't claim the frontend builds — `tsc -b` fails (29 errors).
 - Don't claim integration test coverage — there is none against a real DB.
