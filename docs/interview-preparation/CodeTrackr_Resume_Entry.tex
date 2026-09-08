@@ -1,0 +1,213 @@
+% =============================================================================
+%  CodeTrackr - Resume Project Entry  (ATS-optimised, Overleaf-ready)
+% =============================================================================
+%
+%  WHAT THIS FILE IS
+%  ----------------
+%  A ready-to-paste "Projects" entry for CodeTrackr, written to (a) parse
+%  cleanly through Applicant Tracking Systems and (b) stay 100% truthful to
+%  what the code actually does, so nothing here can be picked apart in an
+%  interview.
+%
+%  HOW TO USE
+%  ----------------
+%  * Preview it:  this file compiles on its own with pdfLaTeX.
+%                 Overleaf -> New Project -> Blank Project -> paste -> Recompile.
+%  * Drop it in:  copy the block between  "% >>> COPY FROM HERE"  and
+%                 "% <<< COPY TO HERE"  into your existing resume's Projects
+%                 section (works with any template - it uses only itemize).
+%  * Jake's / sb2nov template users: a macro-format version is at the bottom
+%                 of this file, after \end{document}.
+%
+%  REPLACE THE <ANGLE-BRACKET> PLACEHOLDERS:
+%     <DATES>            e.g. "Jan 2024 -- Aug 2026"  (changelog spans 2024-2026)
+%     <GITHUB URL>       https://github.com/Soham-Official/CodeTrackr
+%     <LIVE URL>         https://code-trackr-frontend.vercel.app   (confirm it's up)
+%
+%  ATS CHECKLIST (why this entry scores well)
+%  ----------------
+%  [x] Single column, no tables / text boxes / graphics in the entry
+%  [x] \usepackage[T1]{fontenc}  -> text stays selectable & extractable (no "fi" ligature loss)
+%  [x] Standard section name: "Projects"
+%  [x] Real bullet list (itemize), strong action verbs, one idea per bullet
+%  [x] Acronyms expanded on first use:  OAuth 2.0, JSON Web Token (JWT), IDOR
+%  [x] Tech keywords appear BOTH in the heading and in a Technical Skills block
+%  [x] Plain-text dates; nothing important in headers/footers
+% =============================================================================
+
+\documentclass[11pt,a4paper]{article}
+
+\usepackage[T1]{fontenc}      % selectable/extractable text for ATS
+\usepackage[utf8]{inputenc}
+\usepackage{lmodern}          % Latin Modern: correct ToUnicode -> clean ATS text extraction
+% Force a ToUnicode map so ATS parsers read "file"/"efficient", not "le"/"ecient".
+% (Guarded so the file still compiles under XeLaTeX / LuaLaTeX; use pdfLaTeX for best results.)
+\ifdefined\pdfgentounicode
+  \input{glyphtounicode}
+  \pdfgentounicode=1
+\fi
+\usepackage[margin=1.6cm]{geometry}
+\usepackage{enumitem}
+\usepackage[hidelinks]{hyperref}
+\usepackage{titlesec}
+
+\titleformat{\section}{\large\bfseries}{}{0pt}{}[\vspace{2pt}\hrule\vspace{4pt}]
+\setlist[itemize]{leftmargin=1.4em,itemsep=2pt,topsep=3pt,parsep=0pt}
+\pagestyle{empty}
+\setlength{\parindent}{0pt}
+
+\newcommand{\project}[4]{%
+  % #1 name  #2 tech stack  #3 dates  #4 itemize block
+  \textbf{#1} \hfill \textbf{#3}\\[1pt]
+  \textit{#2}\\[-6pt]
+  #4\vspace{4pt}
+}
+
+\begin{document}
+
+% -----------------------------------------------------------------------------
+\section*{Projects}
+% >>> COPY FROM HERE >>>------------------------------------------------------
+
+\project
+  {CodeTrackr: Developer Productivity Analytics Platform}
+  {TypeScript, JavaScript, React, Node.js, Express.js, MongoDB, Mongoose,
+   REST APIs, OAuth 2.0, JSON Web Token (JWT), VS Code Extension API, Vite, Chart.js, Git}
+  {<DATES>}
+  {%
+  \begin{itemize}
+    \item Built a full-stack developer-productivity analytics platform with three
+          independent clients served by one REST API: a \textbf{TypeScript}
+          \textbf{VS Code extension}, a \textbf{React} / \textbf{Vite} dashboard, and
+          a \textbf{Node.js} / \textbf{Express.js} backend on \textbf{MongoDB}.
+    \item Engineered the extension's event-driven tracking engine (editor, terminal,
+          git, focus, and debug trackers) that accumulates coding metrics in memory
+          and flushes normalised activity documents to the API on a 30-second
+          interval, transmitting only file basenames and sanitised command metadata
+          to keep source code private.
+    \item Implemented authentication and authorisation end to end: \textbf{Google
+          OAuth 2.0} with \textbf{JWT} session cookies for the web client, per-user
+          API keys for the extension, scrypt-hashed passwords for private groups,
+          and route-level ownership checks that eliminated an insecure direct object
+          reference (IDOR) vulnerability class.
+    \item Modelled time-series activity data in \textbf{MongoDB} and authored
+          \textbf{aggregation pipelines} plus a unit-tested metrics service that
+          derives productivity insights (deep-work ratio, day-to-day consistency via
+          coefficient of variation, peak-productivity hour, estimate-vs-actual
+          accuracy) from raw events.
+    \item Ran a self-directed security and correctness audit that catalogued 33
+          findings by severity; remediated every high-severity issue (broken access
+          control, plaintext credential storage, an authentication-bypass flag) and
+          wrote 8 automated test suites, including a static scanner that fails when a
+          protected route loses its authorisation middleware.
+    \item Deployed the dashboard on \textbf{Vercel}, the API on \textbf{Render}, and
+          the database on \textbf{MongoDB Atlas}; packaged and published the
+          extension to the \textbf{VS Code Marketplace}.
+    % OPTIONAL extra line: add only if you have room / want the links inline.
+    % \item Code: \href{<GITHUB URL>}{github.com/Soham-Official/CodeTrackr}
+    %       \quad Live: \href{<LIVE URL>}{code-trackr-frontend.vercel.app}
+  \end{itemize}}
+
+% <<< COPY TO HERE <<<-------------------------------------------------------
+
+% -----------------------------------------------------------------------------
+\section*{Technical Skills}
+% Repeat the CodeTrackr keywords here too -- ATS weight terms that appear in a
+% dedicated skills section. Merge these into your existing lines.
+
+\textbf{Languages:} TypeScript, JavaScript, Python, SQL, HTML/CSS\\
+\textbf{Frameworks \& Libraries:} React, Node.js, Express.js, Mongoose, Vite, Chart.js, Tailwind CSS\\
+\textbf{Databases:} MongoDB, MongoDB Atlas, PostgreSQL\\
+\textbf{Concepts:} REST API design, Authentication \& Authorisation, OAuth 2.0, JWT,
+  Data Aggregation Pipelines, Time-Series Data, Unit Testing, Git, Cloud Deployment\\
+\textbf{Tools \& Platforms:} Git, GitHub, Vercel, Render, VS Code Extension API, Postman
+
+\end{document}
+
+% #############################################################################
+% #  ALTERNATE FORMATS + TAILORING NOTES  (LaTeX ignores everything below      #
+% #  \end{document}, so this is just reference text -- copy what you need.)    #
+% #############################################################################
+
+
+% =============================================================================
+%  OPTION B - "Jake Gutierrez" resume template  (\resumeProjectHeading macros)
+%  Also works with sb2nov. Paste inside \resumeSubHeadingListStart ... End.
+% =============================================================================
+%
+% \resumeProjectHeading
+%   {\textbf{CodeTrackr} $|$ \emph{TypeScript, React, Node.js, Express.js, MongoDB, OAuth 2.0, JWT, VS Code Extension API}}
+%   {<DATES>}
+%   \resumeItemListStart
+%     \resumeItem{Built a full-stack developer-productivity analytics platform with three
+%       clients on one REST API: a TypeScript VS Code extension, a React/Vite dashboard,
+%       and a Node.js/Express.js backend on MongoDB.}
+%     \resumeItem{Engineered the extension's event-driven tracking engine (editor, terminal,
+%       git, focus, debug trackers) that flushes normalised activity documents to the API
+%       every 30 seconds, sending only file basenames and sanitised command metadata.}
+%     \resumeItem{Implemented Google OAuth 2.0 with JWT session cookies, per-user API keys
+%       for the extension, scrypt-hashed group passwords, and route-level ownership checks
+%       that removed an IDOR vulnerability class.}
+%     \resumeItem{Wrote MongoDB aggregation pipelines and a unit-tested metrics service
+%       deriving productivity insights (deep-work ratio, consistency index, peak hour)
+%       from time-series activity data.}
+%     \resumeItem{Ran a 33-finding security/correctness audit; fixed all high-severity
+%       issues (broken access control, plaintext credentials, auth-bypass flag) and added
+%       8 automated test suites incl. a static route-guard scanner.}
+%   \resumeItemListEnd
+
+
+% =============================================================================
+%  COMPACT VERSION - 2 lines, for a dense one-page resume
+% =============================================================================
+%
+% \textbf{CodeTrackr} $|$ React, TypeScript, Node.js, Express.js, MongoDB, OAuth 2.0, JWT, VS Code Extension API \hfill <DATES>
+% \\ Full-stack coding-analytics platform (VS Code extension + React dashboard + Express/MongoDB REST API): an
+% event-driven extension streams activity to the API, which surfaces productivity metrics via MongoDB aggregation
+% pipelines; ran a 33-item security audit and fixed all high-severity access-control and credential-storage issues,
+% backed by an 8-suite automated test set.
+
+
+% =============================================================================
+%  KEYWORD TAILORING - edit per job description before you apply
+% =============================================================================
+%  * Mirror the JD's exact words:
+%       "REST API"        -> "RESTful API"        if the JD says RESTful
+%       "authorisation"   -> "authorization"      match the JD's spelling (US vs UK)
+%       "unit testing"    -> "automated testing"  / "test-driven development" if claimed
+%  * Safe additions if the JD lists them AND you can defend them:
+%       "Agile", "code review", "responsive design", "SPA", "CI/CD" (only after you
+%       add a GitHub Actions workflow), "npm", "ESLint", "TypeScript strict mode".
+%  * DO NOT add: "microservices" (it is a monolith), "Docker/Kubernetes" (none),
+%       "GraphQL" (none), "Redis/Kafka" (none), "machine learning" (see note below),
+%       "10k+ users" / any usage or performance number (never load-tested).
+
+
+% =============================================================================
+%  INTERVIEW-SAFETY NOTES - so these bullets never backfire
+% =============================================================================
+%  * "Metrics service / productivity insights": say STATISTICAL ANALYSIS, not
+%    machine learning. It is coefficient of variation, weighted scoring and
+%    medians - no model, no training. This is a strength (every number is
+%    explainable); own it as a deliberate choice.
+%  * The security-audit bullet is your strongest differentiator. Be ready to:
+%      - name the fixes: analytics endpoints had no ownership check (IDOR);
+%        private-group passwords were stored in plain text; an AUTH_BYPASS env
+%        flag disabled all auth; two legacy endpoints accepted unauthenticated writes.
+%      - define IDOR in one line: "any logged-in user could read another user's
+%        data by putting their id in the URL - I added a check that the record
+%        belongs to the caller."
+%  * "Flushes every 30 seconds": the timer ticks every 30s; a network send
+%    happens once enough *active* coding time has accrued (default ~30s). Know
+%    the nuance.
+%  * "Published to the VS Code Marketplace": earlier versions were published
+%    under publisher "CodeTrackr-ext"; confirm the current build is live before
+%    you say "currently published".
+%  * If asked how it scales: it is a portfolio project, not load-tested. Talk
+%    about the plan - a per-user UserStats rollup so the leaderboard is an
+%    indexed 50-row read instead of a full-collection scan, and Redis for rank
+%    lookups. That answer shows more than a fake metric would.
+%  * Only claim first-person work you actually did (repo has 3 contributors).
+%    If the audit + tests were yours, keep that bullet; if not, swap it for the
+%    deployment bullet.
+% =============================================================================
