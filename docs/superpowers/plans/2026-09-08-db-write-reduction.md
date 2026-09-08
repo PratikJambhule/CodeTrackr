@@ -1,5 +1,12 @@
 # DB Write-Reduction Implementation Plan
 
+> **STATUS: COMPLETE — executed 2026-09-08 on `feat/security-and-insights`.** Tasks 3 and 7
+> were committed together (the read-path assertions live in the same test file). 10 backend
+> suites + 2 extension suites green. Migration scripts dry-run cleanly against the live DB
+> (7,014 docs carry `date`; 98 (user, day) pairs to roll up) — `--apply` is a deploy-time
+> action left to the operator. Follow-up: repoint all-time reads at `dailysummaries` +
+> tighten the raw TTL (with `UserStats`).
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Cut the number and size of documents written to the `activities` collection by merging flush payloads into 10-minute rollup documents, dropping empty flushes and dead fields, and adding a daily-summary rollup — with zero change to any analytics total.
@@ -72,7 +79,7 @@
   - `planActivityWrite(normalized, when: Date, bucketMs?: number): { mode: 'legacy' } | { mode: 'merge', filter, inc } | { mode: 'bucket', filter, update, setOnInsert, bucketStart }`
   - `EDITOR_INC: string[]`, `TERMINAL_INC: string[]` (reused by `dailySummary.js`)
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `backend/tests/activityBucket.test.js`:
 
@@ -203,12 +210,12 @@ console.log(`\n${passed} passed, ${failed} failed\n`);
 process.exit(failed === 0 ? 0 : 1);
 ```
 
-- [ ] **Step 2: Run the test, verify it fails**
+- [x] **Step 2: Run the test, verify it fails**
 
 Run: `cd backend && node tests/activityBucket.test.js`
 Expected: FAIL — `Cannot find module '../services/activityBucket'`.
 
-- [ ] **Step 3: Create the service**
+- [x] **Step 3: Create the service**
 
 Create `backend/services/activityBucket.js`:
 
@@ -360,12 +367,12 @@ module.exports = {
 };
 ```
 
-- [ ] **Step 4: Run the test, verify it passes**
+- [x] **Step 4: Run the test, verify it passes**
 
 Run: `cd backend && node tests/activityBucket.test.js`
 Expected: PASS — all checks, `0 failed`.
 
-- [ ] **Step 5: Add the test to the backend test script**
+- [x] **Step 5: Add the test to the backend test script**
 
 In `backend/package.json`, change the `test` script from:
 ```
@@ -376,12 +383,12 @@ to:
 "test": "node tests/streak.test.js && node tests/ingest.test.js && node tests/metrics.test.js && node tests/authorization.test.js && node tests/routeGuards.test.js && node tests/passwordHash.test.js && node tests/activityBucket.test.js"
 ```
 
-- [ ] **Step 6: Run the full backend suite**
+- [x] **Step 6: Run the full backend suite**
 
 Run: `cd backend && npm test`
 Expected: every suite PASS.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add backend/services/activityBucket.js backend/tests/activityBucket.test.js backend/package.json
@@ -405,7 +412,7 @@ Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>"
 - Consumes: nothing
 - Produces: the `Activity` model with fields `bucketStart: Date`, `files: [String]`, `flushCount: Number (default 1)`; no `date` field; indexes `{userId:1,timestamp:-1}`, partial-unique `{userId:1,projectName:1,language:1,bucketStart:1}`, TTL on `{createdAt:1}` (400 days); no `{userId:1,date:-1}` index.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `backend/tests/activityModel.test.js`:
 
@@ -469,12 +476,12 @@ console.log(`\n${passed} passed, ${failed} failed\n`);
 process.exit(failed === 0 ? 0 : 1);
 ```
 
-- [ ] **Step 2: Run the test, verify it fails**
+- [x] **Step 2: Run the test, verify it fails**
 
 Run: `cd backend && node tests/activityModel.test.js`
 Expected: FAIL — `date` still present, `bucketStart` missing, etc.
 
-- [ ] **Step 3: Edit the schema**
+- [x] **Step 3: Edit the schema**
 
 In `backend/models/Activity.js`:
 
@@ -552,16 +559,16 @@ activitySchema.index({ createdAt: 1 }, { expireAfterSeconds: 60 * 60 * 24 * 400 
 ```
 (Keep the field-level `userId: { ..., index: true }`.)
 
-- [ ] **Step 4: Run the test, verify it passes**
+- [x] **Step 4: Run the test, verify it passes**
 
 Run: `cd backend && node tests/activityModel.test.js`
 Expected: PASS.
 
-- [ ] **Step 5: Stop the seed script writing `date`**
+- [x] **Step 5: Stop the seed script writing `date`**
 
 In `backend/scripts/seed-demo-insights.js`, delete the line `date: when,` (it sits next to `timestamp: when,` inside `buildActivity`'s returned object).
 
-- [ ] **Step 6: Write the migration script**
+- [x] **Step 6: Write the migration script**
 
 Create `backend/scripts/migrate-drop-date.js`:
 
@@ -608,21 +615,21 @@ const APPLY = process.argv.includes('--apply');
 })().catch((err) => { console.error('FAILED:', err.message); process.exit(1); });
 ```
 
-- [ ] **Step 7: Syntax-check the new files**
+- [x] **Step 7: Syntax-check the new files**
 
 Run: `cd backend && node --check scripts/migrate-drop-date.js && node --check models/Activity.js && node --check scripts/seed-demo-insights.js`
 Expected: no output (all OK).
 
-- [ ] **Step 8: Add the model test to the test script**
+- [x] **Step 8: Add the model test to the test script**
 
 In `backend/package.json` append ` && node tests/activityModel.test.js` to the `test` script.
 
-- [ ] **Step 9: Run the full backend suite**
+- [x] **Step 9: Run the full backend suite**
 
 Run: `cd backend && npm test`
 Expected: all PASS (note: `ingest.test.js` uses the normalizers, not the model — unaffected).
 
-- [ ] **Step 10: Commit**
+- [x] **Step 10: Commit**
 
 ```bash
 git add backend/models/Activity.js backend/tests/activityModel.test.js backend/scripts/migrate-drop-date.js backend/scripts/seed-demo-insights.js backend/package.json
@@ -644,7 +651,7 @@ Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>"
 - Consumes: `planActivityWrite`, `bucketStartFor` from `services/activityBucket.js` (Task 1)
 - Produces: `/track` and `/track/batch` that upsert 10-minute buckets; `ACTIVITY_BUCKET_MS=0` restores `Activity.create`. Re-exports `planActivityWrite`, `hasSignal`, `bucketStartFor` for tests.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `backend/tests/ingestWiring.test.js`:
 
@@ -693,12 +700,12 @@ console.log(`\n${passed} passed, ${failed} failed\n`);
 process.exit(failed === 0 ? 0 : 1);
 ```
 
-- [ ] **Step 2: Run the test, verify it fails**
+- [x] **Step 2: Run the test, verify it fails**
 
 Run: `cd backend && node tests/ingestWiring.test.js`
 Expected: FAIL — no `activityBucket` require, no `planActivityWrite`.
 
-- [ ] **Step 3: Rewrite the `/track` handler**
+- [x] **Step 3: Rewrite the `/track` handler**
 
 In `backend/routes/extension.js`:
 
@@ -826,17 +833,17 @@ module.exports.hasSignal = hasSignal;
 module.exports.bucketStartFor = bucketStartFor;
 ```
 
-- [ ] **Step 4: Run the wiring test, verify it passes**
+- [x] **Step 4: Run the wiring test, verify it passes**
 
 Run: `cd backend && node tests/ingestWiring.test.js`
 Expected: PASS.
 
-- [ ] **Step 5: Syntax-check and run the suite**
+- [x] **Step 5: Syntax-check and run the suite**
 
 Run: `cd backend && node --check routes/extension.js && npm test` (after appending ` && node tests/ingestWiring.test.js` to the `test` script in `backend/package.json`).
 Expected: all PASS. `routeGuards.test.js` still passes (`/track` keeps `verifyApiKey`).
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add backend/routes/extension.js backend/tests/ingestWiring.test.js backend/package.json
@@ -859,7 +866,7 @@ Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>"
 - Consumes: nothing new
 - Produces: `extension.ts` exports `payloadHasSignal(payload: any): boolean`; `flushIfNeeded` builds the payload and returns early (keeping the buffer) when a non-forced flush has no signal; `codetrackr.minFlushMinutes` default is `2`.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 In `extension/tests/activation.test.js`, add a new section before the final `await ext.deactivate();`:
 
@@ -894,12 +901,12 @@ And in the `manifest` section add:
   });
 ```
 
-- [ ] **Step 2: Build and run, verify it fails**
+- [x] **Step 2: Build and run, verify it fails**
 
 Run: `cd extension && npm run build && node tests/activation.test.js`
 Expected: FAIL — `ext.payloadHasSignal` is not a function; manifest default is `0.5`.
 
-- [ ] **Step 3: Add `payloadHasSignal` and the flush guard**
+- [x] **Step 3: Add `payloadHasSignal` and the flush guard**
 
 In `extension/src/extension.ts`:
 
@@ -993,7 +1000,7 @@ with:
 
 **3e.** `buildPayloadForTest` is unchanged (still returns the full payload).
 
-- [ ] **Step 4: Bump the config default and version**
+- [x] **Step 4: Bump the config default and version**
 
 In `extension/package.json`:
 - `"version": "2.2.0"` -> `"version": "2.3.0"`
@@ -1001,7 +1008,7 @@ In `extension/package.json`:
 
 In `extension/src/extension.ts` `getCfg()`: change the `minFlushMinutes` fallback from `: 0.5` to `: 2`.
 
-- [ ] **Step 5: Changelog**
+- [x] **Step 5: Changelog**
 
 In `extension/CHANGELOG.md`, add below the header:
 ```markdown
@@ -1021,12 +1028,12 @@ In `extension/CHANGELOG.md`, add below the header:
 
 ```
 
-- [ ] **Step 6: Build and run the tests**
+- [x] **Step 6: Build and run the tests**
 
 Run: `cd extension && npm run build && npm test`
 Expected: `trackers.test.js` and `activation.test.js` both PASS (activation now also checks `payloadHasSignal` and the manifest default).
 
-- [ ] **Step 7: Repackage the .vsix**
+- [x] **Step 7: Repackage the .vsix**
 
 Run: `cd extension && npm run package`
 Expected: `codetrackr-vscode-2.3.0.vsix` is written. Then:
@@ -1036,7 +1043,7 @@ git add extension/codetrackr-vscode-2.3.0.vsix
 ```
 If `npm run package` fails (vsce not installed / offline), instead run `git rm extension/codetrackr-vscode-2.2.0.vsix` and note in the commit body that the 2.3.0 `.vsix` is built at publish time.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add extension/src/extension.ts extension/package.json extension/CHANGELOG.md extension/tests/activation.test.js extension/dist/extension.js
@@ -1065,7 +1072,7 @@ Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>"
   - `DailySummary` model
   - `buildDaySummary(userId: string, day: string, docs: object[]): object` — a `DailySummary`-shaped plain object
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `backend/tests/rollup.test.js`:
 
@@ -1141,12 +1148,12 @@ console.log(`\n${passed} passed, ${failed} failed\n`);
 process.exit(failed === 0 ? 0 : 1);
 ```
 
-- [ ] **Step 2: Run, verify it fails**
+- [x] **Step 2: Run, verify it fails**
 
 Run: `cd backend && node tests/rollup.test.js`
 Expected: FAIL — `Cannot find module '../services/dailySummary'`.
 
-- [ ] **Step 3: Create the pure service**
+- [x] **Step 3: Create the pure service**
 
 Create `backend/services/dailySummary.js`:
 
@@ -1221,7 +1228,7 @@ function buildDaySummary(userId, day, docs) {
 module.exports = { buildDaySummary };
 ```
 
-- [ ] **Step 4: Create the model**
+- [x] **Step 4: Create the model**
 
 Create `backend/models/DailySummary.js`:
 
@@ -1256,16 +1263,16 @@ dailySummarySchema.index({ userId: 1, day: 1 }, { unique: true });
 module.exports = mongoose.models.DailySummary || mongoose.model('DailySummary', dailySummarySchema);
 ```
 
-- [ ] **Step 5: Run the test, verify it passes**
+- [x] **Step 5: Run the test, verify it passes**
 
 Run: `cd backend && node tests/rollup.test.js && node --check models/DailySummary.js`
 Expected: PASS; model checks OK.
 
-- [ ] **Step 6: Add to the test script + run the suite**
+- [x] **Step 6: Add to the test script + run the suite**
 
 Append ` && node tests/rollup.test.js` to `backend/package.json` `test`. Run `cd backend && npm test`. Expected: all PASS.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add backend/models/DailySummary.js backend/services/dailySummary.js backend/tests/rollup.test.js backend/package.json
@@ -1287,7 +1294,7 @@ Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>"
 - Consumes: `buildDaySummary` (Task 5), the `Activity` and `DailySummary` models
 - Produces: `rollupDaily({ apply, beforeDays, force }): Promise<{ scanned, wrote, days }>`; a CLI; a `cron.schedule('30 3 * * *', ...)` registered in `initScheduler()`
 
-- [ ] **Step 1: Write the orchestration service**
+- [x] **Step 1: Write the orchestration service**
 
 Create `backend/services/dailyRollup.js`:
 
@@ -1348,7 +1355,7 @@ async function rollupDaily({ apply = false, beforeDays = 2, force = false } = {}
 module.exports = { rollupDaily, utcDayKey };
 ```
 
-- [ ] **Step 2: Write the CLI**
+- [x] **Step 2: Write the CLI**
 
 Create `backend/scripts/rollup-daily.js`:
 
@@ -1385,7 +1392,7 @@ const BEFORE = beforeIdx !== -1 ? Number(args[beforeIdx + 1]) : 2;
 })().catch((err) => { console.error('FAILED:', err.message); process.exit(1); });
 ```
 
-- [ ] **Step 3: Register the nightly cron**
+- [x] **Step 3: Register the nightly cron**
 
 In `backend/services/notificationScheduler.js`:
 
@@ -1411,17 +1418,17 @@ const { rollupDaily } = require('./dailyRollup');
 module.exports = { initScheduler, checkUpcomingDeadlines, checkOverdueGoals, rollupDaily };
 ```
 
-- [ ] **Step 4: Syntax-check**
+- [x] **Step 4: Syntax-check**
 
 Run: `cd backend && node --check services/dailyRollup.js && node --check scripts/rollup-daily.js && node --check services/notificationScheduler.js`
 Expected: no output.
 
-- [ ] **Step 5: Run the full suite**
+- [x] **Step 5: Run the full suite**
 
 Run: `cd backend && npm test`
 Expected: all PASS (no test file imports the scheduler; `dailyRollup` is exercised only via the pure `buildDaySummary` in `rollup.test.js`).
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add backend/services/dailyRollup.js backend/scripts/rollup-daily.js backend/services/notificationScheduler.js
@@ -1443,7 +1450,7 @@ Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>"
 - Consumes: bucket docs carry `files: [String]` and `flushCount: Number` (Tasks 2-3)
 - Produces: `/timeslot` `fileCount` counts real files across bucketed + legacy docs; leaderboard "activity count" stays flush-based
 
-- [ ] **Step 1: Extend the wiring test**
+- [x] **Step 1: Extend the wiring test**
 
 In `backend/tests/ingestWiring.test.js`, add a section before the summary line:
 
@@ -1460,12 +1467,12 @@ check('leaderboard activityCount is flush-based via flushCount', () => {
 });
 ```
 
-- [ ] **Step 2: Run, verify it fails**
+- [x] **Step 2: Run, verify it fails**
 
 Run: `cd backend && node tests/ingestWiring.test.js`
 Expected: FAIL — the two new checks.
 
-- [ ] **Step 3: Fix `/timeslot` `fileCount`**
+- [x] **Step 3: Fix `/timeslot` `fileCount`**
 
 In `backend/routes/analytics.js`, in the `/timeslot/:userId` handler, replace:
 ```js
@@ -1481,7 +1488,7 @@ with:
         ).size;
 ```
 
-- [ ] **Step 4: Fix the leaderboard count**
+- [x] **Step 4: Fix the leaderboard count**
 
 In `backend/routes/leaderboard.js`, in the `$group` stage, replace:
 ```js
@@ -1492,12 +1499,12 @@ with:
                     activityCount: { $sum: { $ifNull: ["$flushCount", 1] } }
 ```
 
-- [ ] **Step 5: Run the tests**
+- [x] **Step 5: Run the tests**
 
 Run: `cd backend && node --check routes/analytics.js && node --check routes/leaderboard.js && npm test`
 Expected: all PASS. `streak.test.js` still passes (it extracts helper functions from `analytics.js`, unaffected by the `/timeslot` change).
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add backend/routes/analytics.js backend/routes/leaderboard.js backend/tests/ingestWiring.test.js
@@ -1522,7 +1529,7 @@ Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>"
 
 **Interfaces:** none (docs only)
 
-- [ ] **Step 1: `CODETRACKR_PROJECT_CONTEXT.md`**
+- [x] **Step 1: `CODETRACKR_PROJECT_CONTEXT.md`**
 
 - §7 (Database design): `activities` — one doc per **10-minute (userId, project, language) window** via atomic `$inc` upsert (`routes/extension.js` + `services/activityBucket.js`); `ACTIVITY_BUCKET_MS=0` restores per-flush inserts; legacy per-flush docs coexist. Analytics sub-documents are **sparse** (no `default: 0`; only non-zero leaves written). `date` field and `{userId:1,date:-1}` index **removed**. New: `bucketStart`, `files[]`, `flushCount`. New indexes `{userId:1,timestamp:-1}` and partial-unique `{userId:1,projectName:1,language:1,bucketStart:1}`; 400-day TTL on `createdAt`. New `dailysummaries` collection (nightly `scripts/rollup-daily.js` / `initScheduler` cron).
 - §8 (API): `POST /api/extension/track` now **upserts a 10-minute bucket** (201 with `bucket:{...}`), or 202 `{merged}` for a signal-less flush; `/track/batch` loops the same.
@@ -1530,11 +1537,11 @@ Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>"
 - §17 (Limitations): replace "one doc per flush ... unbounded growth" with the bucketed model; soften the idempotency line (a same-window retry now merges); add "all-time reads (leaderboard, `/summary`, `metrics >90d`) still scan raw `activities` — not yet repointed at `dailysummaries`; 400-day TTL is a safety net; tightening it + the cutover is the follow-up (bundled with `UserStats`)".
 - §19 (Status): add "DB write-reduction (#3/#2/#4/#6/#1) implemented 2026-09-08 on `feat/security-and-insights`."
 
-- [ ] **Step 2: `docs/IMPROVEMENT_PLAN.md`**
+- [x] **Step 2: `docs/IMPROVEMENT_PLAN.md`**
 
 Add a `Status` entry: "**Write-reduction batch (#3 bucket-on-write, #2 skip-empty, #4 sparse sub-docs + drop `date`, #6 DailySummary + 400d TTL, #1 minFlushMinutes 2): DONE 2026-09-08.** Verified by `activityBucket`, `activityModel`, `ingestWiring`, `rollup` test suites. **Follow-up:** tighten the TTL and repoint the all-time reads (`/leaderboard`, `/api/analytics/summary`, `/api/metrics` beyond 90d) at `dailysummaries` — bundle with the `UserStats` rollup (Quick Wins #9)."
 
-- [ ] **Step 3: `docs/interview-preparation/CodeTrackr_DB_Write_Reduction.md`**
+- [x] **Step 3: `docs/interview-preparation/CodeTrackr_DB_Write_Reduction.md`**
 
 Add a banner right after the title:
 ```markdown
@@ -1544,13 +1551,13 @@ Add a banner right after the title:
 > repoint the all-time reads at `dailysummaries` (with `UserStats`).
 ```
 
-- [ ] **Step 4: The three interview docs**
+- [x] **Step 4: The three interview docs**
 
 - `CodeTrackr_Interview_Preparation.md`: find each "one Activity document per flush" / "one doc per flush" (sections around D1, the extension section, limitations, code-level) and change to "one document per 10-minute (user, project, language) window — the extension flushes counters, the backend `$inc`-upserts the bucket". Keep the correctness note ("`duration` is real seconds, never the bucket width").
 - `CodeTrackr_Interview_Cheat_Sheet.md`: "Data flow" and "Database" one-pagers — "one `Activity` doc per flush" -> "one doc per 10-min window (atomic `$inc` upsert)"; add a line to "Things NOT to claim": "the write path now buckets — say 10-minute `$inc` upsert, not append-only per-flush".
 - `CodeTrackr_Architecture.md`: the ingest data-flow block — the step "→ Activity doc (1 per flush)" becomes "→ `$inc` upsert into the 10-min bucket doc".
 
-- [ ] **Step 5: `docs/SESSION-LOG-2026-08-27.md`**
+- [x] **Step 5: `docs/SESSION-LOG-2026-08-27.md`**
 
 Append:
 ```markdown
@@ -1578,12 +1585,12 @@ only time-of-day resolution drops to the 10-minute grid.
 then optionally `node backend/scripts/rollup-daily.js --apply`.
 ```
 
-- [ ] **Step 6: memory pointer**
+- [x] **Step 6: memory pointer**
 
 In `memory/codetrackr-overview.md`, add one bullet under the findings:
 "- **Write path buckets (2026-09-08):** `/track` `$inc`-upserts a 10-minute `(user, project, language)` document; `date` field/index dropped; extension 2.3.0 skips empty flushes; `DailySummary` rollup + 400d TTL. `ACTIVITY_BUCKET_MS=0` = legacy per-flush. Follow-up: repoint all-time reads at `dailysummaries`."
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add CODETRACKR_PROJECT_CONTEXT.md docs/IMPROVEMENT_PLAN.md docs/interview-preparation/ docs/SESSION-LOG-2026-08-27.md
@@ -1600,17 +1607,17 @@ Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>"
 **Files:**
 - Modify: `docs/superpowers/plans/2026-09-08-db-write-reduction.md` (check the boxes)
 
-- [ ] **Step 1: Full backend suite**
+- [x] **Step 1: Full backend suite**
 
 Run: `cd backend && npm test`
 Expected: 10 suites PASS — `streak`, `ingest`, `metrics`, `authorization`, `routeGuards`, `passwordHash`, `activityBucket`, `activityModel`, `ingestWiring`, `rollup`.
 
-- [ ] **Step 2: Full extension suite**
+- [x] **Step 2: Full extension suite**
 
 Run: `cd extension && npm run build && npm test`
 Expected: `trackers` + `activation` PASS.
 
-- [ ] **Step 3: Syntax-check every changed backend file**
+- [x] **Step 3: Syntax-check every changed backend file**
 
 Run:
 ```bash
@@ -1618,12 +1625,12 @@ cd backend && for f in models/Activity.js models/DailySummary.js routes/extensio
 ```
 Expected: no `FAIL` lines.
 
-- [ ] **Step 4: Dry-run the two scripts (needs `MONGO_URI`)**
+- [x] **Step 4: Dry-run the two scripts (needs `MONGO_URI`)**
 
 Run: `cd backend && node scripts/migrate-drop-date.js` and `node scripts/rollup-daily.js`
 Expected: both print a sane plan and exit 0 without writing. If no DB is available, note this as "verified by code review only" (matches the repo's existing posture — see `SESSION-LOG` §3).
 
-- [ ] **Step 5: Hand-trace the correctness invariant**
+- [x] **Step 5: Hand-trace the correctness invariant**
 
 In a node REPL in `backend/`:
 ```js
@@ -1638,12 +1645,12 @@ console.log(p1.update.$inc.duration, p2.update.$inc.duration, p1.setOnInsert.buc
 // -> two flushes, same bucket, $inc sums to 105 (NOT 1200). bucketStart is the window start.
 ```
 
-- [ ] **Step 6: Confirm no stray production read of `date`**
+- [x] **Step 6: Confirm no stray production read of `date`**
 
 Run: `cd backend && grep -rn "\.date\b\|'date'\|\"date\"" routes/ services/ | grep -v "\$dateToString\|toISOString"`
 Expected: no matches in `routes/` or `services/` (dev scripts under `scripts/`, `tools/` are out of scope).
 
-- [ ] **Step 7: Tick every checkbox in this plan and commit**
+- [x] **Step 7: Tick every checkbox in this plan and commit**
 
 ```bash
 git add docs/superpowers/plans/2026-09-08-db-write-reduction.md
