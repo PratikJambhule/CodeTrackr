@@ -1,6 +1,7 @@
 const cron = require('node-cron');
 const Goal = require('../models/Goal');
 const Notification = require('../models/Notification');
+const { rollupDaily } = require('./dailyRollup');
 
 // Run every hour to check for goals with deadlines in 6 hours
 const checkUpcomingDeadlines = async () => {
@@ -94,6 +95,15 @@ const initScheduler = () => {
     checkOverdueGoals();
   });
 
+  // Daily rollup of raw activity into DailySummary. Inherits the same
+  // serverless caveat as the hourly job (see IMPROVEMENT_PLAN.md H-13).
+  cron.schedule('30 3 * * *', () => {
+    console.log('🗓️  Running daily activity rollup...');
+    rollupDaily({ apply: true, beforeDays: 2 })
+      .then((r) => console.log(`✅ Rollup wrote ${r.wrote} daily summaries`))
+      .catch((err) => console.error('Daily rollup failed:', err.message));
+  });
+
   // Run immediately on startup
   checkUpcomingDeadlines();
   checkOverdueGoals();
@@ -101,4 +111,4 @@ const initScheduler = () => {
   console.log('✅ Goal deadline scheduler initialized');
 };
 
-module.exports = { initScheduler, checkUpcomingDeadlines, checkOverdueGoals };
+module.exports = { initScheduler, checkUpcomingDeadlines, checkOverdueGoals, rollupDaily };
