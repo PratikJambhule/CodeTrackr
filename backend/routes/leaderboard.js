@@ -30,7 +30,9 @@ router.get('/', isAuthenticated, async (req, res) => {
                     totalLinesAdded: { $sum: "$linesAdded" },
                     totalLinesRemoved: { $sum: "$linesRemoved" },
                     projects: { $addToSet: "$projectName" },
-                    activityCount: { $sum: 1 }
+                    // Bucketed docs record how many flushes merged in; legacy
+                    // per-flush docs count as one.
+                    activityCount: { $sum: { $ifNull: ["$flushCount", 1] } }
                 }
             },
             {

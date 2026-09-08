@@ -598,7 +598,15 @@ router.get('/timeslot/:userId', isAuthenticated, async (req, res) => {
         // Calculate statistics
         const totalMinutes = activities.reduce((sum, a) => sum + (a.duration / 60), 0);
         const totalLines = activities.reduce((sum, a) => sum + (a.linesAdded || 0) + (a.linesRemoved || 0), 0);
-        const fileCount = new Set(activities.map(a => a.fileName)).size;
+        // Bucketed docs carry a de-duplicated `files` array; legacy per-flush
+        // docs carry a single `fileName`. Count real files across both.
+        const fileCount = new Set(
+            activities.flatMap(a =>
+                (Array.isArray(a.files) && a.files.length)
+                    ? a.files
+                    : (a.fileName ? [a.fileName] : [])
+            )
+        ).size;
         const productivity = activities.length > 0 ? Math.min(100, Math.round((totalLines / activities.length) * 2)) : 0;
 
         const terminalSummary = buildTerminalSummary(activities);

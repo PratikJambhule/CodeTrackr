@@ -7,6 +7,76 @@ const {
     normalizeFocusAnalytics,
     normalizeGitAnalytics
 } = require('../services/activityNormalizers');
+const {
+    planActivityWrite,
+    hasSignal,
+    bucketStartFor
+} = require('../services/activityBucket');
+
+// Default: merge flushes into 10-minute buckets. Set ACTIVITY_BUCKET_MS=0 to
+// fall back to one document per flush (Activity.create), byte-for-byte as before.
+const ACTIVITY_BUCKET_MS = Number(
+    process.env.ACTIVITY_BUCKET_MS !== undefined ? process.env.ACTIVITY_BUCKET_MS : 600000
+);
+
+/**
+ * Persist one already-normalised flush. Returns { status, body }.
+ * Shared by /track and /track/batch.
+ */
+async function persistFlush(normalized, when) {
+    const plan = planActivityWrite(normalized, when, ACTIVITY_BUCKET_MS);
+
+    if (plan.mode === 'legacy') {
+        const activity = await Activity.create({ ...normalized, timestamp: when });
+        return {
+            status: 201,
+            body: {
+                success: true,
+                message: 'Activity tracked successfully',
+                activity: {
+                    id: activity._id,
+                    fileName: activity.fileName,
+                    language: activity.language,
+                    duration: activity.duration,
+                    timestamp: activity.timestamp
+                }
+            }
+        };
+    }
+
+    if (plan.mode === 'merge') {
+        const r = await Activity.updateOne(plan.filter, { $inc: plan.inc }, { upsert: false });
+        return { status: 202, body: { success: true, merged: r.matchedCount > 0 } };
+    }
+
+    // plan.mode === 'bucket'
+    const withInsert = { ...plan.update, $setOnInsert: plan.setOnInsert };
+    let doc;
+    try {
+        doc = await Activity.findOneAndUpdate(plan.filter, withInsert, {
+            upsert: true, new: true, setDefaultsOnInsert: false
+        });
+    } catch (err) {
+        if (err && err.code === 11000) {
+            doc = await Activity.findOneAndUpdate(plan.filter, plan.update, { new: true });
+        } else {
+            throw err;
+        }
+    }
+    return {
+        status: 201,
+        body: {
+            success: true,
+            message: 'Activity bucketed',
+            bucket: {
+                id: doc._id,
+                bucketStart: plan.bucketStart,
+                duration: doc.duration,
+                flushCount: doc.flushCount
+            }
+        }
+    };
+}
 
 function normalizeTerminalAnalytics(body) {
     const source = body?.terminalAnalytics || body?.analysis || body || {};
@@ -87,13 +157,13 @@ router.post('/track', verifyApiKey, async (req, res) => {
             });
         }
 
-        // Derive one instant for both timestamp and date so backdated/queued
+        // The flush covers an interval that started `duration` seconds ago; the
+        // extension stamps `timestamp` with that start so backdated/queued
         // activity is filed under the day it actually happened.
         const parsedTimestamp = timestamp ? new Date(timestamp) : new Date();
         const when = isNaN(parsedTimestamp.getTime()) ? new Date() : parsedTimestamp;
 
-        // Create new activity record
-        const activity = await Activity.create({
+        const normalized = {
             userId: req.user._id.toString(),
             fileName,
             fileType: fileType || 'unknown',
@@ -105,22 +175,11 @@ router.post('/track', verifyApiKey, async (req, res) => {
             terminalAnalytics: terminalPayload,
             editorAnalytics: normalizeEditorAnalytics(req.body),
             focusAnalytics: normalizeFocusAnalytics(req.body),
-            gitAnalytics: normalizeGitAnalytics(req.body),
-            timestamp: when,
-            date: when
-        });
+            gitAnalytics: normalizeGitAnalytics(req.body)
+        };
 
-        res.status(201).json({
-            success: true,
-            message: 'Activity tracked successfully',
-            activity: {
-                id: activity._id,
-                fileName: activity.fileName,
-                language: activity.language,
-                duration: activity.duration,
-                timestamp: activity.timestamp
-            }
-        });
+        const { status, body } = await persistFlush(normalized, when);
+        res.status(status).json(body);
     } catch (error) {
         console.error('Track activity error:', error);
         res.status(500).json({
@@ -143,35 +202,35 @@ router.post('/track/batch', verifyApiKey, async (req, res) => {
             });
         }
 
-        // Validate and prepare activities
-        const preparedActivities = activities.map(activity => {
-          const parsed = activity.timestamp ? new Date(activity.timestamp) : new Date();
-          const when = isNaN(parsed.getTime()) ? new Date() : parsed;
-          return {
-            userId: req.user._id,
-            fileName: activity.fileName,
-            fileType: activity.fileType || 'unknown',
-            projectName: activity.projectName || 'Unknown Project',
-            language: activity.language,
-            duration: Number(activity.duration),
-            linesAdded: Number(activity.linesAdded) || 0,
-            linesRemoved: Number(activity.linesRemoved) || 0,
-            terminalAnalytics: normalizeTerminalAnalytics(activity),
-            editorAnalytics: normalizeEditorAnalytics(activity),
-            focusAnalytics: normalizeFocusAnalytics(activity),
-            gitAnalytics: normalizeGitAnalytics(activity),
-            timestamp: when,
-            date: when
-          };
-        });
-
-        // Insert all activities
-        const insertedActivities = await Activity.insertMany(preparedActivities);
+        // Persist each activity through the same bucketing path as /track.
+        // (The shipped extension never calls this endpoint — a simple loop
+        // stays obviously correct.)
+        let processed = 0;
+        for (const activity of activities) {
+            const parsed = activity.timestamp ? new Date(activity.timestamp) : new Date();
+            const when = isNaN(parsed.getTime()) ? new Date() : parsed;
+            const normalized = {
+                userId: req.user._id.toString(),
+                fileName: activity.fileName,
+                fileType: activity.fileType || 'unknown',
+                projectName: activity.projectName || 'Unknown Project',
+                language: activity.language,
+                duration: Number(activity.duration),
+                linesAdded: Number(activity.linesAdded) || 0,
+                linesRemoved: Number(activity.linesRemoved) || 0,
+                terminalAnalytics: normalizeTerminalAnalytics(activity),
+                editorAnalytics: normalizeEditorAnalytics(activity),
+                focusAnalytics: normalizeFocusAnalytics(activity),
+                gitAnalytics: normalizeGitAnalytics(activity)
+            };
+            await persistFlush(normalized, when);
+            processed += 1;
+        }
 
         res.status(201).json({
             success: true,
-            message: `${insertedActivities.length} activities tracked successfully`,
-            count: insertedActivities.length
+            message: `${processed} activities processed successfully`,
+            count: processed
         });
     } catch (error) {
         console.error('Batch track activity error:', error);
@@ -197,3 +256,6 @@ router.get('/verify', verifyApiKey, async (req, res) => {
 });
 
 module.exports = router;
+module.exports.planActivityWrite = planActivityWrite;
+module.exports.hasSignal = hasSignal;
+module.exports.bucketStartFor = bucketStartFor;
