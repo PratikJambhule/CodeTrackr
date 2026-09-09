@@ -249,8 +249,11 @@ router.post('/:groupId/join', isAuthenticated, async (req, res) => {
             group: safeJoined
         });
     } catch (error) {
+        if (error && error.code === 11000) {
+            return res.status(409).json({ message: 'You are already a member of this group' });
+        }
         console.error('Error joining group:', error);
-        res.status(500).json({ message: 'Error joining group', error: error.message });
+        return res.status(500).json({ message: 'Error joining group' });
     }
 });
 

@@ -154,6 +154,7 @@ is added (this closes Quick-Wins #5). Live migration: `node backend/scripts/migr
 - **M-11. Dashboard fires 3 requests on mount, one redundant** (`useEffect([])` + `useEffect([viewMode])` both call `fetchAnalytics`). `frontend/src/pages/Dashboard.tsx:37-49`.
 - **M-13. The frontend does not typecheck.** 29 pre-existing errors mean `npm run build` fails at the `tsc -b` stage. Mostly unused imports and variables; two are real type errors (`Type string is not assignable to never` in `Dashboard.tsx:847` and `Goals.tsx:332`). Note `@tanstack/react-query` is already a dependency but unused, which would also address M-12.
 - **M-12. No client-side caching or request dedup.** Every navigation refetches with `cache:'no-cache'`. React Query (or a small SWR-style hook) would remove most of the traffic.
+- **M-14. ✅ FIXED 2026-09-09.** A duplicate group join (double-click / race) returned 500. The `groupmembers` unique compound index throws `11000`; the `/:groupId/join` handler now maps that to `409 Conflict` and no longer echoes `error.message`. Verified by `tests/quickWins.test.js`.
 
 ---
 

@@ -171,7 +171,7 @@ was on a different field, `date`. I added `{ userId: 1, timestamp: -1 }` — I c
 
 ---
 
-## 6. Return 409, not 500, on a duplicate group join 🟢
+## 6. Return 409, not 500, on a duplicate group join 🟢 — ✅ DONE 2026-09-09
 
 **The flaw:** the `groupmembers` collection has a unique compound index on
 `{groupId, userId}`. When two joins race (or someone double-clicks), the second write throws
