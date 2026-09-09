@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { Users, Plus, UserPlus } from 'lucide-react';
 import { API_URL } from '../config';
 
-export default function Teams({ user }: { user: any }) {
+export default function Teams() {
   const [teams, setTeams] = useState([]);
   const [showModal, setShowModal] = useState(false);
   const [teamName, setTeamName] = useState('');

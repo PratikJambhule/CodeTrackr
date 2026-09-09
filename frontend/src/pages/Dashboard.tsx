@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { BarChart3, Clock, Code, TrendingUp, Calendar, ArrowLeft, Terminal, CheckCircle, XCircle, Hammer, GitBranch, Timer } from 'lucide-react';
+import { BarChart3, Clock, Code, TrendingUp, ArrowLeft, Terminal, CheckCircle, XCircle, Hammer, GitBranch, Timer } from 'lucide-react';
 import { Chart as ChartJS, CategoryScale, LinearScale, BarElement, LineElement, PointElement, Title, Tooltip, Legend, ArcElement } from 'chart.js';
 import ChartDataLabels from 'chartjs-plugin-datalabels';
 import { Line, Pie, Bar } from 'react-chartjs-2';
@@ -19,20 +19,6 @@ export default function Dashboard({ user }: { user: any }) {
   const [selectedTimeSlot, setSelectedTimeSlot] = useState<{ start: number, end: number } | null>(null);
   const [timeSlotData, setTimeSlotData] = useState<any>(null);
 
-  const formatRelativeTime = (isoString?: string | null) => {
-    if (!isoString) return null;
-    const timestamp = new Date(isoString).getTime();
-    if (Number.isNaN(timestamp)) return null;
-    const now = Date.now();
-    const diffMs = Math.max(0, now - timestamp);
-    const diffMinutes = Math.floor(diffMs / 60000);
-    if (diffMinutes < 1) return 'just now';
-    if (diffMinutes < 60) return `${diffMinutes} minutes ago`;
-    const diffHours = Math.floor(diffMinutes / 60);
-    if (diffHours < 24) return `${diffHours} hours ago`;
-    const diffDays = Math.floor(diffHours / 24);
-    return `${diffDays} days ago`;
-  };
 
   useEffect(() => {
     fetchAnalytics();

@@ -40,7 +40,7 @@ interface GroupDetails {
   leaderboard: LeaderboardEntry[];
 }
 
-export default function Groups({ user }: { user: any }) {
+export default function Groups(_props: { user?: unknown }) {
   const { theme } = useTheme();
   const [activeTab, setActiveTab] = useState<'my-groups' | 'discover'>('my-groups');
   const [myGroups, setMyGroups] = useState<Group[]>([]);
@@ -138,7 +138,7 @@ export default function Groups({ user }: { user: any }) {
       });
 
       if (res.ok) {
-        const data = await res.json();
+        await res.json();
         alert('Group created successfully!');
         setShowCreateModal(false);
         setGroupName('');

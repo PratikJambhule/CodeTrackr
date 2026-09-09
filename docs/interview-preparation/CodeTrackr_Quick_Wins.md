@@ -28,7 +28,7 @@ central error handler → `timestamp` index → real data in the "Repeated Failu
 
 # Tier 1 — Do these first (fix something broken, ~1 hr each, near-zero risk)
 
-## 1. Make the frontend actually build 🟡
+## 1. Make the frontend actually build 🟡 — ✅ DONE 2026-09-09
 
 **The flaw:** `npm run build` runs `tsc -b && vite build` and **fails** — `tsc -b` reports
 29 pre-existing TypeScript errors (mostly unused imports/variables; 2 real

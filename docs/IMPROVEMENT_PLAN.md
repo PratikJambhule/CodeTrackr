@@ -46,12 +46,12 @@ rather than bcrypt — no native dependency, which keeps the Vercel build simple
 tests run without `npm install`. Legacy plaintext passwords still verify and are upgraded to a
 hash on the next successful join. A new `/insights` page surfaces the five Phase A metrics.
 
-**New finding — the frontend does not compile.** `npm run build` runs `tsc -b && vite build`,
-and `tsc -b` reports **29 pre-existing TypeScript errors** (16 in `Goals.tsx`, 5 in
-`TextType.tsx`, 3 each in `Groups.tsx`/`Dashboard.tsx`, 1 each in `Teams.tsx`/`Profile.tsx`).
-These predate all work in this session — the new `Insights.tsx` and the `App.tsx` edits add
-zero errors. Mostly unused imports/variables plus two `Type string is not assignable to never`
-issues. Worth fixing before the next frontend deploy. Filed as **M-13**.
+**Frontend build — ✅ FIXED 2026-09-09 (M-13).** `npm run build` (`tsc -b && vite build`) had
+**29 pre-existing TypeScript errors** (16 in `Goals.tsx`, 5 in `TextType.tsx`, 3 each in
+`Groups.tsx`/`Dashboard.tsx`, 1 each in `Teams.tsx`/`Profile.tsx`). All resolved: dead
+imports/vars removed, `TextType.tsx` given a `TextTypeProps` interface (which also fixed the 4
+`string`→`never` errors in the pages that pass `textColors`), and the half-built `Goals.tsx`
+to-do scaffolding removed. `npm run build` is green; CI (#2) keeps it that way.
 
 **A backfill is still outstanding for H-5:** rows written before this fix have `date` set to
 their ingest day. Recompute with `date = timestamp` before anything starts trusting `date`.
@@ -152,7 +152,7 @@ is added (this closes Quick-Wins #5). Live migration: `node backend/scripts/migr
 - **M-9. ✅ FIXED 2026-09-09.** `JWT_SECRET` had a literal fallback `'your_jwt_secret'` in `routes/auth.js` (×2) and `middleware/auth.js`. The fallbacks are gone and `app.js` throws at boot if `JWT_SECRET` is unset — a fail-fast beats a silently forgeable token. Verified by `tests/quickWins.test.js`.
 - **M-10. No error-handling middleware.** Every route try/catches and echoes `error.message` to the client, leaking internals. Add a central error handler.
 - **M-11. Dashboard fires 3 requests on mount, one redundant** (`useEffect([])` + `useEffect([viewMode])` both call `fetchAnalytics`). `frontend/src/pages/Dashboard.tsx:37-49`.
-- **M-13. The frontend does not typecheck.** 29 pre-existing errors mean `npm run build` fails at the `tsc -b` stage. Mostly unused imports and variables; two are real type errors (`Type string is not assignable to never` in `Dashboard.tsx:847` and `Goals.tsx:332`). Note `@tanstack/react-query` is already a dependency but unused, which would also address M-12.
+- **M-13. ✅ FIXED 2026-09-09.** 29 `tsc -b` errors resolved: 20 dead imports/vars, plus 5 implicit-`any` props in the decorative `TextType.tsx` — typing its props (`TextTypeProps`) also fixed the 4 `Type string is not assignable to never` errors in `Dashboard`/`Goals`/`Groups`/`Profile` (all were `textColors={[...]}` on `<TextType>`). The half-built to-do scaffolding in `Goals.tsx` was removed (coordinated with deferred #14 — restore from git if reprioritised). `npm run build` is green; CI (#2) enforces it. `@tanstack/react-query` is still a dependency but unused (M-12).
 - **M-12. No client-side caching or request dedup.** Every navigation refetches with `cache:'no-cache'`. React Query (or a small SWR-style hook) would remove most of the traffic.
 - **M-14. ✅ FIXED 2026-09-09.** A duplicate group join (double-click / race) returned 500. The `groupmembers` unique compound index throws `11000`; the `/:groupId/join` handler now maps that to `409 Conflict` and no longer echoes `error.message`. Verified by `tests/quickWins.test.js`.
 - **M-15. ✅ FIXED 2026-09-09.** `Dashboard.tsx` rendered a hardcoded `repeatedFailuresDaily/Weekly` mock instead of the real `terminalSummary.repeatedFailedCommands` (which the backend already computed and returned). The panel is now wired to the real data with an empty state.

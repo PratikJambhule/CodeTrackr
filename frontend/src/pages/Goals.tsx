@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Target, ChevronLeft, ChevronRight, X, Plus, CheckCircle, Circle, Trash2 } from 'lucide-react';
+import { Target, ChevronLeft, ChevronRight, X } from 'lucide-react';
 import { useTheme } from '../contexts/ThemeContext';
 import GradientText from '../components/GradientText';
 import TextType from '../components/TextType';
@@ -27,9 +27,6 @@ export default function Goals() {
   const [currentDate, setCurrentDate] = useState(new Date());
   const [selectedDate, setSelectedDate] = useState<Date | null>(null);
   const [showModal, setShowModal] = useState(false);
-  const [showTodoModal, setShowTodoModal] = useState(false);
-  const [selectedGoal, setSelectedGoal] = useState<Goal | null>(null);
-  const [newTodoText, setNewTodoText] = useState('');
   const [formData, setFormData] = useState({
     title: '',
     description: '',
@@ -76,59 +73,6 @@ export default function Goals() {
     }
   };
 
-  // Todo management functions
-  const addTodo = (goalId: string, todoText: string) => {
-    if (!todoText.trim()) return;
-    
-    const newTodo: Todo = {
-      id: Date.now().toString(),
-      text: todoText,
-      completed: false
-    };
-
-    setGoals(goals.map(goal => {
-      if (goal._id === goalId) {
-        return {
-          ...goal,
-          todos: [...(goal.todos || []), newTodo]
-        };
-      }
-      return goal;
-    }));
-    setNewTodoText('');
-  };
-
-  const toggleTodo = (goalId: string, todoId: string) => {
-    setGoals(goals.map(goal => {
-      if (goal._id === goalId) {
-        return {
-          ...goal,
-          todos: (goal.todos || []).map(todo =>
-            todo.id === todoId ? { ...todo, completed: !todo.completed } : todo
-          )
-        };
-      }
-      return goal;
-    }));
-  };
-
-  const deleteTodo = (goalId: string, todoId: string) => {
-    setGoals(goals.map(goal => {
-      if (goal._id === goalId) {
-        return {
-          ...goal,
-          todos: (goal.todos || []).filter(todo => todo.id !== todoId)
-        };
-      }
-      return goal;
-    }));
-  };
-
-  const openTodoModal = (date: Date) => {
-    setSelectedDate(date);
-    setShowTodoModal(true);
-  };
-
   // Calendar logic
   const getDaysInMonth = (date: Date) => {
     const year = date.getFullYear();
@@ -158,16 +102,6 @@ export default function Goals() {
     setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 1));
   };
 
-  const handleDateClick = (day: number) => {
-    const clickedDate = new Date(currentDate.getFullYear(), currentDate.getMonth(), day);
-    setSelectedDate(clickedDate);
-    setFormData({
-      ...formData,
-      deadline: clickedDate.toISOString().split('T')[0]
-    });
-    setShowModal(true);
-  };
-
   const getGoalsForDate = (day: number) => {
     const dateStr = new Date(currentDate.getFullYear(), currentDate.getMonth(), day).toISOString().split('T')[0];
     return goals.filter(goal => goal.deadline.startsWith(dateStr));
@@ -187,53 +121,6 @@ export default function Goals() {
     today.setHours(0, 0, 0, 0);
     const dateToCheck = new Date(currentDate.getFullYear(), currentDate.getMonth(), day);
     return dateToCheck < today;
-  };
-
-  // Get colorful emoji icon for each date based on month
-  const getDateIcon = (day: number, month: number) => {
-    const emojiStyle = "text-3xl opacity-25";
-    
-    // Month-based colorful emojis
-    const monthIcons: { [key: number]: string[] } = {
-      0: ['❄️', '⛄', '🌨️', '⭐', '🌙', '✨'], // January - Winter
-      1: ['💝', '💖', '💗', '🎁', '💐', '🌹'], // February - Love
-      2: ['🍀', '🌱', '🌷', '🌸', '☘️', '🦋'], // March - Spring
-      3: ['🌧️', '☔', '🌈', '🌺', '🌻', '🌼'], // April - Showers
-      4: ['🌸', '🌺', '🌻', '🌼', '🌷', '🦋'], // May - Flowers
-      5: ['☀️', '🌞', '🏖️', '🍹', '⛱️', '🌊'], // June - Summer
-      6: ['🔥', '☀️', '🌴', '🍉', '🏄', '🌅'], // July - Hot Summer
-      7: ['🌟', '⚡', '🎆', '🏆', '🎯', '💫'], // August - Achievement
-      8: ['🍂', '🍁', '🎃', '☕', '📚', '🌾'], // September - Autumn
-      9: ['🍁', '🎃', '👻', '🌙', '🦇', '🕷️'], // October - Halloween
-      10: ['🍂', '🦃', '🥧', '🌰', '☕', '📅'], // November - Thanksgiving
-      11: ['🎄', '🎅', '🎁', '⛄', '🌟', '❄️']  // December - Christmas
-    };
-
-    const icons = monthIcons[month] || ['📅', '⭐', '✨'];
-    const icon = icons[day % icons.length];
-    
-    return (
-      <span className={emojiStyle}>
-        {icon}
-      </span>
-    );
-  };
-
-  // Get unique color for each date
-  const getDateColor = (day: number) => {
-    const colors = [
-      'from-blue-500/10 to-cyan-500/10',
-      'from-purple-500/10 to-pink-500/10',
-      'from-green-500/10 to-emerald-500/10',
-      'from-orange-500/10 to-red-500/10',
-      'from-indigo-500/10 to-purple-500/10',
-      'from-teal-500/10 to-blue-500/10',
-      'from-rose-500/10 to-pink-500/10',
-      'from-amber-500/10 to-orange-500/10',
-      'from-lime-500/10 to-green-500/10',
-      'from-violet-500/10 to-purple-500/10',
-    ];
-    return colors[day % colors.length];
   };
 
   // Generate calendar grid
