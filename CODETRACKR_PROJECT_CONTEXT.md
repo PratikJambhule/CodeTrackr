@@ -94,7 +94,7 @@ workspace; each is installed and deployed independently.
 | Layer | Stack |
 |---|---|
 | Extension | TypeScript 5, esbuild (CJS bundle, `--external:vscode`), `@vscode/vsce`, axios; `@types/vscode ^1.85` |
-| Backend | Node 18, Express **5**, Mongoose **8**, jsonwebtoken, passport + passport-google-oauth20, cookie-parser, cors, dotenv, node-cron, serverless-http. **helmet, express-rate-limit, express-validator are installed but NOT wired in** (M‑3/M‑4). `three`/`postprocessing` in backend deps are spurious. |
+| Backend | Node 18, Express **5**, Mongoose **8**, jsonwebtoken, passport + passport-google-oauth20, cookie-parser, cors, dotenv, node-cron, serverless-http. **`helmet` + `express-rate-limit` wired 2026-09-09** on `/auth` + `/api/extension` (M‑3); `express-validator` still unused (M‑4). `three`/`postprocessing` in backend deps are spurious. |
 | Database | MongoDB Atlas (connection via `MONGO_URI`) |
 | Frontend | React **19**, Vite **7**, TypeScript ~5.9, Tailwind **3**, react-router-dom **7**, chart.js 4 + react-chartjs-2 + chartjs-plugin-datalabels, lucide-react, gsap, three/ogl/postprocessing (decorative visuals). **`@tanstack/react-query` is a dependency but unused.** |
 | Auth | Google OAuth 2.0 → JWT in httpOnly cookie (web); random API key in `x-api-key` header (extension) |
@@ -172,7 +172,7 @@ ingest tokens, or OAuth device flow).
 
 1. `GET /auth/google` → `passport.authenticate('google', { scope:['profile','email'], session:false })`.
 2. `GET /auth/google/callback` → on success, sign a JWT `{ id, name, email, isFirstLogin }`
-   with `process.env.JWT_SECRET || 'your_jwt_secret'` (**hardcoded fallback — M‑9**),
+   with `process.env.JWT_SECRET` (**required at boot — M‑9 fixed 2026-09-09**),
    `expiresIn: '1d'`. Set cookie `token` (`httpOnly`; `secure`+`sameSite:'none'` in production,
    else `lax`). Redirect to `/onboarding` or `/dashboard` on the frontend.
 3. Protected API routes: `isAuthenticated` reads `req.cookies.token`, `jwt.verify`,
@@ -215,7 +215,7 @@ The old `{ userId:1, date:-1 }` index and the `date` field were **removed** —
 
 - No transactions anywhere. Bucket ingest is an atomic `findOneAndUpdate` with `$inc`
   (race-safe); `ACTIVITY_BUCKET_MS=0` falls back to a single `Activity.create`.
-- `groupmembers` unique compound index is a hard concurrency guard (double-join → duplicate-key error, currently surfaced as a 500). The new partial-unique `activities` bucket index is another.
+- `groupmembers` unique compound index is a hard concurrency guard (double-join → duplicate-key error, surfaced as a 409 as of 2026-09-09). The new partial-unique `activities` bucket index is another.
 - `Team.members.push` + `save()` is read-modify-write — lost-update possible under concurrent adds.
 - `leaderboard` / group leaderboard recompute from scratch per request — always consistent, never cached.
 
@@ -370,8 +370,7 @@ scale. Group leaderboard (`/api/groups/:id/details`) is the same pattern scoped 
 - **Auth to API:** every `fetch` uses `credentials:'include'` to send the JWT cookie.
 - **Charts:** chart.js + react-chartjs-2 (Line/Pie/Bar) in Dashboard; Insights is plain cards.
 - **Known frontend issues:**
-  - `Dashboard.tsx` "Repeated Failures" panel renders **hardcoded mock arrays**
-    (`repeatedFailuresDaily/Weekly`), not the real `terminalSummary.repeatedFailedCommands`.
+  - `Dashboard.tsx` "Repeated Failures" panel — ✅ **wired to the real `terminalSummary.repeatedFailedCommands` (2026-09-09)**; was hardcoded mock arrays.
   - `Goals.tsx` to-do items are **client-state only** — never persisted; no goal
     complete/delete/progress UI; the `/:goalId/progress` endpoint is never called.
   - `npm run build` **fails** — `tsc -b` reports **29 pre-existing TypeScript errors**
@@ -408,8 +407,8 @@ ownership (H‑1); legacy open write/read endpoints deleted (H‑2); group passw
 - API key: **plaintext at rest and in transit**, no expiry, no scope, full ingest authority.
   Stealing it lets an attacker forge unlimited activity for that user (leaderboard fraud) —
   but not read the victim's dashboard (that needs the JWT).
-- `JWT_SECRET` hardcoded fallback `'your_jwt_secret'` (M‑9).
-- No `helmet`, no rate limiting anywhere — including `/auth/google` and `/api/extension/track` (M‑3).
+- `JWT_SECRET` was a hardcoded fallback — now required at boot (M‑9, ✅ fixed 2026-09-09).
+- `helmet` + rate limits on `/auth` and `/api/extension` added 2026-09-09 (M‑3 ✅). Group `/join` brute-force still unlimited.
 - No request validation / schema enforcement (M‑4); fake activity is trivial to inject with a valid key.
 - Error responses echo `error.message` (M‑10).
 - Leaderboard exposes **every user's email**.
@@ -423,7 +422,7 @@ ownership (H‑1); legacy open write/read endpoints deleted (H‑2); group passw
 ## 15. Deployment & environment
 
 **Backend env vars** (`backend/.env.example`): `MONGO_URI` (required), `JWT_SECRET` (required —
-has an unsafe fallback), `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` / `GOOGLE_CALLBACK_URL`
+is now required at boot — fixed 2026-09-09), `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` / `GOOGLE_CALLBACK_URL`
 (required — `config/passport.js` **throws at import** if missing), `FRONTEND_URL` (CORS +
 redirects), `PORT` (default 5050), `NODE_ENV`, `AUTH_BYPASS` (dev only).
 
@@ -472,9 +471,9 @@ database — the bucketing/rollup logic is proven at the pure-function level onl
 2. Leaderboard / group leaderboard: unbounded full-collection scan, no cache, no pagination; exposes emails.
 3. Analytics aggregate in JS, not MongoDB; daily endpoint pulls 7 days to show 1 (M‑1).
 4. `node-cron` scheduler incompatible with serverless (H‑13) — now also runs the nightly rollup.
-5. No helmet / rate limiting / request validation (M‑3/M‑4).
-6. Frontend does not typecheck — `npm run build` fails (M‑13).
-7. Dashboard "Repeated Failures" is mock data; Goals to-dos are non-persistent; Teams UI is orphaned.
+5. `helmet` + rate limits on `/auth` + `/api/extension` added 2026-09-09 (M‑3); ingest bounds-checked 2026-09-09 (M‑4). Group `/join` still unlimited.
+6. Frontend does not typecheck — `npm run build` fails (M‑13). *(fixed in the quick-wins batch — see IMPROVEMENT_PLAN)*
+7. Dashboard "Repeated Failures" now shows real data (2026-09-09); Goals to-dos are non-persistent; Teams UI is orphaned.
 8. `userId` is String on `activities`, ObjectId elsewhere → coercion gymnastics, blocks `$lookup` (M‑6).
 9. Extension has no offline queue; un-flushed time is lost on restart.
 10. Ingest not idempotent — a same-window replay double-counts inside one bucket.

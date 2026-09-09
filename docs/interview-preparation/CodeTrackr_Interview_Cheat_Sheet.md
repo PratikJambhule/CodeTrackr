@@ -37,10 +37,10 @@
 | Layer | Stack | Note |
 |---|---|---|
 | Extension | TypeScript 5, esbuild bundle, `@vscode/vsce`, axios | `onStartupFinished`; 5 trackers; `consumeInterval()` = snapshot+reset |
-| Backend | Node 18, **Express 5**, **Mongoose 8**, jsonwebtoken, passport-google-oauth20, cookie-parser, cors, node-cron, serverless-http | `helmet`/`express-rate-limit`/`express-validator` **installed, NOT used** |
+| Backend | Node 18, **Express 5**, **Mongoose 8**, jsonwebtoken, passport-google-oauth20, cookie-parser, cors, node-cron, serverless-http | `helmet` + `express-rate-limit` **wired 2026-09-09** (`/auth`, `/api/extension`); `express-validator` still unused |
 | DB | MongoDB Atlas | 8 collections (`+dailysummaries`); `activities` is high-volume, now bucketed |
 | Frontend | **React 19**, **Vite 7**, TS ~5.9, **Tailwind 3**, react-router-dom 7, chart.js 4 + react-chartjs-2, lucide-react | `@tanstack/react-query` **installed, unused**; 28-theme `ThemeContext` |
-| Auth | Google OAuth → JWT cookie (web); random 64-hex API key (extension) | `JWT_SECRET` has unsafe fallback `'your_jwt_secret'` |
+| Auth | Google OAuth → JWT cookie (web); random 64-hex API key (extension) | `JWT_SECRET` required at boot — app throws if unset (was an unsafe `'your_jwt_secret'` fallback), fixed 2026-09-09 |
 | "ML" | pure JS stats — coefficient of variation, weighted score, medians | no model/training/inference/LLM/Python |
 | Deploy | Vercel + Render + Atlas | no Dockerfile, no CI, no observability |
 | Tests | plain `node:assert` — 10 backend suites (~104 assertions) + 2 extension suites | **zero frontend tests; nothing run vs a real DB** |
@@ -125,7 +125,7 @@ fetch(/api/metrics?days=&timezone=)  // NO :userId — IDOR-proof by design →
 | **teams** | `members: [ObjectId]` **embedded**. Backend routes exist; **frontend not routed** (orphaned). Different modelling choice from groups on purpose. |
 | **notifications** | scoped by `req.user._id` everywhere — "the one done right". |
 
-**No transactions.** Ingest = single atomic `$inc` upsert into the bucket row (concurrent flushes just accumulate; duplicate-key on first insert → one retry). Double-join → unique index → **500** (should be 409). `team.members.push` = lost-update risk (use `$addToSet`).
+**No transactions.** Ingest = single atomic `$inc` upsert into the bucket row (concurrent flushes just accumulate; duplicate-key on first insert → one retry). Double-join → unique index → **409** (handler detects `error.code === 11000`). `team.members.push` = lost-update risk (use `$addToSet`).
 
 ---
 
@@ -160,16 +160,23 @@ fetch(/api/metrics?days=&timezone=)  // NO :userId — IDOR-proof by design →
 - `/api/metrics` takes **no `:userId`** → IDOR-proof by construction.
 - `routeGuards.test.js` statically scans routes, fails if auth middleware disappears.
 
+**FIXED 2026-09-09 (quick-wins batch):**
+- `helmet()` global; `express-rate-limit` on `/auth` (50/15min) + `/api/extension` (120/min).
+- `JWT_SECRET` required at boot — no more `'your_jwt_secret'` fallback.
+- Double-join → **409** (handler detects `11000`).
+- `GET /health` readiness (503 when Mongo down).
+- "Repeated Failures" dashboard panel now shows real data.
+
 **STILL OPEN / BY DESIGN:**
 - **API key: plaintext at rest + in transit, no expiry, no scope, full ingest authority.** Leak → forge unlimited activity (leaderboard fraud), but NOT read the dashboard (needs JWT).
-- No `helmet`, no rate limiting anywhere (incl. `/auth/google`, `/track`, `/join`).
-- No request validation on ingest — `duration: 1e12` accepted; client sets `timestamp`; `duration:0` wrongly rejected.
-- Errors echo `err.message` (internal leak). No central error handler.
+- No rate limiting on group `/join` (password brute-force) or the analytics routes — only `/auth` + `/api/extension`.
+- Client still sets `timestamp` on ingest (bounds-checked as of 2026-09-09, but client-chosen).
+- Errors echo `err.message` (internal leak). No central error handler. *(fixed later in the batch — #4)*
 - Leaderboard returns **every user's email**.
 - No idempotency / replay protection on ingest.
 - Group `discover` enumerates private groups (name+desc+creator); no group-owner authz.
 - Group search puts input into `$regex` → ReDoS.
-- `JWT_SECRET` fallback `'your_jwt_secret'`; no refresh token; `sameSite:'none'` + no CSRF token.
+- No refresh token; `sameSite:'none'` + no CSRF token.
 - Key in `settings.json`, not SecretStorage.
 
 **Redesign the key:** `ct_<keyId>_<secret>`, store `sha256(secret)`, lookup by indexed `keyId`, constant-time compare; multiple named keys per device; rotation with 24h grace; or short-lived signed ingest token / OAuth device flow.
@@ -217,7 +224,7 @@ fetch(/api/metrics?days=&timezone=)  // NO :userId — IDOR-proof by design →
 23. **Leaderboard at 100k?** → dies reading raw `activities`; point it at the nightly `dailysummaries` rollup (already built), then a `UserStats` running total / Redis ZSET.
 24. **"commits" on leaderboard?** → actually `activityCount`, mislabelled.
 25. **Groups membership?** → `groupmembers` join table, unique compound index. Groups are the reason the app exists — contest weeks / practice pods for a friend group.
-26. **Double-join?** → unique index → 500 (should be 409).
+26. **Double-join?** → unique index → **409** (handler detects `11000`).
 27. **Group admin?** → none; `createdBy` stored, never used for authz.
 27b. **Group compares what?** → hours + lines per member today. The extension already stores per-person failed commands / failed builds / repeated failures — "who hit the most errors" just isn't surfaced in the group view yet (extend the `$group` with `$sum` of those counters).
 28. **Is Insights ML?** → no, deterministic statistics; LLM narration designed, not built.
@@ -245,7 +252,7 @@ fetch(/api/metrics?days=&timezone=)  // NO :userId — IDOR-proof by design →
 - Don't claim the frontend builds — `tsc -b` fails (29 errors).
 - Don't claim integration test coverage — there is none against a real DB.
 - Don't claim the extension has an offline queue — it's memory-only.
-- The Dashboard "Repeated Failures" panel is **mock data** — don't demo it as real.
+- The Dashboard "Repeated Failures" panel now shows **real** `repeatedFailedCommands` (fixed 2026-09-09).
 - Goals to-dos aren't persisted; Teams UI is orphaned.
 - Don't over-claim solo authorship — 3 contributors; describe what you can defend.
 

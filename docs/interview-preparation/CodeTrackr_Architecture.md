@@ -109,7 +109,7 @@ own row; the extension (2.3.0) also **drops a flush entirely when it carries no 
 
 | Path | Responsibility |
 |---|---|
-| `app.js` | Express bootstrap: `trust proxy`, CORS allowlist (`FRONTEND_URL` + localhost:5173/5174, `credentials:true`), `express.json()`, `cookie-parser`, `passport.initialize()`, health route, `mongoose.connect`, mount 10 routers, `initScheduler()`, `app.listen()`. |
+| `app.js` | Express bootstrap: `trust proxy`, **`helmet()`**, CORS allowlist (`FRONTEND_URL` + localhost:5173/5174, `credentials:true`), `express.json()`, `cookie-parser`, `passport.initialize()`, **`rateLimit` on `/auth` + `/api/extension`** (skipped under `NODE_ENV=test`), `GET /` liveness + **`GET /health` readiness (503 if Mongo down)**, `JWT_SECRET` boot-guard, `mongoose.connect`, mount 10 routers, `initScheduler()`, `app.listen()`. *(helmet / rate-limit / `/health` / boot-guard added 2026-09-09.)* |
 | `api/index.js` | `module.exports = (req,res) => serverless(app)(req,res)` — Vercel serverless adapter. |
 | `config/passport.js` | Google OAuth 2.0 strategy. Find-or-create `User` by `googleId`; new users get `generateApiKey()`. **Throws at import** if any `GOOGLE_*` env var is missing. |
 | `middleware/auth.js` | `isAuthenticated` (JWT from `req.cookies.token`), `verifyApiKey` (`User.findOne({ apiKey })`), `AUTH_BYPASS` handling (refused in production). |
@@ -134,7 +134,7 @@ own row; the extension (2.3.0) also **drops a flush entirely when it carries no 
 | `contexts/ThemeContext.tsx` | 28 theme palettes, `localStorage.selectedTheme`, applies CSS custom properties, `useTheme()` hook. |
 | `pages/Login.tsx` | Single button → `window.location.href = API_URL + '/auth/google'`. |
 | `pages/Onboarding.tsx` | `GET /api/user/profile` → show API key + install steps; `POST /api/user/complete-onboarding` → `/dashboard`. |
-| `pages/Dashboard.tsx` | Daily/weekly toggle; `GET /api/analytics/:id`, `/weekly/:id`, `/timeslot/:id`; chart.js Line/Pie/Bar; 2-hour drill-down. **"Repeated Failures" panel = hardcoded mock data.** |
+| `pages/Dashboard.tsx` | Daily/weekly toggle; `GET /api/analytics/:id`, `/weekly/:id`, `/timeslot/:id`; chart.js Line/Pie/Bar; 2-hour drill-down. "Repeated Failures" panel now wired to real `terminalSummary.repeatedFailedCommands` (2026-09-09). |
 | `pages/Insights.tsx` | `GET /api/metrics?days=&timezone=`; 5 metric cards + 4 secondary tiles; hides focus metrics until extension 2.1.0 data exists. |
 | `pages/Leaderboard.tsx` | `GET /api/leaderboard`; table + computed "team average" row. |
 | `pages/Goals.tsx` | Calendar; `GET /api/goals`, `POST /api/goals/create`. To-do list is **client-state only**. No progress/complete/delete. |
@@ -242,7 +242,7 @@ own row; the extension (2.3.0) also **drops a flush entirely when it carries no 
         │  Cookie: token=<JWT>
         ▼
  Express: isAuthenticated
-     token = req.cookies.token ; decoded = jwt.verify(token, JWT_SECRET||'your_jwt_secret')
+     token = req.cookies.token ; decoded = jwt.verify(token, JWT_SECRET)  // fail-fast: app won't boot without it
      req.user = await User.findById(decoded.id)      // 401 if missing/expired
         │
         ▼
@@ -355,7 +355,7 @@ plan there insists any generated number must be traceable to the structured metr
         ▼
  callback handler:
         payload = { id, name, email, isFirstLogin }
-        token   = jwt.sign(payload, JWT_SECRET || 'your_jwt_secret', { expiresIn:'1d' })
+        token   = jwt.sign(payload, JWT_SECRET, { expiresIn:'1d' })
         res.cookie('token', token, { httpOnly:true,
                                      secure: isProd, sameSite: isProd ? 'none' : 'lax',
                                      maxAge: 24h })

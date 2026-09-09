@@ -367,7 +367,7 @@ For each: **what / where in CodeTrackr / why / alternative / why the choice hold
   means no session table and it survives a serverless cold start.
 - **Alternative:** server-side sessions (`express-session` + a store) — easier revocation,
   but needs shared state; Auth0/Clerk — less code, external dependency.
-- **Trade-off:** `JWT_SECRET` has a hardcoded fallback `'your_jwt_secret'` (M-9); no refresh
+- **Trade-off:** `JWT_SECRET` is now required at boot (M-9, fixed 2026-09-09); no refresh
   token, so a 1-day expiry is a hard logout; no server-side revocation; `passport.session()`
   isn't used so `serializeUser`/`deserializeUser` are dead code.
 - **Interview Qs:** §26 exchanges on JWT vs sessions, refresh tokens, CSRF.
@@ -748,7 +748,8 @@ rollups), retention policies. That's the "right" store for `activities` at scale
 - **No transactions.** Every write is a single document op, which Mongo makes atomic — so
   ingest is fine.
 - **Double-join race:** two concurrent `POST /:groupId/join` → the second hits the unique
-  compound index → duplicate-key error, currently surfaced as a **500** (should be a 409).
+  compound index → duplicate-key error, which the handler now detects (`error.code === 11000`)
+  and surfaces as a **409** (fixed 2026-09-09; was a 500).
 - **Last-member-leaves race:** two members leave simultaneously; both see `remainingMembers`
   briefly and one deletes the group — benign but sloppy; a transaction or a
   `findOneAndDelete` guard would tidy it.
@@ -764,7 +765,9 @@ rollups), retention policies. That's the "right" store for `activities` at scale
 
 | Method | Endpoint | Purpose | Input | Auth | Processing | Response |
 |---|---|---|---|---|---|---|
-| POST | `/api/extension/track` | ingest one flush | body: fileName, language, duration(s), timestamp?, analytics sub-objects | `verifyApiKey` (`x-api-key`) | validate → normalise → `planActivityWrite` → **10-min bucket `$inc` upsert** (or `Activity.create` if `ACTIVITY_BUCKET_MS=0`) | `201 {success, bucket:{...}}` (or `202 {merged}` for a signal-less flush) |
+| GET | `/` | liveness ping | — | — | — | `200 {status:'ok'}` |
+| GET | `/health` | readiness | — | — | `mongoose.connection.readyState` | `200 {status:'ok',db:true}` / `503 {status:'degraded'}` (added 2026-09-09) |
+| POST | `/api/extension/track` | ingest one flush | body: fileName, language, duration(s), timestamp?, analytics sub-objects | `verifyApiKey` (`x-api-key`) + IP rate-limit (120/min, added 2026-09-09) | validate → normalise → `planActivityWrite` → **10-min bucket `$inc` upsert** (or `Activity.create` if `ACTIVITY_BUCKET_MS=0`) | `201 {success, activity:{...}}` |
 | POST | `/api/extension/track/batch` | ingest many | `{ activities: [...] }` | `verifyApiKey` | map+normalise → `Activity.insertMany` | `201 {success, count}` |
 | GET | `/api/extension/verify` | key check | — | `verifyApiKey` | — | `200 {success, user:{id,name,email}}` |
 | GET | `/api/analytics/:userId?timezone=` | today hourly + 7d totals | tz offset (min) | `isAuthenticated` + ownership | `Activity.find(7d)` → JS reduce; `computeStreak` (`$group`) | `{ totalHours, projectCount, totalLinesAdded, streakDays, dailyActivity[24], languageBreakdown[], terminalSummary, *Timeline[] }` |
@@ -795,16 +798,18 @@ rollups), retention policies. That's the "right" store for `activities` at scale
 
 ### 7.2 Middleware pipeline
 
-`app.js`: `cors(allowlist, credentials:true)` → `express.json()` → `cookieParser()` →
-`passport.initialize()` → routers. **No** `helmet`, **no** rate limiter, **no** validator,
-**no** central error handler. Each route wraps its body in `try/catch` and returns
-`500 { message, error: err.message }` (leaks internals — M-10).
+`app.js`: `cors(allowlist, credentials:true)` → **`helmet()`** → `express.json()` →
+`cookieParser()` → `passport.initialize()` → **`rateLimit` on `/auth` (50/15min) and
+`/api/extension` (120/min)**, skipped under `NODE_ENV=test` → routers (added 2026-09-09).
+Still **no** validator (M-4) and **no** central error handler (M-10) as of this section —
+each route wraps its body in `try/catch` and returns `500 { message, error: err.message }`
+(leaks internals — M-10).
 
 ### 7.3 Status codes actually used
 
 `200` reads, `201` creates, `400` missing fields / bad body, `401`
 unauth/invalid-key/expired-JWT, `403` ownership/membership failure, `404` not found, `500`
-anything thrown. No `409` (double-join returns 500), no `422`, no `429` (no rate limiting).
+anything thrown. double-join now returns `409` (fixed 2026-09-09); no `422`; `/auth` and `/api/extension` are rate-limited (429) as of 2026-09-09, other routes are not.
 
 ### 7.4 API design weaknesses
 
@@ -1047,7 +1052,7 @@ error/build-success comparison in the group view is the obvious next feature and
 - **Ownership:** only membership is checked. There's no "admin" concept for groups —
   `createdBy` is stored but never used to gate anything. Any member can view details; there's
   no kick/rename/delete-by-owner, no transfer.
-- **Double-join race:** unique index catches it → **500** (should be 409).
+- **Double-join race:** unique index catches it → **409** (the handler detects `error.code === 11000`, fixed 2026-09-09).
 - **Password brute force:** no rate limit on `/join` → a private group's password can be
   guessed offline-speed via the endpoint.
 - **Empty-group deletion race:** two `leave`s at once → both compute `remainingMembers`, one
@@ -1176,7 +1181,7 @@ GET /api/metrics?days=30&timezone=<offset>
    session:false })`.
 3. Google redirects to `/auth/google/callback`. Passport's verify callback find-or-creates the
    `User` (new → `generateApiKey()`), returns the user.
-4. Handler signs `jwt.sign({id,name,email,isFirstLogin}, JWT_SECRET || 'your_jwt_secret',
+4. Handler signs `jwt.sign({id,name,email,isFirstLogin}, JWT_SECRET,
    {expiresIn:'1d'})`, sets cookie `token` (`httpOnly`; prod: `secure` + `sameSite:'none'`;
    dev: `lax`; `maxAge` 24 h), redirects to `FRONTEND_URL + '/onboarding'|'/dashboard'`.
 5. Frontend `App.tsx` → `GET /api/user/profile` (`credentials:'include'`) — 200 renders the
@@ -1209,7 +1214,7 @@ API key in `x-api-key`; `verifyApiKey` → `User.findOne({ apiKey })`. See §5.
 
 - No refresh token — 24 h then a hard logout.
 - No server-side revocation / session list — a stolen JWT is valid until expiry.
-- `JWT_SECRET` fallback (M-9).
+- `JWT_SECRET` was a hardcoded fallback — now required at boot (M-9, fixed 2026-09-09).
 - `sameSite:'none'` in production + no CSRF token — limited exposure because most mutations are
   `POST` with a JSON body and `credentials:'include'`, but `POST /auth/logout` and the
   no-body `POST`s are technically CSRF-able (low impact).
@@ -1234,20 +1239,19 @@ Format: **Current → Vulnerability → Attack → Fix.**
   scope, `lastUsedAt`; or short-lived signed ingest tokens; rate-limit + validate + idempotency
   on ingest.
 
-### 14.2 No rate limiting anywhere
+### 14.2 Rate limiting — partial (as of 2026-09-09)
 
-- **Current:** `express-rate-limit` installed, never used. `/auth/google`, `/api/extension/track`,
-  `/api/groups/:id/join` all uncapped.
-- **Attack:** credential-stuffing the OAuth callback; ingest flooding; private-group password
-  brute force.
-- **Fix:** `express-rate-limit` — global default + tighter on `/auth` and `/api/extension` and
-  `/join`; per-key limits on ingest.
+- **Now:** `express-rate-limit` on `/auth` (50 / 15 min) and `/api/extension` (120 / min),
+  skipped under `NODE_ENV=test`. `trust proxy` is set so the client IP is correct behind Render.
+- **Still uncapped:** `/api/groups/:id/join` (private-group password brute force), the analytics
+  routes, and there's no *per-key* quota on ingest (only per-IP).
+- **Next:** add a limiter on `/join`; per-key limits + an idempotency key on ingest (#10, deferred).
 
-### 14.3 No security headers
+### 14.3 Security headers — done (2026-09-09)
 
-- **Current:** `helmet` installed, never used. No HSTS, no `X-Content-Type-Options`, no
-  `X-Frame-Options`, no CSP.
-- **Fix:** `app.use(helmet())` (the old `server.js.old` did this — it was dropped in the rewrite).
+- **Now:** `app.use(helmet())` — HSTS, `X-Content-Type-Options: nosniff`, `X-Frame-Options`,
+  no `X-Powered-By`. CSP is left off (helmet's default) since the SPA is served from Vercel.
+- (The old `server.js.old` had `helmet`; it was dropped in the rewrite and re-added here.)
 
 ### 14.4 No input validation on ingest
 
@@ -1280,7 +1284,7 @@ Format: **Current → Vulnerability → Attack → Fix.**
 
 ### 14.8 JWT
 
-- **Current:** `HS256`, `JWT_SECRET || 'your_jwt_secret'`, 1-day, httpOnly cookie, no refresh,
+- **Current:** `HS256`, `JWT_SECRET` (required at boot), 1-day, httpOnly cookie, no refresh,
   no revocation.
 - **Attack:** if the fallback secret is ever live, anyone can forge a token for any `id`.
 - **Fix:** fail fast if `JWT_SECRET` is unset (M-9); add refresh + a rotating secret or `RS256`.
@@ -1488,8 +1492,8 @@ Walk it in order (this is `CodeTrackr_Architecture.md` §9 as a checklist):
 8. **Timezone / "wrong day":** a flush near local midnight can bucket to the previous/next
    day; the daily view is *today in the browser's local day*. Check `?timezone=` is sent
    (it's `new Date().getTimezoneOffset()`).
-9. **It's actually there but hidden:** "Repeated Failures" is mock data; Insights focus cards
-   show "—" until 2.1.0 data exists; weekly vs daily toggle.
+9. **Insights focus cards** show "—" until 2.1.0 data exists; weekly vs daily toggle. *(The
+   "Repeated Failures" panel was mock data — wired to real data 2026-09-09.)*
 
 ### 18.2 More scenarios (give a step-by-step for each in an interview)
 
@@ -1534,7 +1538,7 @@ Walk it in order (this is `CodeTrackr_Architecture.md` §9 as a checklist):
 
 ### 19.2 Env vars
 
-`backend/.env.example`: `MONGO_URI`*, `JWT_SECRET`* (unsafe fallback), `GOOGLE_CLIENT_ID`*,
+`backend/.env.example`: `MONGO_URI`*, `JWT_SECRET`* (required at boot — fixed 2026-09-09), `GOOGLE_CLIENT_ID`*,
 `GOOGLE_CLIENT_SECRET`*, `GOOGLE_CALLBACK_URL`*, `FRONTEND_URL`*, `PORT`, `NODE_ENV`,
 `AUTH_BYPASS` (dev only). `config/passport.js` **throws at import** if the three `GOOGLE_*`
 are missing — the API won't boot without them.
@@ -1675,9 +1679,9 @@ Each: **Decision → Reason → Alternative → Trade-off → When the alternati
 | 3 | Analytics aggregate in JS | ships/parses every doc, O(N) memory | slow reads, wasted DB egress | MongoDB `$group` pipelines |
 | 4 | Missing `{userId:1,timestamp:-1}` index | every query filters `timestamp` but indexes are on `date` | full per-user scans | add the index; drop the `date` index |
 | 5 | `node-cron` on serverless | frozen between requests | notifications never fire (H-13) | Vercel Cron / external trigger |
-| 6 | No helmet / rate limit / validation | Express gives nothing free | header attacks, flooding, fake data | wire in the 3 installed deps |
-| 7 | Frontend doesn't typecheck | `npm run build` fails at `tsc -b` | can't ship a clean build | fix the 29 errors (M-13) |
-| 8 | Dashboard "Repeated Failures" is mock | shows fabricated commands | misleading UI | render `terminalSummary.repeatedFailedCommands` |
+| 6 | ~~No helmet / rate limit / validation~~ ✅ mostly fixed 2026-09-09 | — | — | `helmet` + rate limits on `/auth`+`/api/extension`; ingest bounds-checked. Group `/join` still unlimited |
+| 7 | ~~Frontend doesn't typecheck~~ ✅ fixed 2026-09-09 | was 29 `tsc -b` errors | — | `npm run build` is green; CI enforces it |
+| 8 | ~~Dashboard "Repeated Failures" is mock~~ ✅ fixed 2026-09-09 | was fabricated commands | — | now renders `terminalSummary.repeatedFailedCommands` |
 | 9 | Goals to-dos not persisted; no complete/delete | data vanishes on refresh | feature is half-built | add routes + wire the UI; call `/progress` |
 | 10 | Teams UI orphaned | dead code, backend routes unused | confusion | route it or delete it |
 | 11 | Idle < 2 min counts as active | totals skew high | inflated hours | count only intervals with a real edit event (L-7) |
@@ -1996,8 +2000,9 @@ the engine / precompute rollups.
 
 **14. What happens if two requests arrive simultaneously?**
 > Ingest is a single-document insert, so Mongo makes it atomic — fine. The problematic
-> concurrent cases are double-join (caught by the unique index, but I return a 500 instead of
-> a 409) and `team.members.push` (a read-modify-write with a lost-update window — should be
+> concurrent cases are double-join (caught by the unique index; the handler detects `error.code
+> === 11000` and returns a 409 as of 2026-09-09, previously a 500) and `team.members.push`
+> (a read-modify-write with a lost-update window — should be
 > `$addToSet`).
 
 **15. Why aggregate analytics in Node instead of MongoDB?**
@@ -2104,10 +2109,10 @@ the engine / precompute rollups.
 - [x] Frontend architecture, state model, and the three real bugs (mock panel, unpersisted
   todos, orphaned Teams) documented.
 - [x] Leaderboard analysed (O(A+U), relative scoring, email exposure) + the rollup answer.
-- [x] Groups analysed (join table, membership check, double-join → 500, no admin role).
+- [x] Groups analysed (join table, membership check, double-join → 409 (fixed 2026-09-09), no admin role).
 - [x] Insights analysed in full — confirmed **statistics, not ML**; LLM layer designed not built.
 - [x] Auth analysed — Google OAuth → JWT cookie (web), API key (extension), no refresh, no
-  revocation, `JWT_SECRET` fallback.
+  revocation. (`JWT_SECRET` fallback fixed 2026-09-09.)
 - [x] Unique key analysed — classified as an unscoped non-expiring plaintext bearer credential;
   attack scenarios + redesign.
 - [x] Security: separated fixed (H-1/2/9/10/11) from open (keys, rate limit, headers,

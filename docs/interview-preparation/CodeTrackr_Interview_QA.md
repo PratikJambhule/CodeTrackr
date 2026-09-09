@@ -283,9 +283,10 @@
 > server-side with a request id and returns a generic body.
 
 **D5. Middleware order?**
-> `cors` → `express.json` → `cookie-parser` → `passport.initialize` → routers. No `helmet`, no
-> rate limiter. `helmet` and `express-rate-limit` are installed but not wired in (M-3) — the
-> old `server.js.old` used them; they were dropped in the rewrite.
+> `cors` → `helmet()` → `express.json` → `cookie-parser` → `passport.initialize` →
+> `rateLimit` on `/auth` (50/15min) and `/api/extension` (120/min) → routers (helmet +
+> rate-limit wired 2026-09-09, M-3). The limiters are skipped under `NODE_ENV=test`. Group
+> `/join` and the analytics routes are still uncapped.
 
 **D6. How is CORS configured?**
 > An allowlist: `FRONTEND_URL` plus `localhost:5173/5174`, `credentials: true`. Requests with
@@ -301,7 +302,13 @@
 
 **D8. What status codes do you use?**
 > 200 reads, 201 creates, 400 bad input, 401 unauth, 403 not entitled, 404 not found, 500
-> thrown. No 409 (double-join returns 500), no 429 (no rate limiting).
+> thrown. double-join now returns 409 (fixed 2026-09-09); `/auth` + `/api/extension` rate-limited (429) as of 2026-09-09, other routes not.
+
+**D8b. What's your health/readiness check?**
+> `GET /` is the liveness ping (always `200 {status:'ok'}`). `GET /health` (added 2026-09-09)
+> is readiness — it returns `503 {status:'degraded'}` when `mongoose.connection.readyState !== 1`,
+> so the platform stops routing traffic to an instance whose DB is down. Point Render's health
+> check at `/health`.
 
 **D9. How does the notification scheduler work and what's wrong with it?**
 > `node-cron` `'0 * * * *'` plus an immediate run on startup. `checkUpcomingDeadlines` finds
@@ -408,7 +415,7 @@
 > suites; there's still no integration test against a real DB.
 
 **E12. Race conditions in the DB layer?**
-> Double-join (unique index → 500 instead of 409); `team.members.push` lost update;
+> Double-join (unique index → 409 as of 2026-09-09); `team.members.push` lost update;
 > two-members-leave-at-once both deleting an empty group (benign). Ingest itself is
 > race-free — single insert.
 
@@ -475,7 +482,7 @@
 > so expiry is a hard logout.
 
 **F12. What are the weaknesses of your JWT setup?**
-> `JWT_SECRET` has a hardcoded fallback `'your_jwt_secret'` — if that's ever live, tokens are
+> `JWT_SECRET` USED to have a hardcoded fallback `'your_jwt_secret'` — fixed 2026-09-09, the app now refuses to boot without it. If it had ever been live, tokens would be
 > forgeable (M-9). No refresh token. No revocation list. `sameSite:'none'` plus no CSRF token
 > means the no-body POSTs are theoretically forgeable (low impact).
 
@@ -544,7 +551,7 @@
 > Chart.js is canvas — not accessible, hard to server-render.
 
 **G10. Any bugs in the frontend you know about?**
-> Three real ones. The "Repeated Failures" panel on the dashboard renders hardcoded mock
+> Two real ones now (the "Repeated Failures" panel was wired to real data 2026-09-09). Historically the panel rendered hardcoded mock
 > arrays instead of the real `repeatedFailedCommands` the backend computes. The Goals page's
 > to-do items only mutate React state — nothing is persisted. And `Teams.tsx` exists but isn't
 > routed. Plus `npm run build` fails because `tsc -b` has 29 pre-existing type errors.
@@ -732,7 +739,7 @@
 > `role === 'owner'` is the fix.
 
 **J6. What race conditions exist?**
-> Double-join — the unique index catches it but the error surfaces as a 500 (should be 409).
+> Double-join — the unique index catches it and the handler now surfaces a 409 (fixed 2026-09-09).
 > Two members leaving simultaneously can both compute `remainingMembers` and one deletes the
 > empty group — harmless but not transactional. Password brute force on `/join` — no rate
 > limit.
@@ -771,7 +778,7 @@
 > goals/teams closed. Still open: the API key is plaintext and non-expiring; no rate limiting
 > anywhere; no security headers (`helmet` unused); no request validation on ingest; error
 > responses echo `err.message`; the leaderboard leaks emails; no idempotency on ingest; the
-> group search regex is a ReDoS vector; `JWT_SECRET` has an unsafe fallback.
+> group search regex is a ReDoS vector. (`JWT_SECRET` fallback fixed 2026-09-09.)
 
 **K2. Biggest security risk?**
 > The API key model combined with no ingest validation or rate limiting. A valid key plus one
@@ -926,7 +933,7 @@
 > `TerminalTracker.start` logs "not supported in this VS Code version" and no-ops if the API is
 > missing.
 
-**M9. Group join returns 500 instead of 409 on a double-join.**
+**M9. Group join returns 409 on a double-join (✅ fixed 2026-09-09; was a 500).**
 > The unique compound index on `groupmembers` throws a duplicate-key error, which the route's
 > generic `catch` maps to 500. Fix: detect `err.code === 11000` and return 409.
 

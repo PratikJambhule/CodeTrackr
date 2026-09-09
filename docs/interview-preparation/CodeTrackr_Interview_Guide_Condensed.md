@@ -310,8 +310,8 @@ draws it.
 
 - Every route does its own `try/catch` and returns `error.message` to the client — that
   **leaks internal details**. **BETTER:** one central error handler.
-- **No rate limiting anywhere** (`express-rate-limit` is installed but not used).
-- **No security headers** (`helmet` is installed but not used).
+- Rate limiting on `/auth` (50/15min) and `/api/extension` (120/min) via `express-rate-limit` (added 2026-09-09); other routes (e.g. group `/join`) are still unlimited.
+- Security headers via `helmet()` (added 2026-09-09).
 - **No real input validation** — `duration: 999999999` is accepted; you can even send your
   own `timestamp`.
 - No pagination on the leaderboard.
@@ -430,7 +430,7 @@ lines only. Adding the error/build-success columns is a read-path change (extend
 scoping the board to a contest week (`?from=&to=` + a `$match` on `timestamp`).
 
 **Other group weak spots:** no admin/owner powers (`createdBy` stored but unused — no kick or
-rename); a double-join returns **500** instead of **409**; "discover" lists private groups
+rename); a double-join returns **409** (fixed 2026-09-09; the handler detects `11000`); "discover" lists private groups
 too (password-gated, not hidden); no rate limit on join, so passwords can be guessed.
 
 ---
@@ -448,7 +448,7 @@ too (password-gated, not hidden); no rate limit on join, so passwords can be gue
 
 ### Login weak spots
 
-- The signing secret has an unsafe fallback (`'your_jwt_secret'`) if the env var is missing.
+- The signing secret is required at boot — the app refuses to start without `JWT_SECRET` (fixed 2026-09-09; was an unsafe fallback).
 - **No refresh token** — after 1 day you're just logged out.
 - **No way to revoke** a token early (no server-side session list).
 - The cookie is `sameSite: 'none'` in production with no CSRF token — low impact here because
@@ -470,7 +470,7 @@ too (password-gated, not hidden); no rate limit on join, so passwords can be gue
 | Issue | Why it matters |
 |---|---|
 | API key is plain text, never expires, no limits | leak = someone fakes your activity |
-| No rate limiting anywhere | login stuffing, activity flooding, password guessing |
+| Rate limiting only on `/auth` + `/api/extension` (2026-09-09) | group `/join` password guessing still unlimited |
 | No security headers (`helmet` unused) | missing basic browser protections |
 | No input validation on activity | `duration: 1e12` accepted; fake data is trivial |
 | Errors return `error.message` | leaks internal details |
@@ -702,7 +702,7 @@ student project right now*.
 - Don't claim the frontend builds cleanly. It doesn't (`tsc` fails).
 - Don't claim integration test coverage. There is none against a real database.
 - Don't claim the extension has an offline queue. It's memory-only.
-- The dashboard "Repeated Failures" panel is fake data — don't demo it as real.
+- The dashboard "Repeated Failures" panel now shows real data (fixed 2026-09-09).
 - There are 3 contributors — describe what *you* can explain in depth, don't over-claim.
 
 ### Five sentences that make you sound senior
