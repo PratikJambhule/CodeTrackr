@@ -2,6 +2,14 @@
 
 _Reverse-engineered from the codebase (no assumptions from filenames). Last verified: 2026-08-28 (extension 2.1.0)._
 
+> **Superseded — read `CODETRACKR_PROJECT_CONTEXT.md` (repo root) first.** This file predates
+> two batches of work: the **DB write-reduction batch** (2026‑09‑08 — 10-minute bucket-on-write,
+> `DailySummary` rollup, dropped `date` field) and the **quick-wins Tier 1 + security batch**
+> (2026‑09‑09 — `JWT_SECRET` fail-fast, `helmet` + rate-limit, 409 on dup join, `/health`,
+> central error handler, ingest bounds-check, serverless-safe bootstrap + `/api/internal` cron,
+> frontend build fixed, GitHub Actions CI). Details in `CODETRACKR_PROJECT_CONTEXT.md`,
+> `docs/IMPROVEMENT_PLAN.md`, and `docs/interview-preparation/`.
+
 ## 1. Components
 
 | Layer | Location | Stack |
