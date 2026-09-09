@@ -147,7 +147,10 @@ short correlation ID and returns a generic body with just that ID."*
 
 ---
 
-## 5. Add the missing database index 🟢
+## 5. Add the missing database index 🟢 — ✅ DONE 2026-09-08 (shipped in the DB write-reduction batch)
+
+> **Shipped.** `activitySchema.index({ userId: 1, timestamp: -1 })` is in `backend/models/Activity.js`;
+> the dead `{userId:1,date:-1}` index and the `date` field are gone. Verified by `activityModel.test.js`.
 
 **The flaw:** every analytics, metrics and streak query filters on `Activity.timestamp`, but
 the compound indexes in `models/Activity.js` are on `date`. Those queries fall back to the

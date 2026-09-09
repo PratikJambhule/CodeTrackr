@@ -90,6 +90,9 @@ Read paths all query `timestamp`, so nothing is broken in the meantime.
 **Fix:** `date` should be derived from the same instant as `timestamp` (or dropped entirely — `timestamp` already carries it, and every read path already queries `timestamp`).
 **Files:** `backend/routes/extension.js:95,140`.
 **Risk:** Existing rows keep the old value; a one-off backfill script can recompute `date` from `timestamp`.
+**Update 2026-09-08 (DB write-reduction batch):** dropped entirely — the `date` field and the
+`{userId:1,date:-1}` index are removed from `models/Activity.js`, and `{userId:1,timestamp:-1}`
+is added (this closes Quick-Wins #5). Live migration: `node backend/scripts/migrate-drop-date.js --apply`.
 
 ### H-6. Streak calculation is wrong in three ways — ✅ FIXED 2026-08-27
 **Problem:** In `routes/analytics.js` the streak (a) only considers the last 7 days, so it caps at 7; (b) initialises `streakDays = 1` without checking the most recent active day is today or yesterday — a user idle for a week still shows a streak of 1+; (c) buckets days by `toISOString()` (UTC), ignoring the timezone offset the same endpoint uses elsewhere.
