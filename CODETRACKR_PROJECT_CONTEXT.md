@@ -76,7 +76,7 @@ CodeTrackr-main/
 │   └── codetrackr-vscode-2.2.0.vsix   Packaged build
 └── docs/
     ├── ARCHITECTURE.md           Pre-existing architecture notes (verify against code)
-    ├── IMPROVEMENT_PLAN.md       13 High / 13 Medium / 7 Low findings, many marked FIXED
+    ├── IMPROVEMENT_PLAN.md       original audit 13 High / 13 Medium / 7 Low; +M-14/M-15/L-8/L-9 added & fixed in the 2026-09-09 batch; most High + the security Mediums now ✅ FIXED
     ├── SESSION-LOG-2026-08-27.md Chronological engineering log
     ├── TRACKING_ROADMAP.md       Signals + derived-metrics design spec
     ├── diagrams-src/             figure-1 architecture .. figure-5 class diagram (HTML)
@@ -481,8 +481,8 @@ Quick-Wins #24).
 1. API key = plaintext, non-expiring, unscoped bearer credential.
 2. Leaderboard / group leaderboard: unbounded full-collection scan, no cache, no pagination; exposes emails.
 3. Analytics aggregate in JS, not MongoDB; daily endpoint pulls 7 days to show 1 (M‑1).
-4. `node-cron` scheduler incompatible with serverless (H‑13) — now also runs the nightly rollup.
-5. `helmet` + rate limits on `/auth` + `/api/extension` added 2026-09-09 (M‑3). Group `/join` still unlimited; ingest still has no per-key quota or bounds check on the payload (M‑4 open).
+4. `node-cron` on serverless — **fixed 2026-09-09 (H‑13)**: `require.main` guard + `POST /api/internal/run-{notifications,rollup}` behind `INTERNAL_CRON_SECRET`. Operator wires the external scheduler.
+5. Rate limits only on `/auth` + `/api/extension` (M‑3, 2026-09-09) — group `/join` and analytics routes still unlimited; ingest has a payload bounds-check (M‑4, 2026-09-09) but no per-key quota and `timestamp` is still client-supplied.
 6. ~~Frontend does not typecheck~~ ✅ fixed 2026-09-09 (M‑13) — `npm run build` green, enforced by CI.
 7. Dashboard "Repeated Failures" now shows real data (2026-09-09); Goals to-dos are non-persistent; Teams UI is orphaned.
 8. `userId` is String on `activities`, ObjectId elsewhere → coercion gymnastics, blocks `$lookup` (M‑6).

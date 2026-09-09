@@ -46,6 +46,22 @@ rather than bcrypt — no native dependency, which keeps the Vercel build simple
 tests run without `npm install`. Legacy plaintext passwords still verify and are upgraded to a
 hash on the next successful join. A new `/insights` page surfaces the five Phase A metrics.
 
+**Quick-wins batch — Tier 1 + security: DONE 2026-09-09.** 11 items, one commit each, on
+`feat/security-and-insights`. Spec/plan under
+`docs/superpowers/{specs,plans}/2026-09-09-quick-wins-tier1-security.md`.
+Fixed: **M-9** (`JWT_SECRET` fail-fast), **M-14** (409 on duplicate group join), **L-8**
+(`GET /health` readiness), **M-15** (real "Repeated Failures" data), **M-3** (`helmet` +
+rate-limit on `/auth`+`/api/extension`), **M-13** (29 frontend `tsc` errors → build green),
+**L-9** (GitHub Actions CI), **M-10** (central error handler), **M-4** partial (pure ingest
+bounds-check), **H-13** (serverless-safe bootstrap + `POST /api/internal/run-*` cron trigger).
+Plus `#5` (the `{userId:1,timestamp:-1}` index, folded from the DB-write batch).
+Verified by new `backend/tests/quickWins.test.js` (14) + `ingestValidation.test.js` (23);
+backend suites 10 → 12. **Deferred to a follow-up:** `#9` `UserStats` leaderboard rollup
+(decided: live running-total), `#10` idempotency key, `#13` React Query, `#14` goal
+completion, all of Tier 3 (incl. the `supertest` + `mongodb-memory-server` integration test).
+**Operator TODO:** set `JWT_SECRET` + `INTERNAL_CRON_SECRET` in Render; wire an external
+scheduler to the two internal routes; point the health check at `/health`; push for CI.
+
 **Frontend build — ✅ FIXED 2026-09-09 (M-13).** `npm run build` (`tsc -b && vite build`) had
 **29 pre-existing TypeScript errors** (16 in `Goals.tsx`, 5 in `TextType.tsx`, 3 each in
 `Groups.tsx`/`Dashboard.tsx`, 1 each in `Teams.tsx`/`Profile.tsx`). All resolved: dead
@@ -175,9 +191,9 @@ is added (this closes Quick-Wins #5). Live migration: `node backend/scripts/migr
 
 ## Suggested sequencing
 
-1. **Security batch** — H-1, H-2, H-10, H-11, H-9, M-9. Small diffs, no behaviour change for legitimate users.
-2. **Data-accuracy batch** — H-3, H-4, H-5, H-6. Fixes the numbers the AI layer will be grounded in. **Must land before AI work.**
-3. **Aggregation refactor** — M-1, M-2, then H-7, H-8. Produces the shared metrics service the AI layer consumes.
-4. **AI insights feature** — see `AI_INSIGHTS_DESIGN.md`.
-5. **Extension cleanup** — H-12, L-2, L-7 (batched into one republish).
-6. **Everything else** — Medium/Low as capacity allows.
+1. ~~**Security batch** — H-1, H-2, H-10, H-11, H-9, M-9~~ ✅ (Batch 3, 2026-08-28; M-9 in the quick-wins batch 2026-09-09).
+2. ~~**Data-accuracy batch** — H-3, H-4, H-5, H-6~~ ✅ (Batch 1, 2026-08-27).
+3. **Aggregation refactor** — M-1, M-2, then H-7, H-8. *(M-2 ✅. M-1/H-7/H-8 open — the `dailysummaries` rollup from the DB-write batch is the foundation; repoint the all-time reads + add `UserStats`, i.e. Quick-Wins #9.)*
+4. ~~**AI insights feature**~~ ✅ `/insights` page ships deterministic stats (Batch 3); LLM narration layer still designed-not-built.
+5. ~~**Extension cleanup** — H-12, L-2, L-7~~ ✅ (Batch 2, v2.0.11; + v2.3.0 skip-empty flushes).
+6. **Everything else** — the **quick-wins Tier 1 + security batch (2026-09-09)** cleared M-3, M-4 (partial), M-10, M-13, M-14, M-15, L-8, L-9, H-13. Remaining Medium/Low + Quick-Wins #9/#10/#13/#14 + Tier 3 as capacity allows.

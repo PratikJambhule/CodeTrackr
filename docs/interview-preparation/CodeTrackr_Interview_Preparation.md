@@ -1945,7 +1945,7 @@ the engine / precompute rollups.
 | `frontend/src/pages/Profile.tsx` | Key management | `regenerateApiKey`, copy | rotation UX |
 | `frontend/src/contexts/ThemeContext.tsx` | Theming | 28 palettes, CSS vars, `useTheme` | context, localStorage, the verbose-styles trade-off |
 | `frontend/src/components/NotificationPanel.tsx` | Notifications | 30 s poll, browser Notification API, click-outside | polling vs push, the stale-closure bug (L-1) |
-| `docs/IMPROVEMENT_PLAN.md` | Self-audit | 13 H / 13 M / 7 L findings | shows engineering maturity — reference it in interviews |
+| `docs/IMPROVEMENT_PLAN.md` | Self-audit | original 13 H / 13 M / 7 L; +4 added & fixed in the 2026-09-09 batch (M-14, M-15, L-8, L-9) | shows engineering maturity — reference it in interviews |
 | `docs/TRACKING_ROADMAP.md` | Metrics design | signal tiers, derived-metric definitions, the AI-layer plan | where Insights came from; the LLM design |
 
 ---
