@@ -84,7 +84,7 @@ const resolveJwtUser = async (req) => {
     }
 
     try {
-        const decoded = jwt.verify(token, process.env.JWT_SECRET || 'your_jwt_secret');
+        const decoded = jwt.verify(token, process.env.JWT_SECRET);
         if (!decoded?.id) {
             return null;
         }

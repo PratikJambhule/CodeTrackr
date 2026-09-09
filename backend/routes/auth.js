@@ -20,7 +20,7 @@ router.get('/google/callback', passport.authenticate('google', { failureRedirect
         email: req.user.email,
         isFirstLogin: req.user.isFirstLogin
     };
-    const token = jwt.sign(payload, process.env.JWT_SECRET || 'your_jwt_secret', { expiresIn: '1d' });
+    const token = jwt.sign(payload, process.env.JWT_SECRET, { expiresIn: '1d' });
 
     // Cookie options for production
     const isProduction = process.env.NODE_ENV === 'production';
@@ -51,7 +51,7 @@ router.get('/current-user', (req, res) => {
     }
 
     try {
-        const decoded = jwt.verify(token, process.env.JWT_SECRET || 'your_jwt_secret');
+        const decoded = jwt.verify(token, process.env.JWT_SECRET);
         res.json({ user: decoded });
     } catch (err) {
         res.status(401).json({ user: null });

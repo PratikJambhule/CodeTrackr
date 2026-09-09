@@ -6,6 +6,10 @@ const cookieParser = require('cookie-parser');
 const passport = require('passport');
 require("dotenv").config();
 
+if (!process.env.JWT_SECRET) {
+  throw new Error('JWT_SECRET is required — set it in the environment before starting the API.');
+}
+
 const app = express();
 
 // Trust proxy for production (required for secure cookies on Render/Vercel)

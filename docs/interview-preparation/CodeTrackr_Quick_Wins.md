@@ -195,7 +195,7 @@ a legitimate concurrency guard.
 
 ---
 
-## 7. Fail fast on a missing `JWT_SECRET` 🟢
+## 7. Fail fast on a missing `JWT_SECRET` 🟢 — ✅ DONE 2026-09-09
 
 **The flaw:** `routes/auth.js` and `middleware/auth.js` both do
 `process.env.JWT_SECRET || 'your_jwt_secret'`. If the env var is ever missing in production,
