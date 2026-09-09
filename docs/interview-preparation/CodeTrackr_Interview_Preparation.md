@@ -157,7 +157,7 @@ ML" line; (7) auth — Google OAuth → JWT cookie for web, API key for the exte
 token, `session:false`; (8) the security findings you found and fixed vs the ones still open;
 (9) deployment — Vercel + Render + Atlas, and the `node-cron`-on-serverless problem;
 (10) what you'd do next — hash keys, add a queue and a rollup, adopt React Query, fix the
-29 TypeScript errors, add integration tests.
+the (now-fixed) TS errors landed 2026-09-09; add integration tests next.
 
 ### "Tell me about your project."
 
@@ -233,7 +233,7 @@ in depth, not to claim ownership of code you'd struggle to defend.)*
 Top three: (1) hash the API keys and support rotation with a grace window / per-device keys;
 (2) replace the leaderboard's full-collection scan with a `UserStats` rollup updated on
 ingest; (3) move analytics aggregation from JavaScript into MongoDB `$group` pipelines and add
-the missing `{userId:1, timestamp:-1}` index. Also: fix the 29 TypeScript errors so
+the `{userId:1, timestamp:-1}` index (shipped 2026-09-08). The 29 TypeScript errors were fixed 2026-09-09 so
 `npm run build` passes, and add integration tests that actually hit a database.
 
 ---
@@ -301,7 +301,7 @@ For each: **what / where in CodeTrackr / why / alternative / why the choice hold
   icons) and team familiarity won.
 - **Trade-off / where it bit me:** no data-fetching library — every navigation refetches
   with `cache:'no-cache'`. `@tanstack/react-query` is even in `package.json`, unused
-  (M-12). And `tsc -b` currently reports **29 errors** so `npm run build` fails (M-13).
+  (M-12). `tsc -b` had **29 errors** so `npm run build` failed — ✅ fixed 2026-09-09 (M-13), CI enforces it.
 - **Interview Qs:** "Why not Next.js?" / "How do you manage server state?" / "What breaks
   with StrictMode double-invoke?" / "Why is `useCallback` on `fetchAnalytics`?"
 
@@ -885,7 +885,7 @@ card with "Try again"; `Leaderboard`/`Groups`/`Dashboard` render "No data yet" e
 
 ### 8.6 Known frontend problems [ACTUAL IMPLEMENTATION]
 
-1. **`npm run build` fails** — `tsc -b` → 29 errors (16 in `Goals.tsx`, 5 `TextType.tsx`,
+1. **`npm run build` — ✅ green 2026-09-09** — was `tsc -b` → 29 errors (16 in `Goals.tsx`, 5 `TextType.tsx`,
    3 each `Groups`/`Dashboard`, 1 each `Teams`/`Profile`); 2 are real
    (`string not assignable to never`), the rest unused imports/vars (M-13).
 2. **Dashboard "Repeated Failures"** renders `repeatedFailuresDaily` / `repeatedFailuresWeekly`
@@ -1512,7 +1512,7 @@ Walk it in order (this is `CodeTrackr_Architecture.md` §9 as a checklist):
   `timestamp <= deadline`; a goal with `techStack: 'React'` won't match `language: 'javascript'`.
 - **"Notifications never arrive."** → is the backend serverless? `node-cron` won't fire
   (H-13). On Render, check the process stayed up (free tier sleeps).
-- **"`npm run build` fails on the frontend."** → `tsc -b` 29 errors (M-13); `vite build` alone
+- **"`npm run build` on the frontend."** → ✅ green 2026-09-09 (was `tsc -b` 29 errors, M-13); `vite build` alone
   would succeed.
 - **"Duplicate activity after a flaky network."** → no idempotency; the retry re-sent and the
   backend stored both.
@@ -1696,7 +1696,7 @@ Each: **Decision → Reason → Alternative → Trade-off → When the alternati
 ### 21.2 Production-level concerns (would block a real launch)
 
 - No observability (logs are `console.log`, no metrics, no tracing, no error tracking).
-- No CI/CD; manual deploys; manual `vsce publish` (and it stalled on an expired PAT).
+- CI (GitHub Actions, 2026-09-09) runs tests + build on push; still no CD — manual deploys; manual `vsce publish` (once stalled on an expired PAT).
 - No backups/DR story documented.
 - No abuse/anti-cheat (leaderboard is trivially gamed — see §26).
 - No data-retention / privacy policy for a tool that records developer behaviour;
@@ -1717,7 +1717,7 @@ Each: **Decision → Reason → Alternative → Trade-off → When the alternati
 
 ### Short term (days)
 
-- Fix the 29 TS errors → green `npm run build`.
+- ~~Fix the 29 TS errors~~ ✅ done 2026-09-09 — `npm run build` is green.
 - `app.use(helmet())`; `express-rate-limit` on `/auth`, `/api/extension`, `/join`.
 - `express-validator` bounds on `/track` (`0 < duration ≤ 3600`, `timestamp` sanity).
 - Central error middleware; stop echoing `err.message`.
@@ -2071,10 +2071,10 @@ the engine / precompute rollups.
 > Splitting them would add network hops and distributed-transaction problems for no benefit.
 > The one service I'd extract first is ingest, behind a queue, when volume demands it.
 
-**27. Your frontend doesn't build — `tsc -b` fails. Explain.**
-> 29 pre-existing TypeScript errors — mostly unused imports and variables, two real
+**27. Your frontend build — walk me through the cleanup.**
+> It had 29 pre-existing TypeScript errors — mostly unused imports and variables, plus 5 implicit-any props in one decorative component (`TextType.tsx`) that also produced 4 `string not assignable to never` errors where pages passed `textColors`. Fixed 2026-09-09; `npm run build` is green and CI keeps it that way. Historically the two real
 > `string not assignable to never` cases. They predate my security work. `vite build` alone
-> succeeds; the combined `tsc -b && vite build` script fails. It needs a cleanup pass; it's
+> alone always succeeded; the combined `tsc -b && vite build` used to fail. It was a cleanup pass; it's
 > filed as M-13.
 
 **28. You have `@tanstack/react-query` installed but unused. Why?**

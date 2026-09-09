@@ -28,7 +28,7 @@
 7. Leaderboard aggregates the **entire** `activities` collection + **all** users in Node — no cache/window/pagination (H-7).
 8. Insights = **deterministic statistics** (`metricsDerive.js`), **not ML**; LLM layer designed, not built.
 9. `node-cron` hourly job for deadline notifications — **broken on serverless** (H-13).
-10. Deploy: frontend **Vercel**, backend **Render** (Vercel serverless config also present), DB **Atlas**. No CI.
+10. Deploy: frontend **Vercel**, backend **Render** (Vercel serverless config also present), DB **Atlas**. CI: GitHub Actions (2026-09-09) — tests + build on push.
 
 ---
 
@@ -42,7 +42,7 @@
 | Frontend | **React 19**, **Vite 7**, TS ~5.9, **Tailwind 3**, react-router-dom 7, chart.js 4 + react-chartjs-2, lucide-react | `@tanstack/react-query` **installed, unused**; 28-theme `ThemeContext` |
 | Auth | Google OAuth → JWT cookie (web); random 64-hex API key (extension) | `JWT_SECRET` required at boot — app throws if unset (was an unsafe `'your_jwt_secret'` fallback), fixed 2026-09-09 |
 | "ML" | pure JS stats — coefficient of variation, weighted score, medians | no model/training/inference/LLM/Python |
-| Deploy | Vercel + Render + Atlas | no Dockerfile, no CI, no observability |
+| Deploy | Vercel + Render + Atlas | GitHub Actions CI (2026-09-09); no Dockerfile, no CD, no observability |
 | Tests | plain `node:assert` — 10 backend suites (~104 assertions) + 2 extension suites | **zero frontend tests; nothing run vs a real DB** |
 
 **Why MongoDB:** append-only, self-contained, schema-evolving docs; per-user-window access; no hot-path joins; free tier.
@@ -237,8 +237,8 @@ fetch(/api/metrics?days=&timezone=)  // NO :userId — IDOR-proof by design →
 35. **Tests?** → `node:assert` scripts; **10 backend suites (~104 assertions) + 2 extension**; **no frontend tests, nothing vs a real DB**.
 36. **`routeGuards.test.js`?** → static scan; fails if a sensitive route loses its auth middleware.
 37. **Error handling?** → per-route `try/catch` → `500 {message, error: err.message}` (leaks); no central handler.
-38. **Deploy?** → Vercel (FE) + Render (BE) + Atlas; `node-cron` breaks on serverless (H-13); no CI.
-39. **Frontend build?** → **fails** — `tsc -b` has 29 pre-existing errors (M-13).
+38. **Deploy?** → Vercel (FE) + Render (BE) + Atlas; `node-cron` breaks on serverless (H-13); GitHub Actions CI as of 2026-09-09.
+39. **Frontend build?** → ✅ green (was 29 `tsc -b` errors, fixed 2026-09-09; M-13). CI enforces it.
 40. **Biggest weakness?** → the API key model + no ingest validation/rate limiting; and testing depth.
 
 ---
@@ -249,7 +249,7 @@ fetch(/api/metrics?days=&timezone=)  // NO :userId — IDOR-proof by design →
 - Don't say the leaderboard is "optimised" — it's an O(n) scan; know the rollup fix.
 - The write path buckets now (10-min `$inc` upsert) — say that, not "append-only per-flush". Totals are unchanged; time-of-day precision is a 10-min grid.
 - Don't say "the API key is just an identifier" — it's a credential.
-- Don't claim the frontend builds — `tsc -b` fails (29 errors).
+- Frontend build is green as of 2026-09-09 (CI enforces). *(Historically `tsc -b` had 29 errors.)*
 - Don't claim integration test coverage — there is none against a real DB.
 - Don't claim the extension has an offline queue — it's memory-only.
 - The Dashboard "Repeated Failures" panel now shows **real** `repeatedFailedCommands` (fixed 2026-09-09).

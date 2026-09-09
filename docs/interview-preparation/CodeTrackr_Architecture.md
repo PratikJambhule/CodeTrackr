@@ -559,7 +559,7 @@ Failure points, in order (this is also the debugging runbook):
   `notificationScheduler` is broken (H-13): each cold start re-runs the immediate sweep and
   the hourly schedule never fires because the process is frozen between requests.
 - No Dockerfile, Procfile, or CI config in the repo. `frontend` build =
-  `tsc -b && vite build` (currently red — 29 TS errors); `backend` start = `node app.js`;
+  `tsc -b && vite build` (✅ green as of 2026-09-09); `backend` start = `node app.js`;
   `extension` build = `tsc --noEmit && esbuild --minify`.
 
 ---

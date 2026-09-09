@@ -373,7 +373,7 @@ scale. Group leaderboard (`/api/groups/:id/details`) is the same pattern scoped 
   - `Dashboard.tsx` "Repeated Failures" panel — ✅ **wired to the real `terminalSummary.repeatedFailedCommands` (2026-09-09)**; was hardcoded mock arrays.
   - `Goals.tsx` to-do items are **client-state only** — never persisted; no goal
     complete/delete/progress UI; the `/:goalId/progress` endpoint is never called.
-  - `npm run build` **fails** — `tsc -b` reports **29 pre-existing TypeScript errors**
+  - `npm run build` — ✅ **green as of 2026-09-09** (was 29 `tsc -b` errors, M-13). CI (`.github/workflows/ci.yml`) keeps it green.
     (M‑13; mostly unused imports, 2 real `string not assignable to never`).
   - `NotificationPanel` polling `useEffect` closes over a stale `isOpen` (L‑1).
 - **Themes:** 28 palettes in `ThemeContext.tsx`, persisted to `localStorage.selectedTheme`,
@@ -472,13 +472,13 @@ database — the bucketing/rollup logic is proven at the pure-function level onl
 3. Analytics aggregate in JS, not MongoDB; daily endpoint pulls 7 days to show 1 (M‑1).
 4. `node-cron` scheduler incompatible with serverless (H‑13) — now also runs the nightly rollup.
 5. `helmet` + rate limits on `/auth` + `/api/extension` added 2026-09-09 (M‑3); ingest bounds-checked 2026-09-09 (M‑4). Group `/join` still unlimited.
-6. Frontend does not typecheck — `npm run build` fails (M‑13). *(fixed in the quick-wins batch — see IMPROVEMENT_PLAN)*
+6. ~~Frontend does not typecheck~~ ✅ fixed 2026-09-09 (M‑13) — `npm run build` green, enforced by CI.
 7. Dashboard "Repeated Failures" now shows real data (2026-09-09); Goals to-dos are non-persistent; Teams UI is orphaned.
 8. `userId` is String on `activities`, ObjectId elsewhere → coercion gymnastics, blocks `$lookup` (M‑6).
 9. Extension has no offline queue; un-flushed time is lost on restart.
 10. Ingest not idempotent — a same-window replay double-counts inside one bucket.
 11. Insights recomputed every request, no cache.
-12. No CI/CD, no observability, no integration tests.
+12. GitHub Actions CI added 2026-09-09 (backend+extension tests, frontend build); still no CD, no observability, no integration tests.
 13. **DB write-reduction (2026‑09‑08):** time-of-day precision is now the 10-minute grid;
     all-time reads (`/leaderboard`, `/summary`, `/metrics >90d`) still scan raw `activities`
     — not yet repointed at `dailysummaries`; the 400-day TTL is a safety net only.
@@ -492,7 +492,7 @@ explosion; the dead `date` field/index; idle < 2 min inflating totals.)*
 
 **Short term:** hash API keys at rest (`keyId` + secret, prefix); add `helmet` +
 `express-rate-limit` on `/auth` and `/api/extension`; add `express-validator` bounds on
-ingest (`0 < duration ≤ 3600`); central error middleware; fix the 29 TS errors; wire the real
+ingest (`0 < duration ≤ 3600`); central error middleware; wire the real
 `repeatedFailedCommands` into the dashboard; move the scheduler to Vercel Cron / an external
 trigger. *(Done 2026‑09‑08: `{userId:1,timestamp:-1}` index; 10-min bucketing; drop `date`.)*
 
@@ -523,7 +523,7 @@ metrics, tracing); CI (typecheck + both test suites) + automated Marketplace pub
   **Follow-up open:** repoint all-time reads at `dailysummaries` + tighten the TTL (with `UserStats`).
 - `H-7`, `H-8` (leaderboard scans), `H-13` (serverless cron), most `MEDIUM`/`LOW` items **open**.
 - Extension packaged as `2.3.0`; Marketplace publication is manual / unverified.
-- Frontend build is red (`tsc -b`); the deployed Vercel build predates the type regressions or skips the check.
+- Frontend build is ✅ green (`tsc -b && vite build`) as of 2026-09-09; CI runs it on every push.
 - No work has touched a live database. **Migrations to run on deploy:**
   `node backend/scripts/migrate-drop-date.js --apply` then optionally
   `node backend/scripts/rollup-daily.js --apply`.

@@ -331,7 +331,7 @@ draws it.
 
 ### Things to know (and own honestly)
 
-- **`npm run build` currently fails** — the TypeScript check reports 29 old errors (mostly
+- **`npm run build` is green** as of 2026-09-09 — the TypeScript check had 29 old errors (mostly
   unused imports). `vite build` alone works. It's a cleanup job, not a design flaw.
 - The dashboard's **"Repeated Failures" panel shows fake hard-coded data**, not the real
   numbers (which the backend does calculate).
@@ -525,12 +525,12 @@ the frontend; one end-to-end test with Playwright.
 
 ### Deployment
 
-- **Website:** Vercel. Build is `tsc -b && vite build` (currently failing at the `tsc` step).
+- **Website:** Vercel. Build is `tsc -b && vite build` (✅ green as of 2026-09-09).
 - **Backend:** Render (a normal always-on Node process). There's also a Vercel serverless
   config in the repo.
 - **Database:** MongoDB Atlas.
 - **Extension:** packaged with `vsce`, published to the VS Code Marketplace.
-- **No CI/CD, no Dockerfile, no automated tests on push.**
+- GitHub Actions CI on push (2026-09-09): backend + extension tests, frontend build. Still no CD, no Dockerfile.
 
 **One gotcha:** the deadline-reminder cron job uses `node-cron`. That works on Render (always
 on) but **breaks on serverless** — the process is frozen between requests, so the hourly job
@@ -607,8 +607,7 @@ type-conversion tricks in the leaderboard and blocks joins. Migrating it is on t
 **What breaks first at scale?** The leaderboard (whole-table scan per request), then the
 serverless cron. The per-user analytics scans are now indexed and bounded by the bucketing.
 
-**Your frontend doesn't build — explain.** 29 old TypeScript errors, mostly unused imports.
-`vite build` works; the combined `tsc -b && vite build` fails. A cleanup, not a design issue.
+**Your frontend build — walk me through the cleanup.** It had 29 old TypeScript errors (mostly unused imports, plus 5 implicit-any props in one decorative component). Fixed 2026-09-09; `npm run build` is green and CI keeps it that way. It was a cleanup, not a design issue.
 
 **How do you know the database queries are correct if nothing ran against a real DB?** I
 don't fully — the pure functions are unit-tested (and the streak test runs the *shipped*
@@ -682,7 +681,7 @@ document store?"**
 3. **Analytics maths runs in JavaScript**, not the database — downloads records to add up (bounded now that they're bucketed, still not ideal).
 4. **Cron breaks on serverless** (and it now also runs the nightly rollup).
 5. **No rate limiting / security headers / input validation** (libraries installed, not wired up).
-6. **Frontend build fails** (29 old TypeScript errors).
+6. ~~Frontend build fails~~ ✅ fixed 2026-09-09 (was 29 TypeScript errors).
 7. **Fake data on the dashboard** ("Repeated Failures" panel); **unsaved to-dos**; **dead Teams page**.
 8. **The group leaderboard doesn't show the error comparison yet** — the original motive; the data's collected, the view isn't built.
 9. **No integration tests; nothing tested against a real database** — including the new bucketing/rollup code (pure-function tests only).
@@ -699,7 +698,7 @@ student project right now*.
 - Don't call Insights "AI" or "ML". It's statistics. Say so first.
 - Don't say the leaderboard is "optimised". It's a full scan. Know the rollup fix.
 - Don't say the API key is "just an identifier". It's a credential.
-- Don't claim the frontend builds cleanly. It doesn't (`tsc` fails).
+- The frontend builds cleanly as of 2026-09-09 (CI enforces). It used to fail `tsc`.
 - Don't claim integration test coverage. There is none against a real database.
 - Don't claim the extension has an offline queue. It's memory-only.
 - The dashboard "Repeated Failures" panel now shows real data (fixed 2026-09-09).

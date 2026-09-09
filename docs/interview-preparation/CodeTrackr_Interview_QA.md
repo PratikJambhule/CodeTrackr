@@ -69,7 +69,7 @@
 **A7. What would you improve?**
 > Hash the API keys and support rotation/per-device keys; replace the leaderboard's
 > full-collection scan with a `UserStats` rollup; move analytics aggregation into MongoDB
-> `$group`; fix the 29 TypeScript errors so `npm run build` passes; add integration tests
+> `$group`; the 29 TypeScript errors were fixed 2026-09-09 so `npm run build` passes; add integration tests
 > against a real database.
 
 **A8. What are you most proud of?**
@@ -554,7 +554,7 @@
 > Two real ones now (the "Repeated Failures" panel was wired to real data 2026-09-09). Historically the panel rendered hardcoded mock
 > arrays instead of the real `repeatedFailedCommands` the backend computes. The Goals page's
 > to-do items only mutate React state — nothing is persisted. And `Teams.tsx` exists but isn't
-> routed. Plus `npm run build` fails because `tsc -b` has 29 pre-existing type errors.
+> routed. `npm run build` is green as of 2026-09-09 (was 29 `tsc -b` errors).
 
 **G11. How do loading and error states work?**
 > Each page has a `loading` boolean → spinner text. Failed fetches `console.error`; `Insights`
@@ -924,8 +924,8 @@
 > No idempotency — the extension retried and the backend stored both. Confirm two docs with
 > near-identical fields and adjacent `createdAt`. Fix: idempotency key + unique index.
 
-**M7. `npm run build` fails on the frontend.**
-> `tsc -b` reports 29 errors (mostly unused imports/vars, 2 real type errors). `vite build`
+**M7. `npm run build` on the frontend — ✅ fixed 2026-09-09.**
+> Was 29 `tsc -b` errors (mostly unused imports/vars, plus implicit-any props in `TextType.tsx` that also caused 4 `never` errors). Now green; CI enforces it. `vite build`
 > alone works. Fix the errors or split the script.
 
 **M8. The extension isn't tracking terminal commands.**
@@ -1217,7 +1217,7 @@
 **P5. What would you do differently starting over?**
 > Aggregate in MongoDB from day one; use a real test framework and an in-memory Mongo for
 > integration tests from the start; hash the API keys immediately; and keep the frontend
-> typecheck green in CI so it never drifts to 29 errors.
+> typecheck green in CI (added 2026-09-09) so it never drifts back.
 
 **P6. How do you know the project is "done"?**
 > It isn't — it's a working demo with a documented backlog. "Done" for a launch would mean the
