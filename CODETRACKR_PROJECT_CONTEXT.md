@@ -384,7 +384,7 @@ scale. Group leaderboard (`/api/groups/:id/details`) is the same pattern scoped 
 ## 13. Error handling & reliability (actual)
 
 - Every route is a `try/catch` that returns `res.status(500).json({ message, error: error.message })`
-  — **leaks internals**, no central error middleware (M‑10).
+  — ✅ **fixed 2026-09-09 (M‑10)**: a central `(err,req,res,next)` handler logs the full error with a correlation id and returns `{error, id}`; routes `next(err)`.
 - Mongo connection: `mongoose.connect(...).catch(err => console.error(...))` — the process
   **keeps running without a DB**; requests then fail per-query.
 - Ingest validation: only `if (!fileName || !language || !duration)` → 400. `!duration`

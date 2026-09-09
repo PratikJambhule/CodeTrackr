@@ -310,7 +310,7 @@ For each: **what / where in CodeTrackr / why / alternative / why the choice hold
 - **Where:** `backend/`. `app.js` wires middleware and mounts 10 routers.
 - **Why:** same language as the frontend and extension; Express is the smallest thing that
   does routing + middleware; Express 5 gives native async error propagation (a rejected
-  promise in a handler becomes a 500 without `next(err)` — though there's no central error
+  promise in a handler becomes a 500 without `next(err)` — and there's now a central error
   handler so it's still a generic 500).
 - **Alternative:** Fastify (faster, schema validation built in, would have covered M-4);
   NestJS (structure, DI, decorators — would have forced the service layer I only half-built);
@@ -802,8 +802,9 @@ rollups), retention policies. That's the "right" store for `activities` at scale
 `cookieParser()` → `passport.initialize()` → **`rateLimit` on `/auth` (50/15min) and
 `/api/extension` (120/min)**, skipped under `NODE_ENV=test` → routers (added 2026-09-09).
 Still **no** validator (M-4) and **no** central error handler (M-10) as of this section —
-each route wraps its body in `try/catch` and returns `500 { message, error: err.message }`
-(leaks internals — M-10).
+each route wraps its body in `try/catch` and calls `next(err)`; a central `(err,req,res,next)`
+handler (registered after the routers) logs the full error with a correlation id and returns
+`{ error, id }` — no `err.message` leak (M-10, fixed 2026-09-09). `try/catch` wrappers kept for now.
 
 ### 7.3 Status codes actually used
 
@@ -817,7 +818,7 @@ anything thrown. double-join now returns `409` (fixed 2026-09-09); no `422`; `/a
   session — kept for "one release of backward compatibility" (H-1 note); cleaner to drop it.
 - `POST /api/user/regenerate-api-key` and `complete-onboarding` are `POST` with no body and no
   CSRF token.
-- Error bodies echo `err.message`.
+- Error bodies are generic `{ error, id }` since 2026-09-09 (central handler); a few routes still keep deliberate 4xx bodies with a fixed string.
 - No pagination anywhere (`notifications` is hard-capped at 50; leaderboard/groups unbounded).
 - No API versioning.
 - `/track` uses `!duration` so `0` is rejected.
@@ -1263,12 +1264,14 @@ Format: **Current → Vulnerability → Attack → Fix.**
 - **Fix:** `express-validator` — `duration` int `1..3600`, `timestamp` within `[now-24h, now]`,
   `language`/`fileName` length caps, reject unknown top-level keys.
 
-### 14.5 Error messages leak internals
+### 14.5 Error messages leaked internals — ✅ fixed 2026-09-09
 
-- **Current:** `res.status(500).json({ message, error: error.message })` in every route.
-- **Attack:** provoke errors to learn stack shapes, field names, Mongo error text.
-- **Fix:** central error middleware — log server-side with a request id, return
-  `{ error: 'Internal error', id }`.
+- **Was:** `res.status(500).json({ message, error: error.message })` in every route — provoking
+  errors leaked stack shapes, field names, Mongo error text.
+- **Now:** a central `(err, req, res, next)` handler (registered after the routers) logs the
+  full error server-side with a short correlation id and returns `{ error: 'Internal server
+  error', id }`. Routes call `next(err)`; deliberate 4xx bodies (with fixed strings) stay
+  per-route. `try/catch` wrappers kept for now.
 
 ### 14.6 Leaderboard exposes every user's email
 
@@ -1328,7 +1331,7 @@ Format: **Current → Vulnerability → Attack → Fix.**
 | Failure | What happens now [ACTUAL] | Weakness | Fix [RECOMMENDED] |
 |---|---|---|---|
 | MongoDB down at boot | `mongoose.connect().catch(console.error)` — process keeps running | every request then throws a generic 500 | health check that fails readiness; retry with backoff; `/health` reports DB state (the old server did) |
-| MongoDB down mid-request | route `try/catch` → `500 { error: err.message }` | leaks Mongo text; no retry | central handler + transient-error retry |
+| MongoDB down mid-request | route `try/catch` → `next(err)` → central handler → `500 { error, id }` | generic body (fixed 2026-09-09); still no transient-error retry | add a retry wrapper for transient Mongo errors |
 | Ingest: malformed payload | normalisers coerce sub-docs to 0; missing `fileName/language/duration` → 400 | `duration:0` rejected; `1e12` accepted; junk `timestamp` → `now` | `express-validator` with bounds |
 | Ingest: invalid key | 401 `{ message: 'Invalid API key' }` | fine | + rate-limit to slow enumeration |
 | Extension offline | buffered minutes kept in memory, retried next tick; best-effort flush on deactivate | restart loses un-flushed time | persist the buffer to `context.globalState`; a small on-disk queue |
@@ -1689,7 +1692,7 @@ Each: **Decision → Reason → Alternative → Trade-off → When the alternati
 | 13 | Extension has no offline queue | un-flushed time lost on restart | data loss | persist buffer to `globalState` |
 | 14 | No idempotency on ingest | retry = double count | inflated data | client idempotency key + unique index |
 | 15 | Insights recomputed every request | 4 aggregations per page load | slow page, DB load | cache per (user, window) |
-| 16 | Errors echo `err.message` | internals leak | recon aid | central error middleware |
+| 16 | ~~Errors echo `err.message`~~ ✅ fixed 2026-09-09 | was a recon aid | — | central error middleware + correlation id |
 | 17 | Leaderboard exposes emails | PII in a shared list | privacy | return handles only |
 | 18 | No integration/e2e/frontend tests; nothing run vs a real DB | pipelines unverified end-to-end | regressions slip | supertest + `mongodb-memory-server`, Playwright |
 
@@ -1720,7 +1723,7 @@ Each: **Decision → Reason → Alternative → Trade-off → When the alternati
 - ~~Fix the 29 TS errors~~ ✅ done 2026-09-09 — `npm run build` is green.
 - `app.use(helmet())`; `express-rate-limit` on `/auth`, `/api/extension`, `/join`.
 - `express-validator` bounds on `/track` (`0 < duration ≤ 3600`, `timestamp` sanity).
-- Central error middleware; stop echoing `err.message`.
+- ~~Central error middleware; stop echoing `err.message`~~ ✅ done 2026-09-09.
 - Fail fast if `JWT_SECRET` unset.
 - Wire real `repeatedFailedCommands` into the dashboard; **add the error/build-success
   comparison to the group leaderboard** (the original motive — read-path change only);

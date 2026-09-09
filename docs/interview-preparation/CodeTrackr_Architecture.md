@@ -113,7 +113,7 @@ own row; the extension (2.3.0) also **drops a flush entirely when it carries no 
 | `api/index.js` | `module.exports = (req,res) => serverless(app)(req,res)` — Vercel serverless adapter. |
 | `config/passport.js` | Google OAuth 2.0 strategy. Find-or-create `User` by `googleId`; new users get `generateApiKey()`. **Throws at import** if any `GOOGLE_*` env var is missing. |
 | `middleware/auth.js` | `isAuthenticated` (JWT from `req.cookies.token`), `verifyApiKey` (`User.findOne({ apiKey })`), `AUTH_BYPASS` handling (refused in production). |
-| `routes/*.js` | Controllers. Each route: middleware → validate → Mongoose call(s) → shape JSON → `try/catch` → `500 {message, error}`. |
+| `routes/*.js` | Controllers. Each route: middleware → validate → Mongoose call(s) → shape JSON → `try/catch` → `next(err)` → **central handler** → `500 {error, id}` (correlation id; no `err.message` leak, since 2026-09-09). Deliberate 400/401/403/404/409 responses stay per-route. |
 | `services/authorization.js` | `sameUser(a,b)`, `assertOwnership(requestedId, sessionId)` → `{ok,status,message}`, `isBypassAllowed(env)`. Dependency-free (unit-tested). |
 | `services/passwordHash.js` | `crypto.scrypt` hash/verify for **group** passwords. Format `scrypt$salt$hash`. Verifies legacy plaintext too; `routes/groups.js` upgrades on next successful join. |
 | `services/activityNormalizers.js` | `normalizeEditor/Focus/GitAnalytics(body)` — coerce to non-negative finite numbers, cap `flowBlocksMs` at 200. **Since 2026‑09‑08 a missing sub-doc/leaf stays absent** (not defaulted to `0`) so bucket docs are sparse. Tolerates payloads from older extension versions. |

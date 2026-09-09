@@ -309,7 +309,7 @@ draws it.
 ### Weak spots in the API
 
 - Every route does its own `try/catch` and returns `error.message` to the client — that
-  **leaks internal details**. **BETTER:** one central error handler.
+  used to **leak internal details** — ✅ fixed 2026-09-09 with one central `(err,req,res,next)` handler (correlation id, generic body).
 - Rate limiting on `/auth` (50/15min) and `/api/extension` (120/min) via `express-rate-limit` (added 2026-09-09); other routes (e.g. group `/join`) are still unlimited.
 - Security headers via `helmet()` (added 2026-09-09).
 - **No real input validation** — `duration: 999999999` is accepted; you can even send your
@@ -473,7 +473,7 @@ too (password-gated, not hidden); no rate limit on join, so passwords can be gue
 | Rate limiting only on `/auth` + `/api/extension` (2026-09-09) | group `/join` password guessing still unlimited |
 | No security headers (`helmet` unused) | missing basic browser protections |
 | No input validation on activity | `duration: 1e12` accepted; fake data is trivial |
-| Errors return `error.message` | leaks internal details |
+| ~~Errors return `error.message`~~ ✅ fixed 2026-09-09 | central handler, generic body + id |
 | Leaderboard shows every email | privacy |
 | No duplicate/replay protection | resend a request → counted again |
 | Group search puts user text straight into a regex | slow-regex (ReDoS) risk |

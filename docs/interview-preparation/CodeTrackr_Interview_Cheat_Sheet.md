@@ -171,7 +171,7 @@ fetch(/api/metrics?days=&timezone=)  // NO :userId — IDOR-proof by design →
 - **API key: plaintext at rest + in transit, no expiry, no scope, full ingest authority.** Leak → forge unlimited activity (leaderboard fraud), but NOT read the dashboard (needs JWT).
 - No rate limiting on group `/join` (password brute-force) or the analytics routes — only `/auth` + `/api/extension`.
 - Client still sets `timestamp` on ingest (bounds-checked as of 2026-09-09, but client-chosen).
-- Errors echo `err.message` (internal leak). No central error handler. *(fixed later in the batch — #4)*
+- *(FIXED 2026-09-09)* central `(err,req,res,next)` handler — correlation id, generic body, routes `next(err)`.
 - Leaderboard returns **every user's email**.
 - No idempotency / replay protection on ingest.
 - Group `discover` enumerates private groups (name+desc+creator); no group-owner authz.
@@ -236,7 +236,7 @@ fetch(/api/metrics?days=&timezone=)  // NO :userId — IDOR-proof by design →
 34. **Prevent cheating?** → validate duration, rate-limit per key, idempotency key, corroborate with edit/focus/git signals.
 35. **Tests?** → `node:assert` scripts; **10 backend suites (~104 assertions) + 2 extension**; **no frontend tests, nothing vs a real DB**.
 36. **`routeGuards.test.js`?** → static scan; fails if a sensitive route loses its auth middleware.
-37. **Error handling?** → per-route `try/catch` → `500 {message, error: err.message}` (leaks); no central handler.
+37. **Error handling?** → per-route `try/catch` → `next(err)` → **central handler** → `500 {error, id}` (correlation id, no leak; since 2026-09-09). Deliberate 4xx stay per-route.
 38. **Deploy?** → Vercel (FE) + Render (BE) + Atlas; `node-cron` breaks on serverless (H-13); GitHub Actions CI as of 2026-09-09.
 39. **Frontend build?** → ✅ green (was 29 `tsc -b` errors, fixed 2026-09-09; M-13). CI enforces it.
 40. **Biggest weakness?** → the API key model + no ingest validation/rate limiting; and testing depth.

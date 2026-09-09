@@ -269,7 +269,7 @@
 > Express 5 propagates rejected promises from async handlers to the error pipeline
 > automatically, so I don't need `.catch(next)` on every route. In practice there's no central
 > error handler, so a thrown error still becomes a generic 500 — the routes catch their own
-> errors and return `{ message, error: err.message }`, which leaks internals (M-10).
+> errors and call `next(err)`; a central handler returns a generic `{ error, id }` (M-10, fixed 2026-09-09).
 
 **D3. Where's your validation layer?**
 > Minimal — `if (!fileName || !language || !duration)` on ingest, and the normalisers clamp
@@ -278,7 +278,7 @@
 > (`0 < duration <= 3600`, `timestamp` within a sane range).
 
 **D4. How do you handle async errors?**
-> Every handler is a `try/catch` returning a 500 with `err.message`. There's no central error
+> Every handler is a `try/catch` that calls `next(err)`; a central `(err,req,res,next)` handler
 > middleware — that's a known gap; the fix is one `app.use((err,req,res,next)=>...)` that logs
 > server-side with a request id and returns a generic body.
 
@@ -777,7 +777,7 @@
 > deleted; group passwords scrypt-hashed; `AUTH_BYPASS` refused in production; IDORs on
 > goals/teams closed. Still open: the API key is plaintext and non-expiring; no rate limiting
 > anywhere; no security headers (`helmet` unused); no request validation on ingest; error
-> responses echo `err.message`; the leaderboard leaks emails; no idempotency on ingest; the
+> the leaderboard leaks emails; no idempotency on ingest; the
 > group search regex is a ReDoS vector. (`JWT_SECRET` fallback fixed 2026-09-09.)
 
 **K2. Biggest security risk?**
