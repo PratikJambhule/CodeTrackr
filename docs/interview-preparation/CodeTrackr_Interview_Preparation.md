@@ -54,20 +54,29 @@
 
 ### What it is [ACTUAL IMPLEMENTATION]
 
-CodeTrackr is a **developer-productivity analytics platform**. It has three parts that share
-one backend:
+**Why it exists (the motive):** to keep **friendly competition** going in my college friend
+group. You create a **group** — for a contest week, or just to keep each other honest on daily
+practice — and because everyone's editor is tracked automatically, the group page shows who
+actually put in the hours and the code. The extension also records each person's
+**command / build / test failures**, so "who's fighting the most errors this week" is data the
+app already collects (the group view currently ranks by hours + lines; surfacing the error
+comparison there is the obvious next step).
+
+CodeTrackr is a **developer-productivity analytics platform** with three parts that share one
+backend:
 
 1. A **VS Code extension** that passively records coding activity (time, files, languages,
-   editor edits, terminal commands, git commits, focus/flow) and POSTs it to the backend on a
-   timer.
+   editor edits, terminal commands + their success/failure, git commits, focus/flow) and
+   sends it to the backend on a timer.
 2. A **Node/Express/MongoDB backend** that authenticates the extension by an **API key**,
-   normalises and stores each flush as an `Activity` document, and serves aggregated analytics
-   to the dashboard.
+   normalises the payload, and **merges it into a 10-minute activity "bucket" document**
+   (`$inc` upsert — changed 2026‑09‑08; was one document per flush), then serves aggregated
+   analytics to the dashboard.
 3. A **React dashboard** that visualises a user's activity (daily/weekly charts, terminal
-   analytics), plus social features — a **global leaderboard**, **study groups** with their own
-   leaderboards, **goals** on a calendar with deadline notifications — and a private
-   **Insights** page of derived productivity metrics (deep-work ratio, flow blocks,
-   consistency, true peak hour, estimation accuracy).
+   analytics), plus the social layer — **groups** with their own per-member leaderboards
+   (the core feature), a **global leaderboard**, **goals** on a calendar with deadline
+   notifications — and a private **Insights** page of derived productivity metrics (deep-work
+   ratio, flow blocks, consistency, true peak hour, estimation accuracy).
 
 Auth is split: the **web** uses Google OAuth → a JWT in an httpOnly cookie; the **extension**
 uses a per-user random API key in an `x-api-key` header.
@@ -81,27 +90,30 @@ way on purpose (explainable, reproducible, no training data needed). An LLM narr
 
 ### 30-second version
 
-> "CodeTrackr is a coding-activity tracker. You install a VS Code extension, paste an API key
-> from the website, and it quietly records what you work on — time per language, editor
-> churn, terminal commands, git commits — and sends it to my backend every half minute or so.
-> The React dashboard turns that into charts, a global leaderboard, study groups, goal
-> tracking, and an insights page that tells you things like your most productive hour and how
-> steady your habits are. It's a MERN stack — React, Express, MongoDB — plus a TypeScript VS
-> Code extension."
+> "CodeTrackr is a coding-activity tracker built around friendly competition. My friends and I
+> wanted to see who was actually putting in the work during contest weeks and daily practice,
+> so I built a VS Code extension that quietly records what you work on — time per language,
+> editor churn, terminal commands and whether they passed or failed, git commits — and sends
+> it to my backend. You make a group with your friends, and the app shows a per-member
+> leaderboard plus a global one, goal tracking, and an insights page for things like your most
+> productive hour. It's a MERN stack — React, Express, MongoDB — plus a TypeScript VS Code
+> extension."
 
 ### 1-minute version
 
-> "It solves a specific gap: most devs have no idea where their coding time actually goes. I
-> built a VS Code extension in TypeScript that hooks into editor, terminal, git and window
-> events and accumulates counters — gross lines edited, churn, focused minutes, flow blocks,
-> command success rates. Every 30 seconds it flushes an activity document to an Express API,
-> authenticated by a 64-character API key the user gets from the website after signing in with
-> Google. The backend stores each flush in MongoDB and exposes aggregated endpoints. The
-> React frontend renders daily and weekly charts with Chart.js, a leaderboard ranked by
-> coding hours, groups you can create and join (public or password-protected), goals on a
-> calendar with a node-cron job that fires deadline notifications, and an Insights page that
-> derives five productivity metrics from the raw data using plain statistics. It's deployed
-> with the frontend on Vercel, the backend on Render, and MongoDB Atlas."
+> "The idea came from my friend group — during coding contests and daily practice we kept
+> arguing about who'd actually done the work, so I built something to measure it. A VS Code
+> extension in TypeScript hooks into editor, terminal, git and window events and accumulates
+> counters — gross lines edited, churn, focused minutes, flow blocks, command and build
+> success rates. The extension flushes those to an Express API, authenticated by a
+> 64-character API key the user gets from the website after signing in with Google. The
+> backend merges each flush into a 10-minute activity document in MongoDB and exposes
+> aggregated endpoints. The React frontend renders daily and weekly charts with Chart.js;
+> **groups** you create and join (public or password-protected) with a per-member leaderboard
+> of hours and lines; a global leaderboard; goals on a calendar with a node-cron job that
+> fires deadline notifications; and an Insights page that derives five productivity metrics
+> using plain statistics. Deployed with the frontend on Vercel, the backend on Render, and
+> MongoDB Atlas."
 
 ### 2-minute version
 
@@ -130,10 +142,13 @@ Add, after the 1-minute version:
 
 ### 5-minute deep technical version
 
-Cover, in order: (1) the three-client / one-backend topology and why a modular monolith;
+Cover, in order: (0) the motive — friendly competition in a friend group, so the **group** +
+its per-member leaderboard is the heart of the product, everything else is measurement to feed
+it; (1) the three-client / one-backend topology and why a modular monolith;
 (2) the extension's tracker architecture — `consumeInterval()` contract, idle/pause state
-machine, one Activity doc per flush, no offline queue; (3) the ingest path — `verifyApiKey`,
-additive normalisers that tolerate old payloads, `Activity.create`; (4) the read path —
+machine, `payloadHasSignal` skip-empty, no offline queue; (3) the ingest path — `verifyApiKey`,
+additive normalisers that tolerate old payloads, `planActivityWrite` → **10-minute bucket
+`$inc` upsert** (`ACTIVITY_BUCKET_MS=0` = legacy per-flush create); (4) the read path —
 `isAuthenticated` + `assertOwnership`, `Activity.find` then JS aggregation, and why that's a
 known M-1 that should move into MongoDB `$group`; (5) the leaderboard's full-collection scan
 and the `UserStats` rollup you'd build instead; (6) the Insights pipeline —
@@ -146,13 +161,18 @@ token, `session:false`; (8) the security findings you found and fixed vs the one
 
 ### "Tell me about your project."
 
-> "CodeTrackr is a coding-productivity tracker I built with two teammates. The core loop:
-> a VS Code extension records your activity and sends it to my backend, which stores it in
-> MongoDB, and a React dashboard visualises it with a leaderboard, groups and goals on top.
-> My focus areas were the extension's activity-tracking accuracy, the backend API and data
-> model, and a self-audit that turned into a security and correctness pass. The part I'd
-> most want to talk through is the account-linking design — how the extension authenticates
-> without a login UI — because it's a real trade-off and I know exactly where it's weak."
+> "CodeTrackr is a coding-productivity tracker I built with two friends. It came out of our
+> own habit — during coding-contest weeks and daily practice we'd all claim we'd 'grinded',
+> and there was no way to actually see it. So the core loop is: a VS Code extension records
+> your activity and sends it to my backend, and a React dashboard shows it. The feature that
+> matters is **groups** — you make a group with your friends and get a per-member leaderboard
+> of who coded the most, in what languages, and how their command/build success compares. On
+> top of that there's a global leaderboard, goal tracking, and a stats-based insights page.
+> My focus areas were the extension's tracking accuracy, the backend API and data model
+> (including a recent change to merge flushes into 10-minute buckets so the write volume
+> doesn't explode), and a self-audit that turned into a security pass. The part I'd most want
+> to talk through is the account-linking design — how the extension authenticates without a
+> login UI — because it's a real trade-off and I know exactly where it's weak."
 
 ### "What was your contribution?" [ground this ONLY in repo evidence]
 
@@ -175,21 +195,26 @@ in depth, not to claim ownership of code you'd struggle to defend.)*
 
 ### Why I built it
 
-> "I kept losing track of where my time went — I'd 'code for four hours' and have one commit
-> to show for it. Existing tools like WakaTime measure time-in-editor but not whether that
-> time was focused or churny. I wanted something that captured the *shape* of a session and
-> gave me honest feedback, plus a social layer so a study group could see each other's
-> consistency."
+> "My friend group runs informal coding contests and daily practice streaks, and there was
+> always the same argument — everyone *says* they put in the hours. I wanted a way to just
+> see it: make a group, everyone installs the extension, and the group page shows who
+> actually coded, in what languages, and — because the extension records failed
+> commands/builds too — roughly who was fighting the most errors. The personal side
+> (focused vs elapsed time, churn, most-productive hour) grew out of the same 'measure it
+> honestly' idea. WakaTime measures time-in-editor but has no group-competition angle and
+> doesn't tell you whether the time was focused or churny."
 
 ### What problem it solves / what makes it different
 
-- **Problem:** developers have poor visibility into how coding time is actually spent, and
-  self-reported estimates are unreliable.
-- **Different from a plain tracker:** (1) it measures **focused** time and **flow blocks**,
-  not just elapsed time; (2) it tracks **churn** (write-then-delete) so a refactor isn't
-  invisible; (3) it separates "busiest hour" from "most productive hour"; (4) it has a
-  **group** layer for accountability; (5) it compares your goal **estimates** to hours you
-  actually logged.
+- **Problem:** in a group of friends who code together, there's no honest, low-effort way to
+  see who's actually doing the work — self-reported effort is unreliable and nobody wants to
+  manually log anything.
+- **Different from a plain tracker:** (1) it's built around a **group leaderboard** — the
+  competition is the point, not a side feature; (2) it records **command/build/test
+  success and failure** per person, not just time; (3) it measures **focused** time and
+  **flow blocks**, not just elapsed; (4) it tracks **churn** (write-then-delete) so a refactor
+  isn't invisible; (5) it separates "busiest hour" from "most productive hour" and compares
+  your goal **estimates** to hours actually logged.
 
 ### Hardest part / biggest technical challenge
 
@@ -298,8 +323,9 @@ For each: **what / where in CodeTrackr / why / alternative / why the choice hold
 
 ### MongoDB + Mongoose 8
 
-- **Where:** the only datastore. `activities` (high volume, one doc per flush), `users`,
-  `groups`, `groupmembers`, `goals`, `teams`, `notifications`.
+- **Where:** the only datastore. `activities` (high volume — one doc per 10-minute
+  `(user, project, language)` window since 2026‑09‑08, previously one per flush), `users`,
+  `groups`, `groupmembers`, `goals`, `teams`, `notifications`, `dailysummaries` (nightly rollup).
 - **Why:** activity documents are **append-only, self-contained, and schema-evolving** — I
   added three analytics sub-documents (`editorAnalytics`, `focusAnalytics`, `gitAnalytics`)
   additively with no migration, because Mongoose ignores unknown fields on read and defaults
@@ -440,15 +466,17 @@ if (isPaused): return
 flushIfNeeded(false)
 ```
 
-`flushIfNeeded(force)`:
+`flushIfNeeded(force)` *(2.3.0)*:
 ```
 if (!startedMs) return
 elapsedFromStartMin = (now - startedMs)/60000
 idleMin             = (now - lastActivityMs)/60000
 if (!force && idleMin >= 2) return                       // idle: don't flush
 totalBuffered = bufferedMinutes + elapsedFromStartMin
-if (!force && totalBuffered < minFlushMinutes) return    // default 0.5 min
-await sendActivity(totalBuffered, fileOpened)
+if (!force && totalBuffered < minFlushMinutes) return    // default 2 min (was 0.5)
+payload = buildPayload(round(totalBuffered*60), fileOpened)
+if (!force && !payloadHasSignal(payload)) return         // nothing happened → keep buffering
+await sendActivity(payload)
 startedMs = now ; bufferedMinutes = 0                    // on success
 // on throw: bufferedMinutes = totalBuffered ; startedMs = now   (retry next tick)
 ```
@@ -457,7 +485,7 @@ startedMs = now ; bufferedMinutes = 0                    // on success
 
 | Signal | Source | Tracker | Notes |
 |---|---|---|---|
-| Active time | timer + `markActivity()` events | `extension.ts` | buffered minutes; idle < 2 min still counts (L-7) |
+| Active time | timer + `markActivity()` events | `extension.ts` | buffered minutes; since 2.3.0 a signal-less flush isn't sent, trimming the old idle-<2-min L-7 skew |
 | File name / type / project / language | `activeTextEditor.document`, `workspace.name` | `getFileMeta()` | **basename only** — never the path |
 | Gross lines/chars inserted & deleted | `onDidChangeTextDocument` content changes | `EditorTracker` | replaces the broken net-`lineCount` delta |
 | Churn | deletions matched against insertions ≤ 10 min old | `EditorTracker.consumeChurn` | "wrote it then deleted it" |
@@ -471,13 +499,18 @@ startedMs = now ; bufferedMinutes = 0                    // on success
 | Terminal commands: total, success/fail, per-category, build/test runs, git actions, repeated failures | `onDidStart/EndTerminalShellExecution` | `TerminalTracker` + `analyticsAggregator` + `commandClassifier` | exit code → success/fail; commands **sanitised** (`token=***`) + truncated |
 | Debug sessions | `debug.onDidStart/TerminateDebugSession` | `DebugTracker` | folded into `terminalAnalytics.debuggingSessions` |
 
-### 4.4 Frequency, batching, buffering, debounce/throttle
+### 4.4 Frequency, batching, buffering, debounce/throttle *(updated 2026‑09‑08 — extension 2.3.0)*
 
 - **Timer ticks** every `flushIntervalSeconds` (default 30 s).
-- **A flush happens** only when `totalBuffered ≥ minFlushMinutes` (default 0.5 min) — so in
-  practice roughly every 30–90 s of continuous coding.
-- **Batched?** No. One `POST /api/extension/track` per flush, one `Activity` doc per POST.
-  A `/track/batch` endpoint exists on the backend but the extension never calls it.
+- **A flush is sent** only when `totalBuffered ≥ minFlushMinutes` (**default 2 min** since
+  2.3.0, was 0.5) **and** `payloadHasSignal(payload)` is true (there were edits / commands /
+  commits) — otherwise the buffered time is kept and carried to the next flush. So in practice
+  a POST every ~2 min of real coding.
+- **Batched?** No HTTP batching (one `POST /api/extension/track` per flush). But the **backend
+  merges** flushes: `planActivityWrite` floors the timestamp to a 10-minute boundary and
+  `$inc`-upserts a `(userId, projectName, language, bucketStart)` document, so many flushes in
+  a window = **one row**. `/track/batch` exists but is unused. `ACTIVITY_BUCKET_MS=0` restores
+  one plain `Activity.create` per flush.
 - **Buffering:** active minutes are buffered in the `state` object between ticks and across a
   failed flush (in memory only).
 - **Debounce/throttle:** the 5 s attention sampler and the 15 s focus ticker are the only
@@ -602,10 +635,13 @@ harden it."
   userId: String,          // hex of users._id — NOT an ObjectId ref
   fileName: String,        // required, basename only
   fileType, projectName, language: String,
-  duration: Number,        // SECONDS  ← every reader divides by 3600
-  linesAdded, linesRemoved: Number,   // gross counts since 2.2.0
-  timestamp: Date,         // start of the flush interval
-  date: Date,              // == timestamp since H-5; legacy rows differ
+  duration: Number,        // SECONDS  ← $inc of REAL measured seconds; every reader /3600
+  linesAdded, linesRemoved: Number,   // gross counts, $inc-accumulated per bucket
+  timestamp: Date,         // == bucketStart (the 10-min window start)
+  bucketStart: Date,       // 10-min-floored; present only on bucketed docs (2026-09-08)
+  files: [String],         // de-duped basenames merged into this bucket
+  flushCount: Number,      // how many flushes merged in (default 1)
+  // (`date` field REMOVED 2026-09-08 — nothing read it; index dropped)
   terminalAnalytics: { totalCommands, successfulCommands, failedCommands, successRate,
                        buildRuns, testRuns, successfulBuilds, failedBuilds, buildSuccessRate,
                        debuggingSessions, commandUsage:{git,npm,node,python,docker,gcc,java,pip,misc},
@@ -619,14 +655,28 @@ harden it."
 }   // { timestamps: true } adds createdAt / updatedAt
 ```
 
-- **Purpose:** immutable record of one flush interval.
+- **Purpose:** one merged record per 10-minute `(user, project, language)` window.
+  `duration` is `$inc`-accumulated from real measured seconds — **totals unchanged** vs the
+  old per-flush model; only time-of-day resolution is now the 10-minute grid.
+- **Write:** atomic `Activity.findOneAndUpdate({...key, bucketStart}, {$inc, $max, $push
+  $slice:-200, $addToSet files, $setOnInsert}, {upsert:true, setDefaultsOnInsert:false})`,
+  keyed by a partial-unique index `{userId,projectName,language,bucketStart}`. `11000` on the
+  upsert insert → retry once as a plain update.
 - **Relationships:** `userId` → `users._id` (as a string; no populate).
-- **Why this structure:** self-contained, append-only, cheap to write; sub-documents added
-  additively without migration.
-- **Scalability issue:** one doc per flush → ~ 60–120 docs/user/active-hour; unbounded growth;
-  all analytics scan a user's slice and aggregate in Node.
-- **Improvements:** TTL or cold-storage archival of raw docs after N months; a `UserStats`
-  daily rollup; migrate `userId` to `ObjectId`; add `{userId:1,timestamp:-1}`.
+- **Was:** one doc per flush → ~60–120 docs/user/active-hour, unbounded. **Now:** ~6–12
+  docs/user/active-hour. Sparse sub-docs (only non-zero leaves written). `date` field + its
+  index removed. 400-day TTL on `createdAt`. A `dailysummaries` nightly rollup exists.
+- **Still to do:** repoint the all-time reads (leaderboard, `/summary`, `metrics >90d`) at
+  `dailysummaries` and tighten the TTL — bundle with a `UserStats` rollup; migrate `userId`
+  to `ObjectId`.
+
+#### `dailysummaries`
+
+`{ userId, day (YYYY-MM-DD UTC), totalSeconds, totalLinesAdded/Removed, flushCount,
+bucketCount, languages:[{language,seconds}], projects:[String], editor/terminal/git
+aggregates, focus{} }`, unique `{userId,day}`. Written nightly by `scripts/rollup-daily.js` /
+the `initScheduler` cron from raw `activities`. **Not yet consumed by any read** — it's
+infrastructure for the future all-time-read cutover.
 
 #### `users`
 
@@ -658,18 +708,20 @@ demand, not stored.
 `userId`, `goalId`, `type` (enum incl. `goal_completed` which is never produced), `title`,
 `message`, `read`. Written by `notificationScheduler`.
 
-### 6.2 Indexes [ACTUAL IMPLEMENTATION + gap]
+### 6.2 Indexes [ACTUAL IMPLEMENTATION — updated 2026‑09‑08]
 
-Defined: `{userId:1}`, `{userId:1,date:-1}`, `{userId:1,projectName:1}`,
-`{userId:1,language:1}` on `activities`; `{groupId:1,userId:1}` unique on `groupmembers`;
-unique on `users.googleId`, `users.email`, `users.apiKey` (sparse).
+On `activities`: `{userId:1}`, **`{userId:1,timestamp:-1}`** (added — the range queries every
+read does), `{userId:1,projectName:1}`, `{userId:1,language:1}`, **partial-unique
+`{userId:1,projectName:1,language:1,bucketStart:1}`** (`partialFilterExpression: {bucketStart:
+{$exists:true}}` — race-safe bucket merge, ignores legacy per-flush docs), **400-day TTL on
+`{createdAt:1}}`**. The old `{userId:1,date:-1}` index was **dropped** (nothing queried
+`date`; `scripts/migrate-drop-date.js --apply` removes it + the field). `{groupId:1,userId:1}`
+unique on `groupmembers`; unique on `users.googleId/email/apiKey`; `{userId:1,day:1}` unique
+on `dailysummaries`.
 
-**Missing / wrong:**
-- No `{userId:1,timestamp:-1}` — but every analytics/metrics/streak query filters
-  `timestamp`. They use the `{userId:1}` index and filter timestamp in memory.
-- The `{userId:1,date:-1}` index is near-useless because nothing queries `date`.
+**Still weak:**
 - No index supporting the leaderboard's collection-wide `$group` (there's no good one — it's a
-  full scan by nature).
+  full scan by nature; the `UserStats` rollup is the fix).
 
 ### 6.3 SQL vs MongoDB — the full answer
 
@@ -712,7 +764,7 @@ rollups), retention policies. That's the "right" store for `activities` at scale
 
 | Method | Endpoint | Purpose | Input | Auth | Processing | Response |
 |---|---|---|---|---|---|---|
-| POST | `/api/extension/track` | ingest one flush | body: fileName, language, duration(s), timestamp?, analytics sub-objects | `verifyApiKey` (`x-api-key`) | validate → normalise → `Activity.create` | `201 {success, activity:{id,...}}` |
+| POST | `/api/extension/track` | ingest one flush | body: fileName, language, duration(s), timestamp?, analytics sub-objects | `verifyApiKey` (`x-api-key`) | validate → normalise → `planActivityWrite` → **10-min bucket `$inc` upsert** (or `Activity.create` if `ACTIVITY_BUCKET_MS=0`) | `201 {success, bucket:{...}}` (or `202 {merged}` for a signal-less flush) |
 | POST | `/api/extension/track/batch` | ingest many | `{ activities: [...] }` | `verifyApiKey` | map+normalise → `Activity.insertMany` | `201 {success, count}` |
 | GET | `/api/extension/verify` | key check | — | `verifyApiKey` | — | `200 {success, user:{id,name,email}}` |
 | GET | `/api/analytics/:userId?timezone=` | today hourly + 7d totals | tz offset (min) | `isAuthenticated` + ownership | `Activity.find(7d)` → JS reduce; `computeStreak` (`$group`) | `{ totalHours, projectCount, totalLinesAdded, streakDays, dailyActivity[24], languageBreakdown[], terminalSummary, *Timeline[] }` |
@@ -953,7 +1005,17 @@ serverless limit this fails "long before the user count becomes interesting" (H-
 
 ---
 
-## 11. Groups
+## 11. Groups — the core feature
+
+**Why it's the heart of the product:** the whole project exists so a friend group can run
+**friendly competition** — a contest week, or an ongoing daily-practice streak. You make a
+group, everyone joins, and because every member's editor is tracked automatically, the group
+page ranks who actually did the work. The intent was also "see how many errors each person
+hit" — the extension **does** record per-person `terminalErrorCount` / `failedCommands` /
+`failedBuilds` / `repeatedFailedCommands`, but the group leaderboard currently ranks only by
+**coding hours + lines added** (`codingHours`, `totalLinesAdded` per member). Surfacing the
+error/build-success comparison in the group view is the obvious next feature and an honest
+"what would you add" answer.
 
 ### 11.1 Model [ACTUAL IMPLEMENTATION]
 
@@ -1000,6 +1062,20 @@ duplicate join return?" (409) · "How would you add group admins?" (a `role` col
 `groupmembers`, gate mutations on `role === 'owner'`) · "Private group password vs per-user
 invites — which is better and why?" (invites: revocable, auditable, no shared secret) ·
 "How would you rate-limit join attempts?" (per-user + per-group counter, exponential backoff).
+
+**"You said the point was comparing errors — how would you add that to the group view?"**
+> "The data's already there — each member's activity carries `terminalErrorCount`,
+> `failedCommands`, `failedBuilds` and `repeatedFailedCommands`. The group-details endpoint
+> already `$group`s `Activity` by member for hours and lines; I'd extend that same pipeline
+> with `$sum` of the failure counters and a computed `buildSuccessRate`, add the columns to
+> the group leaderboard table, and optionally a 'most-improved success rate this week' badge.
+> It's a read-path change only — an afternoon."
+
+**"A contest week — how do you scope the leaderboard to just that week?"**
+> "Right now the group leaderboard is all-time (`Activity.aggregate` over member IDs, no
+> window). I'd add a `?from=&to=` to `/groups/:id/details` and a `$match` on `timestamp`; a
+> group could store a `contestStart`/`contestEnd`. The 10-minute bucketing doesn't change
+> this — buckets are stamped `bucketStart` so a time-range `$match` still works."
 
 ---
 
@@ -1261,16 +1337,20 @@ Format: **Current → Vulnerability → Attack → Fix.**
 
 ## 16. Performance & scalability (10k → 1M users)
 
-Assume ~2 active hours/user/day → ~ 120 flushes/user/day → ~ 1 write/user/min while active.
+Assume ~2 active hours/user/day. Since 2026‑09‑08 that's ~**12 bucket writes/user/day**
+(≈ 1 write per 10 active minutes), not ~120 — the bucket `$inc` upsert absorbed the volume.
 
 ### 10,000 users [ACTUAL: mostly fine]
 
-- **Writes:** ~ a few hundred inserts/min peak — trivial for one Mongo node.
-- **Leaderboard:** `activities` might be ~ 10⁷–10⁸ docs after months. The all-collection
-  `$group` + `$addToSet` + load-all-users starts taking seconds and risks the request
-  timeout. **First thing to break (H-7).**
-- **Analytics:** `find(7d)` per user is bounded (`~ 1k` docs) but every call ships and parses
-  them all (M-1). Add `{userId:1,timestamp:-1}`.
+- **Writes:** ~tens of upserts/min peak — trivial for one Mongo node (each is one indexed
+  `findOneAndUpdate`, slightly dearer than an insert but ~10× fewer of them).
+- **Storage:** `activities` grows ~10× slower now; the 400-day TTL caps it; `dailysummaries`
+  is tiny.
+- **Leaderboard:** still the **first thing to break (H-7)** — the all-collection `$group` +
+  `$addToSet` + load-all-users. Bucketing shrinks the doc count ~10× (buys time) but the
+  complexity class is unchanged; needs the `UserStats` rollup.
+- **Analytics:** `find(7d)` per user is now bounded to ~hundreds of docs and uses the new
+  `{userId:1,timestamp:-1}` index; still ships them to Node to aggregate (M-1).
 - **Frontend:** every nav refetches — noticeable but survivable.
 
 ### 100,000 users
@@ -1395,7 +1475,8 @@ Walk it in order (this is `CodeTrackr_Architecture.md` §9 as a checklist):
 3. **Right backend?** `codetrackr.apiBase` — the 2.0.x regression pointed it at localhost.
    Should be `https://codetrackr-backend-uckp.onrender.com` (or your deploy).
 4. **Is it flushing?** Dev tools / `console` in the Extension Host: look for "Activity tracked
-   ✅" or "flush failed". `duration < minFlushMinutes` (0.5) → nothing sent yet. Run
+   ✅" or "flush failed". Under `minFlushMinutes` (default **2** in 2.3.0), or a flush with no
+   real signal → nothing sent yet. Run
    `CodeTrackr: Flush Now`.
 5. **Network:** backend reachable? Render free tier asleep (first request ~30 s)? `axios`
    15 s timeout — a cold start can exceed it once.
@@ -1624,23 +1705,33 @@ Each: **Decision → Reason → Alternative → Trade-off → When the alternati
 
 ## 22. Future improvements roadmap
 
+### Done 2026‑09‑08 (DB write-reduction batch)
+
+- ✅ 10-minute bucket-on-write (`$inc` upsert); extension 2.3.0 skip-empty + `minFlushMinutes` 2.
+- ✅ Sparse analytics sub-docs; dropped the dead `date` field + index.
+- ✅ Added `{userId:1,timestamp:-1}`; `DailySummary` + nightly rollup + 400-day TTL.
+
 ### Short term (days)
 
 - Fix the 29 TS errors → green `npm run build`.
 - `app.use(helmet())`; `express-rate-limit` on `/auth`, `/api/extension`, `/join`.
 - `express-validator` bounds on `/track` (`0 < duration ≤ 3600`, `timestamp` sanity).
 - Central error middleware; stop echoing `err.message`.
-- Add `{userId:1,timestamp:-1}` index; backfill `date = timestamp`.
 - Fail fast if `JWT_SECRET` unset.
-- Wire real `repeatedFailedCommands` into the dashboard; delete or route `Teams.tsx`.
-- Guard `app.listen()` behind `require.main === module`; move the cron to an external trigger.
+- Wire real `repeatedFailedCommands` into the dashboard; **add the error/build-success
+  comparison to the group leaderboard** (the original motive — read-path change only);
+  delete or route `Teams.tsx`.
+- Guard `app.listen()` behind `require.main === module`; move the cron (deadline + rollup) to an external trigger.
+- Run `scripts/migrate-drop-date.js --apply` + `scripts/rollup-daily.js --apply` on the live DB.
 
 ### Medium term (weeks)
 
 - **API keys:** hash at rest, `keyId` prefix, per-device keys, rotation grace window,
   `lastUsedAt`.
 - **`UserStats` rollup** updated on ingest (`$inc`) → leaderboard reads O(users);
-  `?period=` + pagination.
+  `?period=` + pagination. **Bundle with it:** repoint `/leaderboard`, `/api/analytics/summary`
+  and `/api/metrics >90d` at the existing `dailysummaries` collection, then tighten the raw
+  `activities` TTL from 400 days.
 - **Shared aggregation service** — one module doing `$group` for analytics *and* metrics;
   delete the JS reduce paths (M-1).
 - **React Query** (already installed) for caching + dedup + retry across the frontend.
@@ -1792,7 +1883,10 @@ the engine / precompute rollups.
 | `backend/models/user.js` | User schema | `generateApiKey` (`randomBytes(32).hex`) | the unique-key discussion |
 | `backend/models/Group.js` / `GroupMember.js` | Groups | scrypt password note; unique compound index | join-table modelling, concurrency |
 | `backend/models/Goal.js` / `Team.js` / `Notification.js` | Other entities | embedded `members[]` on Team | embedding vs referencing |
-| `backend/routes/extension.js` | Ingest | `/track`, `/track/batch`, `/verify`, `normalizeTerminalAnalytics` | payload contract, validation gaps |
+| `backend/routes/extension.js` | Ingest | `/track`, `/track/batch`, `/verify`, `persistFlush`, `normalizeTerminalAnalytics` | payload contract; 10-min bucket `$inc` upsert; `ACTIVITY_BUCKET_MS` |
+| `backend/services/activityBucket.js` | **Bucketing (2026‑09‑08)** | `planActivityWrite`, `bucketStartFor`, `hasSignal`, `buildBucketUpdate` | pure, unit-tested; event-log→rollup; `$inc` atomicity; the correctness invariant |
+| `backend/models/DailySummary.js` + `services/dailySummary.js` + `services/dailyRollup.js` + `scripts/rollup-daily.js` | **Daily rollup (2026‑09‑08)** | `buildDaySummary` (pure), `rollupDaily` (DB) | rollup infra for the all-time-read cutover |
+| `backend/scripts/migrate-drop-date.js` | One-off migration | drops `date` field + `{userId:1,date:-1}` | dry-run default; run on deploy |
 | `backend/routes/analytics.js` | Dashboard reads | `computeStreak`, `localDayInfo`, `buildTerminalSummary`, `resolveOwnedUserId` | JS-vs-Mongo aggregation, timezones, streak |
 | `backend/routes/leaderboard.js` | Global ranking | the all-collection aggregate + relative scoring | scalability (H-7), the rollup answer |
 | `backend/routes/metrics.js` + `services/metricsService.js` + `services/metricsDerive.js` | Insights | `buildMetrics`, `deepWorkRatio`, `consistencyIndex`, `truePeakWindow`, `estimationCalibration` | "is this ML?"; pure-function testing |
@@ -1804,7 +1898,7 @@ the engine / precompute rollups.
 | `backend/services/authorization.js` | Authz helpers | `sameUser`, `assertOwnership`, `isBypassAllowed` | unit-tested, dependency-free |
 | `backend/services/passwordHash.js` | Group pw hashing | `crypto.scrypt`, legacy plaintext | scrypt-over-bcrypt decision |
 | `backend/services/activityNormalizers.js` | Ingest normalisers | `normalizeEditor/Focus/GitAnalytics`, `MAX_FLOW_BLOCKS` | additive schema evolution |
-| `backend/services/notificationScheduler.js` | Cron | `checkUpcomingDeadlines`, `checkOverdueGoals`, `initScheduler` | H-13 serverless problem |
+| `backend/services/notificationScheduler.js` | Cron | `checkUpcomingDeadlines`, `checkOverdueGoals`, daily `rollupDaily`, `initScheduler` | H-13 serverless problem (now also runs the rollup) |
 | `backend/tests/*.js` | Tests | `check()` harness; static route scan; helper extraction | testing story |
 | `backend/server.js.old` | Legacy monolith | had `helmet` + `rate-limit`; per-day upsert model | "what changed and why" |
 | `extension/src/extension.ts` | Extension entry | `activate`, `flushIfNeeded`, `buildPayload`, `sendActivity`, `start` | the whole §4 |
@@ -1942,10 +2036,16 @@ the engine / precompute rollups.
 > ObjectId — I coerce with `$toObjectId` in an `$addFields`. Migrating `userId` to ObjectId
 > is on the list; then the join is native.
 
-**22. Why store everything in one `activities` collection instead of per-day buckets?**
-> One insert per flush, immutable, no read-modify-write races, and I keep 10-minute
-> granularity for the drill-down view. The cost is document count. The right long-term shape
-> is: keep the raw stream *and* maintain bucketed rollups alongside it.
+**22. Why did you move from one insert per flush to 10-minute buckets?**
+> The original per-flush model was ~1 row per 30–90s of coding — a two-hour session was ~100
+> tiny rows, each repeating the metadata plus four mostly-zero analytics objects. I changed
+> ingest to an atomic `findOneAndUpdate` with `$inc` into a `(user, project, language,
+> 10-minute window)` document. `$inc` in one update is atomic, unlike `server.js.old`'s
+> read-then-`.save()` which had a lost-update race. I picked 10 minutes because that's the
+> finest window any dashboard reads, so nothing lost resolution — and `$inc.duration` is the
+> real measured seconds, so every total is identical. Row count dropped ~10×. A `DailySummary`
+> nightly rollup exists for the long-tail all-time reads; repointing them at it is the
+> follow-up.
 
 **23. Why not Redis?**
 > Nothing needs it yet — leaderboard and insights recompute in under a second at current

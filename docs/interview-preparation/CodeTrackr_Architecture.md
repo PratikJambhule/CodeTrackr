@@ -16,6 +16,16 @@ Where this contradicts the informal project description, the code is authoritati
 
 ## 1. System overview
 
+**Why it was built (the product thesis).** CodeTrackr started as a way to run **friendly
+competition inside a college friend group**. The idea: create a *group* for a contest week or
+for daily practice, everyone installs the extension once, and their coding time / lines are
+tracked automatically instead of self-reported — then the group page shows who actually put
+in the work. The extension also records each member's failed terminal commands, failed
+builds, and repeated failures, so "who hit the most errors this week" is data the system
+already collects; the group leaderboard just doesn't surface it yet (that's a read-path
+`$group` extension, not a schema change — see §8). The solo dashboard, deterministic
+insights, and goals all grew outward from that group-competition core.
+
 CodeTrackr is a **client–server, REST, modular-monolith** web application with three clients
 of one backend:
 
@@ -47,20 +57,21 @@ Everything is synchronous HTTP + one MongoDB.
       │  CORS(allowlist,credentials) → express.json → cookie-parser → passport.initialize     │
       │                                                                                      │
       │   /auth/*            passport-google-oauth20 → sign JWT → httpOnly cookie             │
-      │   /api/extension/*   verifyApiKey  → normalise payload → Activity.create()            │
+      │   /api/extension/*   verifyApiKey  → normalise → planActivityWrite → bucket $inc      │
       │   /api/analytics/*   isAuthenticated + ownership → Activity.find → JS aggregation     │
       │   /api/metrics       isAuthenticated → metricsService → metricsDerive (pure stats)    │
       │   /api/leaderboard   isAuthenticated → aggregate ALL activity + ALL users in Node     │
       │   /api/groups|goals|teams|notifications/*   isAuthenticated (+ per-feature checks)    │
       │                                                                                      │
-      │   services/notificationScheduler.js   node-cron  '0 * * * *'  (hourly)               │
+      │   services/notificationScheduler.js   node-cron  '0 * * * *' (hourly deadlines)      │
+      │                                       + '30 3 * * *' (nightly dailySummary rollup)   │
       └───────────────────────────────────────┬──────────────────────────────────────────────┘
                                               │ Mongoose
                                               ▼
                         ┌──────────────────────────────────────────────┐
                         │  MongoDB (Atlas)                             │
                         │  activities · users · groups · groupmembers  │
-                        │  goals · teams · notifications               │
+                        │  goals · teams · notifications · dailysummaries │
                         └──────────────────────────────────────────────┘
 ```
 
@@ -69,7 +80,8 @@ Everything is synchronous HTTP + one MongoDB.
 - *RESTish* — resource-oriented URLs, JSON, HTTP verbs; not strict REST (no HATEOAS, some RPC-style paths like `/groups/:id/join`).
 - *Modular monolith* — a single Express process; features are separate routers (`routes/*.js`) sharing one DB connection and one deploy unit.
 - *Partial MVC* — Mongoose **models**; routers act as **controllers**; React is the **view**. A **service layer** exists only for `metrics`, `authorization`, `passwordHash`, `activityNormalizers`, `notificationScheduler` — everything else is route → Mongoose directly.
-- *Not* microservices, *not* event-driven, *not* CQRS (though the recommended leaderboard rollup would be a read-model / CQRS-lite step).
+- *Not* microservices, *not* event-driven, *not* CQRS — though the nightly `dailysummaries`
+  rollup is a first read-model / CQRS-lite step, not yet wired into any read path.
 
 ---
 
@@ -87,8 +99,11 @@ Everything is synchronous HTTP + one MongoDB.
 | `debugTracker.ts` | Debug session / breakpoint / exception counts; folded into `terminalAnalytics.debuggingSessions`. |
 
 Each tracker implements the same contract: `getIntervalSnapshot()` (peek) and
-`consumeInterval()` (snapshot **and reset**). One flush = one `Activity` document =
-the sum of all trackers' `consumeInterval()` for that window.
+`consumeInterval()` (snapshot **and reset**). One flush = the sum of all trackers'
+`consumeInterval()` for that window. Since 2026‑09‑08 that flush is **`$inc`-merged into a
+10-minute `(user, project, language)` bucket document** server-side rather than written as its
+own row; the extension (2.3.0) also **drops a flush entirely when it carries no signal**
+(no edits, terminal, git, or focus) and rolls the buffered time into the next one.
 
 ### 2.2 Backend (`backend/`)
 
@@ -101,10 +116,13 @@ the sum of all trackers' `consumeInterval()` for that window.
 | `routes/*.js` | Controllers. Each route: middleware → validate → Mongoose call(s) → shape JSON → `try/catch` → `500 {message, error}`. |
 | `services/authorization.js` | `sameUser(a,b)`, `assertOwnership(requestedId, sessionId)` → `{ok,status,message}`, `isBypassAllowed(env)`. Dependency-free (unit-tested). |
 | `services/passwordHash.js` | `crypto.scrypt` hash/verify for **group** passwords. Format `scrypt$salt$hash`. Verifies legacy plaintext too; `routes/groups.js` upgrades on next successful join. |
-| `services/activityNormalizers.js` | `normalizeEditor/Focus/GitAnalytics(body)` — coerce to non-negative finite numbers, default missing sub-docs to zero, cap `flowBlocksMs` at 200. Tolerates payloads from older extension versions. |
+| `services/activityNormalizers.js` | `normalizeEditor/Focus/GitAnalytics(body)` — coerce to non-negative finite numbers, cap `flowBlocksMs` at 200. **Since 2026‑09‑08 a missing sub-doc/leaf stays absent** (not defaulted to `0`) so bucket docs are sparse. Tolerates payloads from older extension versions. |
+| `services/activityBucket.js` | **Pure, dependency-free.** `planActivityWrite(normalized, when, bucketMs)` decides the write shape: `{mode:'legacy'}` (bucketMs 0 → plain `Activity.create`), or `{mode:'bucket', filter, update, setOnInsert, bucketStart}` where `filter` is the `(userId, projectName, language, bucketStart)` key and `update` is `$inc`/`$max`/`$push $slice`/`$addToSet`. `bucketStartFor(when)` = `floor(t / 600000) * 600000`. `hasSignal(payload)` = "does this flush carry any editor/terminal/git/focus data". Fully unit-tested (`tests/activityBucket.test.js`, 21 assertions). |
 | `services/metricsService.js` | `buildMetrics(userId, {days, timezoneOffset})` — runs the MongoDB aggregations the Insights page needs; delegates maths to `metricsDerive`. |
 | `services/metricsDerive.js` | Pure functions: `deepWorkRatio`, `flowBlockStats`, `consistencyIndex`, `truePeakWindow`, `estimationCalibration`. No DB, no deps — fully unit-tested. |
-| `services/notificationScheduler.js` | `node-cron` `'0 * * * *'` + an immediate run on startup: `checkUpcomingDeadlines` (6–7 h out, in-progress, not yet reminded) and `checkOverdueGoals` (deadline passed). |
+| `services/dailySummary.js` | **Pure** `buildDaySummary(userId, day, docs)` — folds one day's `activities` docs into a single `DailySummary` shape (`totalSeconds`, lines, `flushCount`, `bucketCount`, `languages[]`, `projects[]`, editor/terminal/git/focus rollups). Unit-tested (`tests/rollup.test.js`, 7 assertions). |
+| `services/dailyRollup.js` | `rollupDaily({apply, beforeDays, force})` — the DB-touching orchestrator: find `(userId, day)` pairs with raw activity, call `buildDaySummary`, `upsert` into `dailysummaries`. Dry-run by default. CLI wrapper: `scripts/rollup-daily.js`. |
+| `services/notificationScheduler.js` | `node-cron` `'0 * * * *'` + an immediate run on startup: `checkUpcomingDeadlines` (6–7 h out, in-progress, not yet reminded) and `checkOverdueGoals` (deadline passed). Also schedules `'30 3 * * *'` → `rollupDaily({apply:true})` (nightly DailySummary rollup). |
 
 ### 2.3 Frontend (`frontend/src/`)
 
@@ -143,7 +161,11 @@ the sum of all trackers' `consumeInterval()` for that window.
                      │no
                      ▼
  (3) flushIfNeeded(false): totalBuffered = bufferedMinutes + (now - startedMs)/60000
-     totalBuffered ≥ minFlushMinutes (default 0.5) ?  ──no──► wait for next tick
+     totalBuffered ≥ minFlushMinutes (default 2 since 2.3.0) ?  ──no──► wait for next tick
+                     │yes
+                     ▼
+ (3a) build the payload, then payloadHasSignal(payload) ?
+      no (no edits / terminal / git / focus) ──► DON'T send; keep buffering into the next tick
                      │yes
                      ▼
  (4) buildPayload(durationSeconds):
@@ -172,17 +194,25 @@ the sum of all trackers' `consumeInterval()` for that window.
        user  → req.user = user ; next()
                      │
                      ▼
- (7) routes/extension.js handler:
+ (7) routes/extension.js handler → persistFlush(normalized, when):
        validate: fileName && language && duration  (else 400)
        when = parse(timestamp) || now  (guarded for NaN)
-       terminalPayload  = normalizeTerminalAnalytics(...)
-       editorAnalytics  = normalizeEditorAnalytics(req.body)     // clamp ≥ 0, default 0
-       focusAnalytics   = normalizeFocusAnalytics(req.body)      // flowBlocksMs cap 200
-       gitAnalytics     = normalizeGitAnalytics(req.body)
-       Activity.create({ userId: req.user._id.toString(), ...fields, timestamp: when, date: when })
+       normalize{Terminal,Editor,Focus,Git}Analytics(req.body)  // clamp ≥ 0; missing ⇒ ABSENT
+       plan = planActivityWrite(normalized, when, ACTIVITY_BUCKET_MS)   // default 600000
+         plan.mode === 'legacy' → Activity.create({...fields, timestamp: when})   // BUCKET_MS=0
+         plan.mode === 'bucket' →
+           bucketStart = floor(when / 600000) * 600000
+           Activity.findOneAndUpdate(
+             { userId, projectName, language, bucketStart },              // partial-unique key
+             { $inc:  { duration, linesAdded, linesRemoved, flushCount, ...non-zero leaves },
+               $max:  { timestamp: when, ...gauge fields },
+               $push: { files: { $each: [...], $slice: -200 } },          // (also $addToSet variant)
+               $setOnInsert: { userId, projectName, language, bucketStart, timestamp: bucketStart } },
+             { upsert: true, new: true, setDefaultsOnInsert: false } )
+           duplicate-key (11000) on first insert race → one retry
                      │
                      ▼
- (8) MongoDB: one new document in `activities`.
+ (8) MongoDB: the bucket document is created or `$inc`-updated in `activities`.
      201 { success:true, activity:{ id, fileName, language, duration, timestamp } }
 ```
 
@@ -392,17 +422,28 @@ dashboard, or an OAuth 2.0 device-authorization flow.
 
 ```
         ┌─────────────┐                 ┌──────────────────────────────────────────┐
-        │   users     │                 │              activities                  │
+        │   users     │                 │   activities   (one doc per 10-min bucket)│
         ├─────────────┤                 ├──────────────────────────────────────────┤
         │ _id (OID)   │◄───── userId ───│ userId : String  (hex of users._id)      │
-        │ googleId U  │  (string, not   │ fileName, fileType, projectName, language │
-        │ email    U  │   a real ref)   │ duration : Number  (SECONDS)             │
-        │ apiKey  U,S │                 │ linesAdded, linesRemoved                  │
-        │ name        │                 │ timestamp : Date   date : Date            │
-        │ isFirstLogin│                 │ terminalAnalytics { … }                   │
-        └──────┬──────┘                 │ editorAnalytics   { … }                   │
-               │                        │ focusAnalytics    { flowBlocksMs:[Num] }  │
-               │ createdBy (OID)        │ gitAnalytics      { … }                   │
+        │ googleId U  │  (string, not   │ projectName, language      ← bucket key   │
+        │ email    U  │   a real ref)   │ bucketStart : Date         ← bucket key   │
+        │ apiKey  U,S │                 │ duration : Number  (SECONDS, $inc)       │
+        │ name        │                 │ linesAdded, linesRemoved      ($inc)      │
+        │ isFirstLogin│                 │ flushCount : Number  ($inc, #flushes)     │
+        └──────┬──────┘                 │ files : [String]  ($addToSet)            │
+               │                        │ fileName, fileType   (latest write)      │
+               │                        │ timestamp : Date  ($max)   ·  (no `date`) │
+               │                        │ terminal/editor/focus/gitAnalytics {sparse}│
+               │                        └──────────────────────────────────────────┘
+               │                        ┌──────────────────────────────────────────┐
+               │◄───────── userId ──────│   dailysummaries   (nightly cron rollup)  │
+               │                        ├──────────────────────────────────────────┤
+               │                        │ userId : String  ·  day : "YYYY-MM-DD" UTC│
+               │                        │ totalSeconds, totalLinesAdded/Removed     │
+               │                        │ flushCount, bucketCount                   │
+               │                        │ languages:[{language,seconds}] · projects:[]│
+               │                        │ editor/terminal/git {…} · focus {…} · rolledAt│
+               │ createdBy (OID)        │ UNIQUE(userId, day)                       │
                ▼                        └──────────────────────────────────────────┘
         ┌─────────────┐    groupId (OID)   ┌──────────────────┐
         │   groups    │◄───────────────────│  groupmembers    │
@@ -437,19 +478,32 @@ dashboard, or an OAuth 2.0 device-authorization flow.
 - **`activities.userId` is a `String`** (the hex of `users._id`), while every other collection
   uses real `ObjectId` refs. This forces the `$regexMatch` + `$toObjectId` coercion in
   `leaderboard.js` and blocks `$lookup` joins (M-6).
+- **`activities` is bucketed** (since 2026‑09‑08): the write path `$inc`-upserts one document
+  per `(userId, projectName, language, bucketStart)` 10-minute window instead of one per flush.
+  `duration` accumulates **real measured seconds**, so every total/hour is byte-identical to
+  the old model — only *time-of-day resolution* collapses to a 10-minute grid. A heavy day is
+  tens of docs, not hundreds. `ACTIVITY_BUCKET_MS=0` reverts to one-doc-per-flush.
+- **`dailysummaries`** is the nightly rollup (`services/dailyRollup.js`, cron `30 3 * * *`) —
+  one doc per `(userId, day)`, `UNIQUE(userId, day)`. Built as the O(user·days) read source
+  for the leaderboard / analytics scale fix; **no read path uses it yet**.
 - **`groupmembers`** is a proper join table with a **unique compound index** `{groupId,userId}`
   — the only hard concurrency guard in the system.
 - **`teams.members`** is an **embedded array** — a deliberately different modelling choice from
   groups (and the reason `team.members.push()` has a lost-update risk).
-- **Indexes** (all on `activities`): `{userId:1}`, `{userId:1,date:-1}`, `{userId:1,projectName:1}`,
-  `{userId:1,language:1}`. **Missing:** `{userId:1,timestamp:-1}` — every analytics/metrics
-  query filters `timestamp`, not `date`.
+- **Indexes on `activities`**: `{userId:1}`, `{userId:1,timestamp:-1}` (**added** — analytics/
+  metrics all filter `timestamp`), `{userId:1,projectName:1}`, `{userId:1,language:1}`,
+  **partial-unique** `{userId:1,projectName:1,language:1,bucketStart:1}`
+  (`partialFilterExpression: { bucketStart: { $exists: true } }` — enforces one row per bucket,
+  tolerates legacy rows), and `{createdAt:1}` **TTL 400 days** (safety net now that the
+  nightly rollup owns long-term history). The dead `{userId:1,date:-1}` index and the `date`
+  field are **dropped** (`scripts/migrate-drop-date.js`).
 
 ### Typical queries
 
 | Feature | Query |
 |---|---|
-| Ingest | `Activity.create({...})` / `Activity.insertMany([...])` |
+| Ingest | `Activity.findOneAndUpdate({userId,projectName,language,bucketStart}, {$inc,$max,$push,$addToSet,$setOnInsert}, {upsert:true, setDefaultsOnInsert:false})` (legacy mode: `Activity.create`) |
+| Nightly rollup | per `(userId, day)`: `Activity.find({userId, timestamp:{$gte:dayStart,$lt:dayEnd}})` → `buildDaySummary` → `DailySummary.updateOne({userId,day}, …, {upsert:true})` |
 | Daily dashboard | `Activity.find({ userId, timestamp: { $gte: 7d } })` then JS reduce |
 | Streak | `Activity.aggregate([{$match:{userId, timestamp:{$gte:90d}}},{$group:{_id: localDayString, seconds:{$sum:'$duration'}}},{$match:{seconds:{$gt:0}}}])` |
 | Summary | `Activity.aggregate([{$match},{$group:{_id:dayString,totalHours:{$sum:{$divide:['$duration',3600]}}}}])` |
@@ -463,7 +517,9 @@ dashboard, or an OAuth 2.0 device-authorization flow.
 ## 9. Sequence — "does a user's activity show up?"
 
 ```
-extension flush ──► POST /api/extension/track ──► verifyApiKey ──► Activity.create ──► activities
+extension flush ──► payloadHasSignal? ──► POST /api/extension/track ──► verifyApiKey
+                                                │
+                    planActivityWrite ──► Activity.findOneAndUpdate($inc bucket) ──► activities
                                                                                           │
 dashboard open ──► GET /api/analytics/:id ──► isAuthenticated ──► ownership ──► Activity.find ──┘
               ◄── JSON ◄── JS aggregation ◄────────────────────────────────────────────────────
@@ -471,7 +527,7 @@ chart.js render
 ```
 
 Failure points, in order (this is also the debugging runbook):
-1. Extension not started / no API key / idle-paused / `duration < minFlushMinutes`.
+1. Extension not started / no API key / idle-paused / `duration < minFlushMinutes` (**2** since 2.3.0) / flush had **no signal** so it was withheld.
 2. Wrong `apiBase` (the 2.0.x localhost regression) or offline → payload lost (memory-only retry).
 3. `verifyApiKey` 401 — key rotated / typo / trailing whitespace.
 4. Ingest 400 — missing `fileName`/`language`/`duration` (or `duration === 0`).
@@ -487,7 +543,7 @@ Failure points, in order (this is also the debugging runbook):
    ┌───────────────────────┐        ┌──────────────────────────┐        ┌────────────────────┐
    │ VS Code Marketplace    │        │ Vercel (static)          │        │ Render (Node)      │
    │ CodeTrackr-ext.        │        │ code-trackr-frontend     │        │ codetrackr-backend │
-   │ codetrackr-vscode 2.2.0│        │ .vercel.app              │        │ -uckp.onrender.com │
+   │ codetrackr-vscode 2.3.0│        │ .vercel.app              │        │ -uckp.onrender.com │
    └───────────┬───────────┘        └───────────┬──────────────┘        └─────────┬──────────┘
                │ x-api-key                       │ JWT cookie                      │ Mongoose/TLS
                └───────────────────────────────► API ◄───────────────────────────┘
@@ -518,4 +574,4 @@ Failure points, in order (this is also the debugging runbook):
 | API gateway | One service, one deploy | Multiple backend services, centralised auth/rate-limit |
 | Search index | No text search | Group discovery over many groups |
 | Analytics warehouse | Aggregations run fine on the OLTP store | Historical trend queries, cohort analysis, BI |
-| Read model / CQRS | Reads recompute from the write model | `UserStats` rollup for the leaderboard is the first step |
+| Read model / CQRS | Reads still recompute from raw `activities` | **First step already taken** — the nightly `dailysummaries` rollup is a read model; next is pointing the leaderboard/analytics at it, then a live `UserStats` running total |

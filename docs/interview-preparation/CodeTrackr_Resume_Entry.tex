@@ -1,38 +1,42 @@
 % =============================================================================
 %  CodeTrackr - Resume Project Entry  (ATS-optimised, Overleaf-ready)
+%  Last refreshed: 2026-09-09  (branch feat/security-and-insights)
 % =============================================================================
 %
 %  WHAT THIS FILE IS
 %  ----------------
-%  A ready-to-paste "Projects" entry for CodeTrackr, written to (a) parse
-%  cleanly through Applicant Tracking Systems and (b) stay 100% truthful to
-%  what the code actually does, so nothing here can be picked apart in an
-%  interview.
+%  A concise, ready-to-paste "Projects" entry for CodeTrackr. It is deliberately
+%  scoped to the parts the author can defend in depth -- the VS Code extension,
+%  the extension-to-backend ingestion path, and the insights/metrics service --
+%  and stays 100% truthful to what the code does. Every number is verifiable in
+%  the repo. A fuller (6-bullet) version is kept below \end{document} for
+%  reference if a role wants the social / security / deployment breadth.
 %
 %  HOW TO USE
 %  ----------------
 %  * Preview it:  this file compiles on its own with pdfLaTeX.
 %                 Overleaf -> New Project -> Blank Project -> paste -> Recompile.
+%                 (Menu -> Compiler -> pdfLaTeX for the cleanest ATS text layer.)
 %  * Drop it in:  copy the block between  "% >>> COPY FROM HERE"  and
-%                 "% <<< COPY TO HERE"  into your existing resume's Projects
-%                 section (works with any template - it uses only itemize).
-%  * Jake's / sb2nov template users: a macro-format version is at the bottom
-%                 of this file, after \end{document}.
+%                 "% <<< COPY TO HERE"  into your resume's Projects section
+%                 (works with any template - it uses only itemize).
+%  * Jake's / sb2nov template users: a macro-format version is below
+%                 \end{document}, plus a 2-line compact version.
 %
 %  REPLACE THE <ANGLE-BRACKET> PLACEHOLDERS:
-%     <DATES>            e.g. "Jan 2024 -- Aug 2026"  (changelog spans 2024-2026)
-%     <GITHUB URL>       https://github.com/Soham-Official/CodeTrackr
-%     <LIVE URL>         https://code-trackr-frontend.vercel.app   (confirm it's up)
+%     <DATES>        e.g. "Jan 2025 -- Sep 2026"  (extension changelog spans 2025-2026)
+%     <GITHUB URL>   https://github.com/Soham-Official/CodeTrackr
 %
 %  ATS CHECKLIST (why this entry scores well)
 %  ----------------
-%  [x] Single column, no tables / text boxes / graphics in the entry
-%  [x] \usepackage[T1]{fontenc}  -> text stays selectable & extractable (no "fi" ligature loss)
-%  [x] Standard section name: "Projects"
-%  [x] Real bullet list (itemize), strong action verbs, one idea per bullet
-%  [x] Acronyms expanded on first use:  OAuth 2.0, JSON Web Token (JWT), IDOR
-%  [x] Tech keywords appear BOTH in the heading and in a Technical Skills block
-%  [x] Plain-text dates; nothing important in headers/footers
+%  [x] Single column, no tables / text boxes / graphics / icons in the entry
+%  [x] \usepackage[T1]{fontenc} + lmodern + glyphtounicode -> selectable,
+%      extractable text (parser reads "file"/"efficient", not "fi"/"ffi" loss)
+%  [x] Standard section name: "Projects"; plain-text dates; nothing in headers/footers
+%  [x] Real bullet list (itemize), strong past-tense action verbs, one idea per bullet
+%  [x] Acronyms expanded on first use: REST, API, OAuth 2.0, JSON Web Token (JWT), TTL
+%  [x] Hard numbers in every bullet (5 trackers, ~2 min flush, ~10x, 5 metrics, 400-day TTL)
+%  [x] Tech keywords appear in the heading AND in a Technical Skills block
 % =============================================================================
 
 \documentclass[11pt,a4paper]{article}
@@ -40,7 +44,7 @@
 \usepackage[T1]{fontenc}      % selectable/extractable text for ATS
 \usepackage[utf8]{inputenc}
 \usepackage{lmodern}          % Latin Modern: correct ToUnicode -> clean ATS text extraction
-% Force a ToUnicode map so ATS parsers read "file"/"efficient", not "le"/"ecient".
+% Force a ToUnicode map so ATS parsers read whole words, not ligature-mangled ones.
 % (Guarded so the file still compiles under XeLaTeX / LuaLaTeX; use pdfLaTeX for best results.)
 \ifdefined\pdfgentounicode
   \input{glyphtounicode}
@@ -52,7 +56,11 @@
 \usepackage{titlesec}
 
 \titleformat{\section}{\large\bfseries}{}{0pt}{}[\vspace{2pt}\hrule\vspace{4pt}]
-\setlist[itemize]{leftmargin=1.4em,itemsep=2pt,topsep=3pt,parsep=0pt}
+% Bullet marker: the rendered PDF shows a normal round bullet. If a strict ATS
+% ever mangles it, change  label=\textbullet  to  label=\textendash  (a dash) --
+% every text-only extractor reads a dash cleanly; all the words/numbers here
+% already extract fine either way.
+\setlist[itemize]{label=\textbullet,leftmargin=1.4em,itemsep=2pt,topsep=3pt,parsep=0pt}
 \pagestyle{empty}
 \setlength{\parindent}{0pt}
 
@@ -70,57 +78,58 @@
 % >>> COPY FROM HERE >>>------------------------------------------------------
 
 \project
-  {CodeTrackr: Developer Productivity Analytics Platform}
-  {TypeScript, JavaScript, React, Node.js, Express.js, MongoDB, Mongoose,
-   REST APIs, OAuth 2.0, JSON Web Token (JWT), VS Code Extension API, Vite, Chart.js, Git}
+  {CodeTrackr: VS Code Activity Tracker \& Productivity Insights}
+  {TypeScript, JavaScript, Node.js, Express.js, MongoDB, Mongoose, VS Code
+   Extension API, REST APIs, OAuth 2.0, JSON Web Token (JWT)}
   {<DATES>}
   {%
   \begin{itemize}
-    \item Built a full-stack developer-productivity analytics platform with three
-          independent clients served by one REST API: a \textbf{TypeScript}
-          \textbf{VS Code extension}, a \textbf{React} / \textbf{Vite} dashboard, and
-          a \textbf{Node.js} / \textbf{Express.js} backend on \textbf{MongoDB}.
-    \item Engineered the extension's event-driven tracking engine (editor, terminal,
-          git, focus, and debug trackers) that accumulates coding metrics in memory
-          and flushes normalised activity documents to the API on a 30-second
-          interval, transmitting only file basenames and sanitised command metadata
-          to keep source code private.
-    \item Implemented authentication and authorisation end to end: \textbf{Google
-          OAuth 2.0} with \textbf{JWT} session cookies for the web client, per-user
-          API keys for the extension, scrypt-hashed passwords for private groups,
-          and route-level ownership checks that eliminated an insecure direct object
-          reference (IDOR) vulnerability class.
-    \item Modelled time-series activity data in \textbf{MongoDB} and authored
-          \textbf{aggregation pipelines} plus a unit-tested metrics service that
-          derives productivity insights (deep-work ratio, day-to-day consistency via
-          coefficient of variation, peak-productivity hour, estimate-vs-actual
-          accuracy) from raw events.
-    \item Ran a self-directed security and correctness audit that catalogued 33
-          findings by severity; remediated every high-severity issue (broken access
-          control, plaintext credential storage, an authentication-bypass flag) and
-          wrote 8 automated test suites, including a static scanner that fails when a
-          protected route loses its authorisation middleware.
-    \item Deployed the dashboard on \textbf{Vercel}, the API on \textbf{Render}, and
-          the database on \textbf{MongoDB Atlas}; packaged and published the
-          extension to the \textbf{VS Code Marketplace}.
-    % OPTIONAL extra line: add only if you have room / want the links inline.
+    \item Built a \textbf{TypeScript} \textbf{VS Code extension} that passively
+          measures coding activity through 5 event-driven trackers (editor
+          edits and churn, terminal commands, Git commits, window focus, and
+          debugger sessions), accumulating metrics in memory behind an
+          idle/pause state machine and posting a consolidated, normalised
+          record to a \textbf{REST} API about every 2 minutes of active coding
+          --- transmitting only file basenames and sanitised command text so
+          source code never leaves the machine.
+    \item Designed the extension-to-backend ingestion path on \textbf{Node.js}
+          / \textbf{Express.js}: per-user API-key authentication, additive
+          payload normalisers that stay backward-compatible with older
+          extension releases, and an atomic \texttt{\$inc} upsert that merges
+          each flush into a 10-minute (user, project, language) \textbf{MongoDB}
+          document --- cutting activity-record and write volume by roughly 10x
+          with byte-identical totals, plus a 400-day time-to-live (TTL) index
+          to bound growth.
+    \item Developed a metrics service built on \textbf{MongoDB} \textbf{aggregation
+          pipelines} and a unit-tested pure-function module that derives 5
+          explainable productivity insights from the raw time-series events ---
+          deep-work ratio, day-to-day consistency (coefficient of variation),
+          true peak-productivity hour, estimate-vs-actual accuracy, and
+          flow-block statistics --- using deterministic statistics rather than
+          a black-box model.
+    \item Secured the companion React dashboard with \textbf{Google OAuth 2.0}
+          and \textbf{JWT} cookies and added per-route ownership checks on the
+          analytics endpoints; covered the trackers, normalisers, and metrics
+          functions with automated \texttt{node:assert} test suites, including
+          a static scan that fails the build if a protected route loses its
+          auth middleware.
+    % OPTIONAL: inline link -- add only if you have vertical space.
     % \item Code: \href{<GITHUB URL>}{github.com/Soham-Official/CodeTrackr}
-    %       \quad Live: \href{<LIVE URL>}{code-trackr-frontend.vercel.app}
   \end{itemize}}
 
 % <<< COPY TO HERE <<<-------------------------------------------------------
 
 % -----------------------------------------------------------------------------
 \section*{Technical Skills}
-% Repeat the CodeTrackr keywords here too -- ATS weight terms that appear in a
-% dedicated skills section. Merge these into your existing lines.
+% Repeat the CodeTrackr keywords here too -- ATS parsers weight terms that
+% appear in a dedicated skills section. Merge these into your existing lines.
 
 \textbf{Languages:} TypeScript, JavaScript, Python, SQL, HTML/CSS\\
-\textbf{Frameworks \& Libraries:} React, Node.js, Express.js, Mongoose, Vite, Chart.js, Tailwind CSS\\
+\textbf{Frameworks \& Libraries:} Node.js, Express.js, React, Mongoose, Vite, Chart.js\\
 \textbf{Databases:} MongoDB, MongoDB Atlas, PostgreSQL\\
 \textbf{Concepts:} REST API design, Authentication \& Authorisation, OAuth 2.0, JWT,
-  Data Aggregation Pipelines, Time-Series Data, Unit Testing, Git, Cloud Deployment\\
-\textbf{Tools \& Platforms:} Git, GitHub, Vercel, Render, VS Code Extension API, Postman
+  Aggregation Pipelines, Time-Series Data, Data Modelling, Unit Testing, Git\\
+\textbf{Tools \& Platforms:} Git, GitHub, VS Code Extension API, Vercel, Render, Postman
 
 \end{document}
 
@@ -131,29 +140,29 @@
 
 
 % =============================================================================
-%  OPTION B - "Jake Gutierrez" resume template  (\resumeProjectHeading macros)
+%  OPTION B - "Jake Gutierrez" template  (\resumeProjectHeading macros).
 %  Also works with sb2nov. Paste inside \resumeSubHeadingListStart ... End.
 % =============================================================================
 %
 % \resumeProjectHeading
-%   {\textbf{CodeTrackr} $|$ \emph{TypeScript, React, Node.js, Express.js, MongoDB, OAuth 2.0, JWT, VS Code Extension API}}
+%   {\textbf{CodeTrackr: VS Code Activity Tracker \& Productivity Insights} $|$ \emph{TypeScript, Node.js, Express.js, MongoDB, VS Code Extension API, REST, OAuth 2.0, JWT}}
 %   {<DATES>}
 %   \resumeItemListStart
-%     \resumeItem{Built a full-stack developer-productivity analytics platform with three
-%       clients on one REST API: a TypeScript VS Code extension, a React/Vite dashboard,
-%       and a Node.js/Express.js backend on MongoDB.}
-%     \resumeItem{Engineered the extension's event-driven tracking engine (editor, terminal,
-%       git, focus, debug trackers) that flushes normalised activity documents to the API
-%       every 30 seconds, sending only file basenames and sanitised command metadata.}
-%     \resumeItem{Implemented Google OAuth 2.0 with JWT session cookies, per-user API keys
-%       for the extension, scrypt-hashed group passwords, and route-level ownership checks
-%       that removed an IDOR vulnerability class.}
-%     \resumeItem{Wrote MongoDB aggregation pipelines and a unit-tested metrics service
-%       deriving productivity insights (deep-work ratio, consistency index, peak hour)
-%       from time-series activity data.}
-%     \resumeItem{Ran a 33-finding security/correctness audit; fixed all high-severity
-%       issues (broken access control, plaintext credentials, auth-bypass flag) and added
-%       8 automated test suites incl. a static route-guard scanner.}
+%     \resumeItem{Built a TypeScript VS Code extension that measures coding activity via 5
+%       event-driven trackers (editor/churn, terminal, Git, focus, debugger), accumulates
+%       metrics in memory behind an idle/pause state machine, and posts a consolidated record
+%       to a REST API about every 2 minutes of active coding -- sending only file basenames
+%       and sanitised command text.}
+%     \resumeItem{Designed the extension-to-backend ingestion path (Node.js/Express.js):
+%       per-user API-key auth, backward-compatible payload normalisers, and an atomic \$inc
+%       upsert that merges each flush into a 10-minute (user, project, language) MongoDB
+%       document -- ~10x lower write/record volume with identical totals, plus a 400-day TTL.}
+%     \resumeItem{Developed a metrics service on MongoDB aggregation pipelines + a unit-tested
+%       pure module deriving 5 explainable insights (deep-work ratio, consistency via
+%       coefficient of variation, true peak hour, estimation accuracy, flow blocks) -- no ML model.}
+%     \resumeItem{Secured the React dashboard with Google OAuth 2.0 + JWT cookies and per-route
+%       ownership checks; covered trackers, normalisers, and metrics with node:assert suites
+%       incl. a static route-guard scan.}
 %   \resumeItemListEnd
 
 
@@ -161,53 +170,132 @@
 %  COMPACT VERSION - 2 lines, for a dense one-page resume
 % =============================================================================
 %
-% \textbf{CodeTrackr} $|$ React, TypeScript, Node.js, Express.js, MongoDB, OAuth 2.0, JWT, VS Code Extension API \hfill <DATES>
-% \\ Full-stack coding-analytics platform (VS Code extension + React dashboard + Express/MongoDB REST API): an
-% event-driven extension streams activity to the API, which surfaces productivity metrics via MongoDB aggregation
-% pipelines; ran a 33-item security audit and fixed all high-severity access-control and credential-storage issues,
-% backed by an 8-suite automated test set.
+% \textbf{CodeTrackr: VS Code Activity Tracker \& Productivity Insights} $|$ TypeScript, Node.js, Express.js, MongoDB, VS Code Extension API, REST, OAuth 2.0, JWT \hfill <DATES>
+% \\ TypeScript VS Code extension with 5 event-driven trackers that posts coding metrics to an Express/MongoDB REST API
+% about every 2 min of active coding (file basenames + sanitised commands only); backend authenticates by per-user API key
+% and merges each flush into a 10-minute \$inc-upsert bucket (~10x fewer writes, identical totals). A metrics service on
+% MongoDB aggregation pipelines derives 5 explainable, statistics-based productivity insights. Web auth via Google OAuth 2.0 + JWT.
+
+
+% =============================================================================
+%  FULLER 6-BULLET VERSION - use if the role wants breadth over depth
+%  (adds the group/leaderboard product angle, the audit, and deployment)
+% =============================================================================
+%
+% \project
+%   {CodeTrackr: Developer Productivity Analytics Platform}
+%   {TypeScript, JavaScript, React, Node.js, Express.js, MongoDB, Mongoose, REST APIs,
+%    OAuth 2.0, JSON Web Token (JWT), VS Code Extension API, Vite, Chart.js, Tailwind CSS, Git}
+%   {<DATES>}
+%   {%
+%   \begin{itemize}
+%     \item Built a full-stack developer-productivity analytics platform -- a TypeScript VS Code
+%           extension, a React/Vite dashboard, and a Node.js/Express.js REST API (34 endpoints,
+%           10 route modules) on MongoDB -- built around a group leaderboard that ranks friends by
+%           focused coding time and build/command success rate.
+%     \item Engineered the extension's event-driven tracking engine of 5 trackers (editor,
+%           terminal, Git, focus, debugger) that posts normalised activity to the API about
+%           every 2 minutes of active coding, sending only file basenames and sanitised command metadata.
+%     \item Redesigned ingestion from one document per flush to an atomic \$inc upsert into a
+%           10-minute (user, project, language) bucket -- ~10x lower document count and writes
+%           with byte-identical totals; added a nightly rollup collection and a 400-day TTL index.
+%     \item Implemented Google OAuth 2.0 + JWT session cookies, per-user extension API keys, and
+%           scrypt-hashed group passwords; added route-level ownership checks that removed an
+%           insecure direct object reference (IDOR) vulnerability class.
+%     \item Authored MongoDB aggregation pipelines and a unit-tested metrics service deriving 5
+%           explainable productivity insights (deep-work ratio, consistency index, true peak hour,
+%           estimation accuracy, flow blocks) from time-series events -- deterministic statistics.
+%     \item Ran a self-directed security/correctness audit (33 findings: 13 high, 13 medium, 7
+%           low); fixed all high-severity security and correctness issues and wrote 12 automated
+%           test suites incl. a static route-guard scanner. Deployed on Vercel + Render + Atlas;
+%           published the extension (v2.3.0) to the VS Code Marketplace.
+%   \end{itemize}}
 
 
 % =============================================================================
 %  KEYWORD TAILORING - edit per job description before you apply
 % =============================================================================
 %  * Mirror the JD's exact words:
-%       "REST API"        -> "RESTful API"        if the JD says RESTful
-%       "authorisation"   -> "authorization"      match the JD's spelling (US vs UK)
-%       "unit testing"    -> "automated testing"  / "test-driven development" if claimed
+%       "REST API"       -> "RESTful API"        if the JD says RESTful
+%       "authorisation"  -> "authorization"      match the JD's spelling (US vs UK)
+%       "unit testing"   -> "automated testing"  if that is the JD's phrasing
 %  * Safe additions if the JD lists them AND you can defend them:
-%       "Agile", "code review", "responsive design", "SPA", "CI/CD" (only after you
-%       add a GitHub Actions workflow), "npm", "ESLint", "TypeScript strict mode".
-%  * DO NOT add: "microservices" (it is a monolith), "Docker/Kubernetes" (none),
-%       "GraphQL" (none), "Redis/Kafka" (none), "machine learning" (see note below),
-%       "10k+ users" / any usage or performance number (never load-tested).
+%       "Agile", "code review", "Git workflow", "npm", "ESLint", "cron jobs",
+%       "event-driven architecture", "backward compatibility", "schema design".
+%  * DO NOT add: "microservices" (modular monolith), "Docker/Kubernetes" (none),
+%       "GraphQL" (none), "Redis/Kafka" (none), "machine learning" / "ML" / "AI"
+%       (deterministic statistics -- see note below), or ANY usage / latency /
+%       throughput number (never load-tested; the "~10x" is a design-level
+%       document-count reduction, not a benchmark).
 
 
 % =============================================================================
 %  INTERVIEW-SAFETY NOTES - so these bullets never backfire
 % =============================================================================
-%  * "Metrics service / productivity insights": say STATISTICAL ANALYSIS, not
-%    machine learning. It is coefficient of variation, weighted scoring and
-%    medians - no model, no training. This is a strength (every number is
-%    explainable); own it as a deliberate choice.
-%  * The security-audit bullet is your strongest differentiator. Be ready to:
-%      - name the fixes: analytics endpoints had no ownership check (IDOR);
-%        private-group passwords were stored in plain text; an AUTH_BYPASS env
-%        flag disabled all auth; two legacy endpoints accepted unauthenticated writes.
-%      - define IDOR in one line: "any logged-in user could read another user's
-%        data by putting their id in the URL - I added a check that the record
-%        belongs to the caller."
-%  * "Flushes every 30 seconds": the timer ticks every 30s; a network send
-%    happens once enough *active* coding time has accrued (default ~30s). Know
-%    the nuance.
-%  * "Published to the VS Code Marketplace": earlier versions were published
-%    under publisher "CodeTrackr-ext"; confirm the current build is live before
-%    you say "currently published".
-%  * If asked how it scales: it is a portfolio project, not load-tested. Talk
-%    about the plan - a per-user UserStats rollup so the leaderboard is an
-%    indexed 50-row read instead of a full-collection scan, and Redis for rank
-%    lookups. That answer shows more than a fake metric would.
-%  * Only claim first-person work you actually did (repo has 3 contributors).
-%    If the audit + tests were yours, keep that bullet; if not, swap it for the
-%    deployment bullet.
+%  * SCOPE / not overclaiming. This entry is written around the parts you can
+%    defend line by line: the extension tracker layer + idle/pause flush state
+%    machine, the ingestion path (API-key auth, normalisers, 10-minute bucketing),
+%    and the metrics service + derived-metrics module + tests. The repo has 3
+%    contributors (Pratik Jambhule, Kartik Kharat, Soham Budhewar); the React
+%    dashboard UI and the social features (groups, global leaderboard, goals)
+%    are team work -- mention them as context, don't claim them as yours.
+%
+%  * "5 trackers": editorTracker, terminalTracker, gitStateTracker, focusTracker,
+%    debugTracker. If pressed on which you personally wrote, the defensible ones
+%    are the editor, focus and Git-state trackers, the idle/pause state machine,
+%    and the payload assembly -- say that.
+%
+%  * "Posts about every 2 minutes of active coding": the internal timer TICKS
+%    every 30 s (flushIntervalSeconds), but a network send only happens once at
+%    least 2 minutes of *active* coding time has buffered (minFlushMinutes,
+%    default 2 since v2.3.0 -- it was 0.5 before), AND that interval carried a
+%    real editor/terminal/Git/focus signal; a signal-less interval is withheld
+%    and its time rolled into the next send. So on a wall clock the posts are
+%    ~2 min apart during steady work and further apart when you pause. Say
+%    "about every 2 minutes of active coding", never "every 30 seconds".
+%
+%  * The 10-minute bucketing bullet is your strongest system-design story:
+%      - BEFORE: one Activity document per 30-90 s flush -> ~60-120 docs per user
+%        per active hour, unbounded, each repeating metadata + four mostly-zero
+%        analytics sub-objects.
+%      - AFTER: an atomic findOneAndUpdate with \$inc into a document keyed by
+%        (userId, projectName, language, bucketStart), bucketStart = the
+%        timestamp floored to a 10-minute grid -> ~6-12 docs per user per hour.
+%      - WHY TOTALS ARE UNCHANGED: \$inc.duration accumulates the REAL measured
+%        seconds from each flush (45 + 60 = 105, never "1200"); only time-of-day
+%        resolution drops to a 10-minute grid, finer than any chart renders.
+%      - SAFETY: a partial-unique index on the bucket key; a duplicate-key
+%        (11000) on first insert is caught and retried once as an update.
+%      - ESCAPE HATCH: ACTIVITY_BUCKET_MS=0 restores one-doc-per-flush.
+%      - The "~10x" is a document-count / write-count reduction by construction,
+%        NOT a measured latency or throughput number. Say that plainly.
+%
+%  * "5 explainable insights" -- say STATISTICAL ANALYSIS, not machine learning.
+%    Coefficient of variation, weighted scoring, medians, computed on demand in
+%    pure JavaScript. No model, no training, no LLM. Frame it as deliberate:
+%    every number is explainable and reproducible. (An LLM narration layer is
+%    designed in docs/TRACKING_ROADMAP.md but NOT built -- don't imply it is.)
+%
+%  * "additive / backward-compatible normalisers": the backend
+%    normalize{Editor,Focus,Git,Terminal}Analytics functions coerce every field
+%    to a safe number and tolerate payloads from older extension versions that
+%    omit whole sub-objects -- so a user on an old extension build still ingests
+%    cleanly. Good "how do you handle client/server version skew" answer.
+%
+%  * "per-route ownership checks": analytics + leaderboard endpoints previously
+%    trusted a :userId in the URL; you added assertOwnership so a logged-in user
+%    can only read their own data (returns 403 on mismatch). Define it in one
+%    line if asked.
+%
+%  * "node:assert test suites": plain scripts, no framework (~100+ assertions
+%    across 12 files). Includes a static source scan (routeGuards.test.js) and
+%    tests for the new write path (activityBucket / rollup / model). There are
+%    NO integration or end-to-end tests and NOTHING has run against a real
+%    database -- say so; the fix is supertest + mongodb-memory-server.
+%
+%  * If asked "why an API key and not OAuth for the extension?": there is no
+%    browser in the VS Code extension host for a redirect, and you wanted
+%    tracking to work offline once configured. It is a fair MVP choice -- but
+%    call it what it is: an unscoped, non-expiring plaintext bearer credential.
+%    You would hash it at rest with a keyId prefix and add a rotation grace window.
 % =============================================================================

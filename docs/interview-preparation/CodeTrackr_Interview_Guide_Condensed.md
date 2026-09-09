@@ -18,19 +18,27 @@ the project was described.*
 
 ## 1. What CodeTrackr is (in one breath)
 
-CodeTrackr watches how you code and shows you the numbers.
+CodeTrackr watches how you code and shows you the numbers — built so a friend group can keep
+**friendly competition** going.
+
+**The motive:** my friends and I run coding contests and daily-practice streaks, and everyone
+always *claims* they put in the hours. CodeTrackr makes it automatic: make a **group**,
+everyone installs the extension, and the group page shows who actually coded, in what
+languages, and (because it tracks failed commands/builds too) roughly who fought the most
+errors.
 
 There are three parts:
 
 1. **A VS Code extension.** It runs quietly in your editor. It notices what file you're in,
-   what language, how much you type, how many commands you run in the terminal, when you
-   commit — and every 30–90 seconds it sends a small summary to a server.
+   what language, how much you type, how many terminal commands you run **and whether they
+   passed or failed**, when you commit — and every ~2 minutes it sends a small summary to a
+   server.
 2. **A backend server** (Node + Express + MongoDB). It checks who the data belongs to using
-   a personal key, saves each summary as one database record, and does the maths when the
-   website asks for it.
+   a personal key, then **merges the summary into a 10-minute "bucket" record** (many
+   summaries → one row), and does the maths when the website asks for it.
 3. **A React website** (the dashboard). You log in with Google. It shows charts of your
-   coding, a global leaderboard, study "groups", goal tracking, and an "Insights" page with
-   things like your most productive hour.
+   coding, **groups with a per-member leaderboard** (the main feature), a global leaderboard,
+   goal tracking, and an "Insights" page with things like your most productive hour.
 
 **Two different logins:**
 - The **website** uses Google sign-in → the server gives you a JWT stored in a cookie.
@@ -50,23 +58,24 @@ every number can be explained. (More in section 9.)
 
 ### 30 seconds
 
-> "CodeTrackr is a coding-activity tracker. You install a VS Code extension, paste in a key
-> from the website, and it records what you work on — time per language, editor activity,
-> terminal commands, git commits — and sends it to my backend. The React dashboard turns
-> that into charts, a leaderboard, study groups, goals, and an insights page. It's the MERN
-> stack — MongoDB, Express, React, Node — plus a TypeScript VS Code extension."
+> "CodeTrackr is a coding-activity tracker built around friendly competition. My friends and I
+> wanted to see who was actually grinding during contest weeks, so I built a VS Code extension
+> that records what you work on — time per language, editor activity, terminal commands and
+> whether they passed or failed, git commits — and sends it to my backend. You make a group
+> with your friends and the app shows a per-member leaderboard plus a global one, goal
+> tracking, and an insights page. MERN stack plus a TypeScript VS Code extension."
 
 ### 1 minute
 
-> "It fixes a real gap: most developers can't tell you where their coding time went. My VS
-> Code extension hooks into editor, terminal, git and window events and keeps running
-> counters — lines added, 'churn' (code you wrote then deleted), focused minutes, command
-> success rates. Every 30 seconds it sends one activity record to an Express API, checked by
-> a per-user API key. MongoDB stores each record. The React frontend shows daily and weekly
-> Chart.js graphs, a leaderboard ranked by coding hours, groups you can create and join
-> (public or password-protected), goals on a calendar with deadline reminders driven by a
-> cron job, and an insights page that works out five productivity metrics using plain
-> statistics."
+> "The idea came from my friend group — during coding contests we kept arguing about who'd
+> done the work, so I built something to measure it. My VS Code extension hooks into editor,
+> terminal, git and window events and keeps running counters — lines added, 'churn' (code you
+> wrote then deleted), focused minutes, command and build success rates. It sends those to an
+> Express API, checked by a per-user API key. The backend merges each summary into a
+> 10-minute record in MongoDB. The React frontend shows daily/weekly Chart.js graphs; **groups
+> you create with a per-member leaderboard**; a global leaderboard; goals on a calendar with
+> cron-driven reminders; and an insights page that works out five productivity metrics using
+> plain statistics."
 
 ### 2 minutes
 
@@ -129,8 +138,10 @@ data. Splitting them would add network calls and complexity for no benefit yet.
 
 When VS Code finishes starting up, the extension wakes (`onStartupFinished`), creates five
 small "trackers", and starts a timer. The timer ticks every **30 seconds**: if you've been
-idle 2+ minutes it pauses (resuming when you type again); if you've been active and enough
-time has built up (default half a minute) it sends one activity record.
+idle 2+ minutes it pauses (resuming when you type again); if you've been active for at least
+**2 minutes** (the default, `minFlushMinutes` — changed from 30 seconds in v2.3.0) **and**
+something actually happened (edits / commands / commits), it sends one summary. A flush with
+no real activity is held so the time carries to the next one.
 
 ### What it records
 
@@ -161,7 +172,7 @@ commands are cleaned (`token=...` becomes `token=***`) and shortened.
 | VS Code closes | It tries one last send, then stops |
 | No internet | The unsent minutes stay **in memory** and retry next tick. If VS Code restarts first, that time is lost — **there's no on-disk queue** |
 | Key is wrong / was reset | You get a one-time popup: "Set API Key" / "Open Dashboard" |
-| Same data sent twice | It gets saved twice and counted twice — **no duplicate protection** |
+| Same data sent twice | The backend adds it to the **same 10-minute bucket** (not a new row), so it double-counts *within* that bucket — still not fully idempotent |
 
 **Where the key is stored on your machine:** in VS Code's settings file, as **plain text**.
 **BETTER:** use VS Code's SecretStorage (the OS keychain).
@@ -220,9 +231,10 @@ cookie). There's no rate limit and no sanity check on the numbers, so it's easy.
 
 | Collection | What it holds | Notes |
 |---|---|---|
-| **activities** | one record per flush from the extension | the big one; grows forever |
+| **activities** | one record per **10-minute window** (per user + project + language) — changed 2026‑09‑08; was one per flush | the big one; a 400-day auto-delete rule now caps its growth |
+| **dailysummaries** | one row per user per day, built by a nightly job from `activities` | infrastructure for future "all-time" reads — nothing uses it yet |
 | **users** | Google ID, email, name, the **plain-text** API key | |
-| **groups** + **groupmembers** | study groups + who's in them | `groupmembers` is a proper join table with a "one row per (group, user)" rule |
+| **groups** + **groupmembers** | competition groups + who's in them | `groupmembers` is a proper join table with a "one row per (group, user)" rule |
 | **goals** | title, target hours, tech stack, deadline, status | **nothing in the code ever marks a goal "completed"** — only the demo seed script does |
 | **teams** | older idea; members stored inside the team record | backend exists but **the website never shows it** — dead code |
 | **notifications** | goal deadline reminders | created by the cron job |
@@ -230,14 +242,18 @@ cookie). There's no rate limit and no sanity check on the numbers, so it's easy.
 ### The `activities` record
 
 Key fields: `userId` (stored as **text**, not a real reference — a quirk), file/language/
-project, `duration` in **seconds** (every reader divides by 3600), line counts, `timestamp`,
-and four sub-objects: `terminalAnalytics`, `editorAnalytics`, `focusAnalytics`, `gitAnalytics`.
+project, `duration` in **seconds** (added up as real measured seconds — the totals don't
+change from bucketing), line counts, `timestamp` (= the 10-minute window start), `files[]`,
+`flushCount`, and four sub-objects (`terminalAnalytics`, `editorAnalytics`, `focusAnalytics`,
+`gitAnalytics`) that now only store the numbers that actually happened (a dead `date` field
+was removed).
 
 ### Why MongoDB (a good answer)
 
-- Activity records are **write once, never change** — perfect for a document store.
+- Activity records are **written once, never edited** (each 10-minute bucket is just added to
+  with `$inc`) — good fit for a document store.
 - The shape **grew over time** — I added three tracker sub-objects with **no migration**,
-  because Mongoose just fills missing fields with zero.
+  because Mongoose just treats missing fields as zero.
 - The main read is "give me one user's records for the last week, then add them up" — no
   joins needed on the hot path.
 - Free managed hosting (Atlas).
@@ -250,12 +266,14 @@ and four sub-objects: `terminalAnalytics`, `editorAnalytics`, `focusAnalytics`, 
   loading the whole table into Node.
 - **Transactions** for multi-step actions.
 
-### Indexes
+### Indexes (updated 2026‑09‑08)
 
-There are indexes on `{userId, date}`, `{userId, project}`, `{userId, language}`.
-**The gap:** every real query filters by `timestamp`, but the index is on `date`. So those
-queries scan all of a user's records and filter in memory. **BETTER:** add
-`{userId: 1, timestamp: -1}`.
+`{userId, timestamp}` (the one the read queries actually need — added), `{userId, project}`,
+`{userId, language}`, a **unique** `{userId, project, language, bucketStart}` (makes the
+10-minute merge race-safe), and a **400-day auto-delete** rule on `createdAt`. The old
+`{userId, date}` index was dropped along with the `date` field.
+**Still missing:** anything that would help the global leaderboard — but that's a full table
+scan by design; the fix is a running-totals table, not an index.
 
 ---
 
@@ -265,7 +283,9 @@ queries scan all of a user's records and filter in memory. **BETTER:** add
 
 **Extension sending data:**
 `POST /api/extension/track` → check the API key → basic checks (file, language, duration
-present) → clean the numbers (missing → 0) → `Activity.create(...)` → return 201.
+present) → clean the numbers → work out which 10-minute window this belongs to → **add the
+numbers into that window's record** (`findOneAndUpdate` with `$inc`, create it if missing) →
+return 201. (Set `ACTIVITY_BUCKET_MS=0` and it goes back to one new row per flush.)
 
 **Website reading data:**
 `GET /api/analytics/:userId` → check the JWT cookie → **check "is this your own data?"** (403
@@ -354,9 +374,13 @@ store outcomes like "goal missed". Serve it from a background job, never inside 
 
 ---
 
-## 10. The social features — leaderboard and groups
+## 10. The social features — groups (the core) and the global leaderboard
 
-### The leaderboard — how ranking works (**REAL**)
+**Groups are why the project exists** — friendly competition in a friend group. You make a
+group for a contest week or daily practice, everyone joins, and because everyone's editor is
+tracked automatically the group page ranks who actually did the work.
+
+### The global leaderboard — how ranking works (**REAL**)
 
 Rank = **total coding hours, all time, highest first**. Ties keep their existing order.
 
@@ -393,11 +417,19 @@ Every time someone opens the page:
 - **Join:** public = one click; private = enter the password (old plain-text ones still work
   and get upgraded to a hash on the next correct login).
 - **Membership** is a `groupmembers` join table with a "one row per (group, user)" unique
-  rule — the one solid race protection in the whole app.
-- **Leave:** the last member leaving deletes the group. **View details:** members-only (403
-  otherwise), then a group leaderboard (same slow full-scan as the global one).
+  rule — a solid race protection.
+- **View details:** members-only (403 otherwise), then a **per-member leaderboard** of coding
+  hours + lines added (same slow full-scan pattern as the global one).
+- **Leave:** the last member leaving deletes the group.
 
-**Group weak spots:** no admin/owner powers (`createdBy` is stored but unused — no kick or
+**The gap vs the original idea:** I wanted the group view to also show **how many errors each
+person hit**. The extension *does* record every member's failed commands / failed builds /
+repeated failures — the data's there — but the group leaderboard currently ranks by hours +
+lines only. Adding the error/build-success columns is a read-path change (extend the same
+`$group` with `$sum` of the failure counters) and is the top thing on my list. Same for
+scoping the board to a contest week (`?from=&to=` + a `$match` on `timestamp`).
+
+**Other group weak spots:** no admin/owner powers (`createdBy` stored but unused — no kick or
 rename); a double-join returns **500** instead of **409**; "discover" lists private groups
 too (password-gated, not hidden); no rate limit on join, so passwords can be guessed.
 
@@ -457,13 +489,15 @@ that also have editor/focus/git activity.
 
 | Users | What happens | What to do |
 |---|---|---|
-| **10,000** | Mostly fine. The leaderboard starts getting slow once `activities` is tens of millions of rows. | Add the missing `timestamp` index. Put a 30-day window + limit on the leaderboard query. |
-| **100,000** | Leaderboard is unusable without a rollup. No caching means the same maths runs over and over. | Build the `UserStats` rollup. Move analytics from JavaScript into MongoDB `$group`. |
+| **10,000** | Mostly fine. Writes are now ~10× lower (10-minute buckets), and the `timestamp` index + 400-day auto-delete are in. The leaderboard still gets slow once `activities` is millions of rows. | Repoint the leaderboard / all-time reads at the `dailysummaries` rollup that already exists; put a 30-day window + limit on the leaderboard query. |
+| **100,000** | Leaderboard is unusable without a running-totals table. No caching means the same maths runs over and over. | Build the `UserStats` rollup (`$inc` on write). Move the JS-side analytics into MongoDB `$group`. |
 | **1,000,000** | One server + one database is the wrong shape. | Put a **queue** in front of activity ingest → workers write to a **sharded** `activities` (split by userId) plus rollups. **Redis** for the leaderboard and the insights cache. Serve charts from precomputed rollups. Archive old raw records. Add real monitoring. |
 
-**The one-line answer:** *"It's fine to about 10k users. The first thing to break is the
-leaderboard, because it reads the whole activity table on every request. The fix is a small
-per-user stats table updated on write, which turns a full-table scan into a 50-row read."*
+**The one-line answer:** *"Yesterday's change — merging flushes into 10-minute buckets on
+write — cut the write and row rate about 10× with no change to the numbers. The next
+bottleneck is still the leaderboard, because it reads the whole activity table per request;
+the fix is a per-user running-totals table updated on write, turning a full-table scan into a
+50-row read, and I already built the daily-summary collection it would sit on."*
 
 ---
 
@@ -473,9 +507,10 @@ per-user stats table updated on write, which turns a full-table scan into a 50-r
 
 **What exists:** small test scripts using Node's built-in `assert` (no framework).
 
-- **Backend:** 6 files, ~57 checks — the streak logic, the number-cleaning functions, the
-  five insight formulas, the ownership helper, the password hashing, and the route scanner
-  that enforces auth.
+- **Backend:** 10 files, ~104 checks — the streak logic, the number-cleaning functions, the
+  five insight formulas, the ownership helper, the password hashing, the route scanner that
+  enforces auth, and (2026‑09‑08) the bucketing maths, the schema/index shape, the ingest
+  wiring, and the daily-rollup builder.
 - **Extension:** 2 files — the trackers' behaviour, and an "activation" test that loads the
   real built bundle and checks every command is registered and no network call happens
   without a key.
@@ -533,14 +568,16 @@ ship. It's a legitimate MVP trade-off.
 cost is no easy revocation and no refresh token.
 
 **How does data get from the extension to the dashboard?** Extension event → tracker counters
-→ 30s flush → check API key → save one record → (later) website asks → check JWT + ownership
-→ read records → add up → JSON → chart.
+→ ~2-min flush → check API key → **`$inc` the numbers into the right 10-minute record** →
+(later) website asks → check JWT + ownership → read records → add up → JSON → chart.
 
-**Where's the aggregation done?** Mostly in JavaScript after `Activity.find()`. That's tech
-debt — it should be MongoDB `$group`. The streak and the insights already use `$group`.
+**Where's the aggregation done?** Mostly in JavaScript after `Activity.find()`. Tech debt — it
+should be MongoDB `$group`. Streak, insights, the group leaderboard and the daily rollup
+already use `$group`.
 
-**What's the bottleneck?** The leaderboard — it reads the whole activity table on every
-request.
+**What's the bottleneck?** Still the leaderboard — it reads the whole activity table on every
+request. (Yesterday's 10-minute bucketing cut the row count ~10×, buying time, but the
+complexity class is unchanged.)
 
 **How do you scale the leaderboard to 10M users?** A per-user `UserStats` rollup updated on
 write, then a Redis sorted set for O(log n) rank lookups.
@@ -555,18 +592,20 @@ explainable.
 rate limit or validation. Fix: validate duration, rate-limit, require a unique send ID,
 cross-check with editor activity.
 
-**What happens if the same activity is sent twice?** It's saved twice. No duplicate
-protection. Fix: a client-generated ID per send + a unique index.
+**What happens if the same activity is sent twice?** It `$inc`s the same 10-minute record
+again — so it double-counts *within* that bucket, but doesn't add a phantom row. Still not
+fully idempotent; proper fix is a client-generated ID per send + a unique index.
 
-**Two requests at the same time — any problem?** Activity insert is a single atomic write, so
-that's fine. The weak spot is group-join (unique rule catches it but returns a 500) and
-adding a team member (a read-modify-write that could lose an update — should use `$addToSet`).
+**Two requests at the same time — any problem?** Ingest is now an atomic `findOneAndUpdate`
+with `$inc` — two flushes for the same window both apply cleanly, and the unique bucket index
+handles the create race with a retry. The weak spots elsewhere are group-join (unique rule
+catches it but returns a 500) and adding a team member (a read-modify-write — should be `$addToSet`).
 
 **Why is `userId` a string on activities but an ID everywhere else?** Historical. It forces
 type-conversion tricks in the leaderboard and blocks joins. Migrating it is on the list.
 
-**What breaks first at scale?** Leaderboard, then the un-indexed analytics scans, then the
-serverless cron.
+**What breaks first at scale?** The leaderboard (whole-table scan per request), then the
+serverless cron. The per-user analytics scans are now indexed and bounded by the bucketing.
 
 **Your frontend doesn't build — explain.** 29 old TypeScript errors, mostly unused imports.
 `vite build` works; the combined `tsc -b && vite build` fails. A cleanup, not a design issue.
@@ -580,8 +619,16 @@ plan.
 net to zero on a refactor. I built an idle/pause state machine and switched to gross edit
 counts plus a churn metric.
 
-**What would you improve first?** Hash the keys, build the leaderboard rollup, move analytics
-into the database, fix the TypeScript errors, add integration tests.
+**What would you improve first?** Hash the keys; add the error/build-success columns to the
+group leaderboard (the original motive — read-path change only); repoint the all-time reads
+at the daily-summary rollup that already exists; fix the TypeScript errors; add integration
+tests.
+
+**You changed the write model recently — what and why?** It was one row per flush (~1 per
+minute of coding). I changed ingest to `$inc` into a 10-minute `(user, project, language)`
+record. `$inc` adds the real measured seconds, so every total is identical — only the
+time-of-day detail is now 10-minute-grained, which is the finest any chart shows. Row count
+dropped ~10×. There's a rollback env switch (`ACTIVITY_BUCKET_MS=0`).
 
 ---
 
@@ -632,14 +679,17 @@ document store?"**
 
 1. **API key** — plain text, never expires, no limits.
 2. **Leaderboard** — reads the whole table every request; no cache, no pagination; leaks emails.
-3. **Analytics maths runs in JavaScript**, not the database — downloads every record to add it up.
-4. **Missing `timestamp` index** — queries filter on a field that isn't indexed.
-5. **Cron breaks on serverless.**
-6. **No rate limiting / security headers / input validation** (libraries installed, not wired up).
-7. **Frontend build fails** (29 old TypeScript errors).
-8. **Fake data on the dashboard** ("Repeated Failures" panel); **unsaved to-dos**; **dead Teams page**.
-9. **Idle time under 2 minutes still counts** as coding time.
-10. **No integration tests; nothing tested against a real database.**
+3. **Analytics maths runs in JavaScript**, not the database — downloads records to add up (bounded now that they're bucketed, still not ideal).
+4. **Cron breaks on serverless** (and it now also runs the nightly rollup).
+5. **No rate limiting / security headers / input validation** (libraries installed, not wired up).
+6. **Frontend build fails** (29 old TypeScript errors).
+7. **Fake data on the dashboard** ("Repeated Failures" panel); **unsaved to-dos**; **dead Teams page**.
+8. **The group leaderboard doesn't show the error comparison yet** — the original motive; the data's collected, the view isn't built.
+9. **No integration tests; nothing tested against a real database** — including the new bucketing/rollup code (pure-function tests only).
+10. **All-time reads still scan raw `activities`** — not repointed at the `dailysummaries` rollup; the 400-day auto-delete is just a safety net.
+
+*(Fixed 2026‑09‑08: per-flush document explosion, the missing `timestamp` index, the dead
+`date` field, idle-<2-min inflating totals.)*
 
 For each one: know *why it matters*, *what it would take to fix*, and *why it's acceptable for a
 student project right now*.
@@ -662,12 +712,12 @@ student project right now*.
 2. "The leaderboard reads the whole activity table per request; the fix is a per-user stats
    rollup updated on write, turning a full scan into a 50-row read, with a Redis sorted set
    for rank lookups."
-3. "Insights is plain statistics — a spread score, weighted scoring, medians — chosen so
-   every number is explainable; the LLM layer is designed with a 'can't invent numbers' rule
-   but not built."
-4. "Analytics currently add up in JavaScript after loading every record; moving that into
-   MongoDB `$group` is the prerequisite for scale, and the insights code already does it
-   right."
+3. "I recently moved ingest from one row per flush to an atomic `$inc` into a 10-minute
+   `(user, project, language)` bucket — real seconds are summed either way, so every total is
+   identical, but the write and row rate dropped about 10×."
+4. "The project's really about friendly competition — the group leaderboard is the point, and
+   the next feature is surfacing the per-person error and build-success comparison, which the
+   extension already collects."
 5. "I audited my own code into an improvement plan — about 30 findings by severity — and
    closed the serious security ones with a test that fails if a protected route loses its
    auth check."

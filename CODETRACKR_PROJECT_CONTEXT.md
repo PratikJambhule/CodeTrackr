@@ -17,9 +17,19 @@ records coding activity and POSTs it to a Node/Express backend, which stores it 
 A React dashboard visualises the data and adds social/gamification features (global
 leaderboard, groups, goals) and a private **Insights** page of derived productivity metrics.
 
-**One-line pitch:** "WakaTime-style coding tracker with a leaderboard, study groups, goal
-tracking, and a statistics-based insights page — VS Code extension + React dashboard +
-Express/MongoDB backend."
+**Original motive (the "why").** It started as a way to keep **friendly competition** going in
+the author's college friend group: create a **group** — for a contest week, or just daily
+practice — and because everyone's editor is tracked automatically, the group page shows who
+actually put in the hours and code. The extension also records **command / build / test
+failures per person** (`terminalAnalytics`), so "who's hitting the most errors" is data the
+app already collects; surfacing that in the group view (it currently ranks by hours + lines
+added) is the natural next step, not yet built.
+
+**One-line pitch:** "A coding-activity tracker built around friendly competition: install the
+VS Code extension, join a group with your friends, and the app shows who coded the most, in
+what languages, and how their build/command success rates compare — plus a global
+leaderboard, goal tracking and a stats-based insights page. VS Code extension + React
+dashboard + Express/MongoDB backend."
 
 **Team:** Pratik Jambhule, Kartik Kharat, Soham Budhewar (per `extension/package.json`
 `contributors` and repo git history — `Soham-Official/CodeTrackr` on GitHub). Do not invent

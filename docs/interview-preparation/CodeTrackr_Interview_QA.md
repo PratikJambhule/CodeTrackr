@@ -18,29 +18,39 @@
 ## A. Project overview
 
 **A1. Tell me about CodeTrackr.**
-> A developer-productivity tracker. A VS Code extension records your coding activity — time per
-> language, editor churn, terminal commands, git commits, focused minutes — and every ~30
-> seconds sends it to my Express/MongoDB backend, authenticated by an API key you get from the
-> website after a Google login. A React dashboard turns that into daily/weekly charts, a global
-> leaderboard, study groups with their own leaderboards, goal tracking on a calendar with
-> deadline notifications, and a private Insights page of derived metrics like your most
-> productive hour and how consistent your habits are. MERN stack plus a TypeScript VS Code
-> extension; frontend on Vercel, backend on Render, MongoDB Atlas.
+> A coding-activity tracker built around friendly competition in a friend group. A VS Code
+> extension records your coding activity — time per language, editor churn, terminal commands
+> and whether they passed or failed, git commits, focused minutes — and sends it to my
+> Express/MongoDB backend, authenticated by an API key you get from the website after a Google
+> login. The backend merges the flushes into 10-minute activity records. A React dashboard
+> turns that into daily/weekly charts, **groups you create with your friends that each get a
+> per-member leaderboard**, a global leaderboard, goal tracking on a calendar with deadline
+> notifications, and a private Insights page of derived metrics like your most productive
+> hour. MERN stack plus a TypeScript VS Code extension; frontend on Vercel, backend on Render,
+> MongoDB Atlas.
 
 **A2. Why did you build it?**
-> I kept losing track of where my coding time went — "coded for four hours, one commit". Tools
-> like WakaTime measure time-in-editor but not whether it was focused or churny. I wanted
-> something that captured the shape of a session and a social layer for accountability.
+> My friend group runs informal coding contests and daily-practice streaks, and everyone
+> always *claimed* they'd put in the hours. I wanted to just see it — make a group, everyone
+> installs the extension, and the group page shows who actually coded, in what languages, and
+> (because the extension tracks failed commands and builds too) roughly who was fighting the
+> most errors. The personal metrics — focused vs elapsed time, churn, most-productive hour —
+> grew out of the same "measure it honestly" idea. WakaTime measures time-in-editor but has no
+> group-competition angle.
 
 **A3. What problem does it solve?**
-> Developers have poor visibility into how time is actually spent, and self-estimates are
-> unreliable. CodeTrackr makes it concrete: focused vs elapsed time, rework (churn), and a
-> comparison of your goal estimates to the hours you actually logged.
+> In a group of friends who code together there's no honest, low-effort way to see who's
+> actually doing the work — self-reported effort is unreliable and nobody wants to manually
+> log anything. CodeTrackr makes it automatic and comparable: a group leaderboard of hours and
+> lines, per-person command/build success, plus personal metrics (focused vs elapsed, churn,
+> estimate vs actual).
 
 **A4. What makes it different from a normal coding tracker?**
-> Four things: it measures *focused* time and "flow blocks", not just elapsed; it tracks churn
-> so a refactor isn't invisible; it separates your busiest hour from your most productive hour;
-> and it has groups so a study cohort can see each other's consistency.
+> It's built *around* the group leaderboard — the competition is the point, not a side
+> feature. It records command/build/test success and failure per person, not just time. And
+> the personal side measures *focused* time and "flow blocks" not just elapsed, tracks churn
+> so a refactor isn't invisible, and separates your busiest hour from your most productive
+> one.
 
 **A5. What was the hardest part?**
 > Making the time number honest. V1 counted wall-clock elapsed from session start, so leaving
@@ -150,13 +160,17 @@
 > and debug sessions.
 
 **C4. How frequently is data collected and sent?**
-> A timer ticks every `flushIntervalSeconds` (default 30s). A flush actually POSTs only when
-> buffered active minutes reach `minFlushMinutes` (default 0.5). So roughly every 30–90s of
-> continuous coding. One `Activity` document per POST.
+> A timer ticks every `flushIntervalSeconds` (default 30s). A flush POSTs only when buffered
+> active minutes reach `minFlushMinutes` (**default 2** since 2.3.0, was 0.5) *and* the payload
+> has real signal (`payloadHasSignal` — edits/commands/commits). So roughly a POST every ~2
+> minutes of real coding.
 
 **C5. Is data batched?**
-> No. One `POST /api/extension/track` per flush. There's a `/track/batch` endpoint on the
-> backend that uses `insertMany`, but the extension never calls it.
+> Not over HTTP — one `POST /api/extension/track` per flush. But since 2026‑09‑08 the
+> **backend merges** them: it floors the timestamp to a 10-minute boundary and `$inc`-upserts
+> a `(user, project, language, bucketStart)` document, so many flushes in a window become one
+> row. `/track/batch` (`insertMany`) exists but the extension never calls it.
+> `ACTIVITY_BUCKET_MS=0` reverts to one `Activity.create` per flush.
 
 **C6. Is there buffering / debouncing / throttling?**
 > Active minutes are buffered in the `state` object between ticks and across a failed flush.
@@ -194,8 +208,10 @@
 > "which account" beyond the key string.
 
 **C14. How is duplicate activity handled? Same payload twice?**
-> It isn't — the backend stores it again and double-counts. There's no idempotency key. The
-> fix is a client-generated uuid per flush plus a unique index or a short dedupe window.
+> Still not idempotent, but bounded now: a replay `$inc`s the *same 10-minute bucket* rather
+> than creating a second row, so it double-counts *within* one bucket instead of adding a
+> phantom document. The proper fix is a client-generated uuid per flush plus a unique index or
+> a short dedupe window.
 
 **C15. Why stamp the payload with the interval start, not "now"?**
 > Stamping upload time pushed every session forward in the day and skewed hour-of-day
@@ -244,7 +260,10 @@
 > → `express.json()` parses the body → `verifyApiKey` reads `x-api-key`, `User.findOne
 > ({apiKey})`, attaches `req.user` → the handler checks `fileName && language && duration`,
 > parses `timestamp` (falls back to now), runs the four `normalize*Analytics` functions →
-> `Activity.create({ userId: req.user._id.toString(), ... })` → `201`.
+> `planActivityWrite(normalized, when)` decides: **bucket** (has signal) → `Activity.
+> findOneAndUpdate` `$inc`-ing the 10-minute `(user,project,language,bucketStart)` document,
+> `upsert:true`, `11000`-retry; **merge** (no signal) → `$inc` only an existing bucket's
+> duration; **legacy** (`ACTIVITY_BUCKET_MS=0`) → `Activity.create`. `201` (or `202` for merge).
 
 **D2. Express 4 vs Express 5 — why does it matter here?**
 > Express 5 propagates rejected promises from async handlers to the error pipeline
@@ -301,11 +320,14 @@
 ## E. MongoDB
 
 **E1. Describe the schema.**
-> Seven collections. `activities` is the high-volume one — one document per flush, with
-> `userId` (a String, the hex of `users._id`), file/language/project, `duration` in seconds,
-> line counts, `timestamp`, and four analytics sub-documents (terminal, editor, focus, git).
-> `users` (googleId, email, plaintext `apiKey`), `groups` + `groupmembers` (a join table with
-> a unique compound index), `goals`, `teams` (embedded `members` array), `notifications`.
+> Eight collections. `activities` is the high-volume one — since 2026‑09‑08 **one document per
+> 10-minute `(user, project, language)` window** (`$inc`-merged), with `userId` (a String, the
+> hex of `users._id`), file/language/project, `duration` in seconds, line counts, `timestamp`
+> (= `bucketStart`), `files[]`, `flushCount`, and four *sparse* analytics sub-documents
+> (terminal, editor, focus, git — only non-zero leaves stored). `users` (googleId, email,
+> plaintext `apiKey`), `groups` + `groupmembers` (a join table with a unique compound index),
+> `goals`, `teams` (embedded `members` array), `notifications`, and `dailysummaries` (nightly
+> rollup, one per user per UTC day).
 
 **E2. Why is `userId` a String on `activities` but an ObjectId elsewhere?**
 > Historical — early ingest stored the hex string. It forces `$toObjectId` coercion in the
@@ -320,22 +342,26 @@
 > UI doesn't use it).
 
 **E4. What indexes do you have?**
-> On `activities`: `{userId:1}`, `{userId:1,date:-1}`, `{userId:1,projectName:1}`,
-> `{userId:1,language:1}`. Unique compound `{groupId:1,userId:1}` on `groupmembers`. Unique on
+> On `activities` (updated 2026‑09‑08): `{userId:1}`, **`{userId:1,timestamp:-1}`**,
+> `{userId:1,projectName:1}`, `{userId:1,language:1}`, a **partial-unique**
+> `{userId:1,projectName:1,language:1,bucketStart:1}` (`partialFilterExpression: bucketStart
+> exists` — the race-safe bucket-merge guard), and a **400-day TTL on `{createdAt:1}`**. The
+> old `{userId:1,date:-1}` was dropped. Unique compound `{groupId:1,userId:1}` on
+> `groupmembers`; unique `{userId:1,day:1}` on `dailysummaries`; unique on
 > `users.googleId/email/apiKey` (sparse).
 
 **E5. Any missing indexes?**
-> Yes — the important one. Every analytics, metrics, and streak query filters on `timestamp`,
-> but the compound index is on `date`. There's no `{userId:1,timestamp:-1}`, so those queries
-> use the single-field `userId` index and filter timestamp in memory. `date` is now written
-> equal to `timestamp`, so I could either add the timestamp index or repurpose the queries to
-> use `date`.
+> Not on the per-user reads any more — I added `{userId:1,timestamp:-1}`, which every
+> analytics/metrics/streak query uses (they filter on `timestamp`; the old index was on a dead
+> `date` field). What's still missing is anything to help the leaderboard's collection-wide
+> `$group` — but that's a full scan by nature; the fix is a `UserStats` rollup, not an index.
 
 **E6. How do you do aggregations?**
-> Two ways, inconsistently. `computeStreak`, `/summary`, and all of `/api/metrics` use real
-> `$match`/`$group` pipelines. The daily/weekly/timeslot analytics endpoints do
-> `Activity.find()` then `.reduce()` in Node — that's tech debt (M-1): it transfers and parses
-> every document and holds them all in memory.
+> Two ways, inconsistently. `computeStreak`, `/summary`, `/api/metrics`, the group-details
+> leaderboard, and now the daily rollup use real `$match`/`$group` pipelines. The
+> daily/weekly/timeslot analytics endpoints do `Activity.find()` then `.reduce()` in Node —
+> tech debt (M-1); bounded now that docs are bucketed (~hundreds not ~thousands) but still
+> ships them to the app to sum.
 
 **E7. Give me an example aggregation pipeline in the project.**
 > The streak: `$match { userId, timestamp: { $gte: 90d } }` → `$group` by
@@ -344,9 +370,11 @@
 > backward from today (or yesterday) counting consecutive days.
 
 **E8. Consistency and transactions?**
-> No transactions anywhere. Single-document writes are atomic in Mongo so ingest is safe. The
-> weak spots are `team.members.push` (should be `$addToSet`) and the double-join race (caught
-> by the unique index but returned as a 500).
+> No transactions anywhere. Ingest is now an atomic `findOneAndUpdate` with `$inc` into a
+> bucket — race-safe (two concurrent flushes for the same window both apply; the partial
+> unique index handles the upsert-insert race with a `11000`-retry). The weak spots elsewhere
+> are `team.members.push` (should be `$addToSet`) and the double-join race (caught by the
+> unique index but returned as a 500).
 
 **E9. When would PostgreSQL be better?**
 > The relational parts — group/team membership, goal ownership — where foreign keys and
@@ -361,9 +389,23 @@
 > and a free managed tier.
 
 **E11. How would you handle the activity collection growing to hundreds of millions of docs?**
-> Shard on `userId` (hashed) so per-user queries are single-shard; maintain daily rollups
-> (`daily_stats` keyed `{userId, day}`) so reads don't touch raw docs; TTL or archive raw docs
-> older than N months to cold storage or a columnar warehouse for trend analysis.
+> The first step is done — merging flushes into 10-minute buckets cut the write/row rate ~10×,
+> and a 400-day TTL caps growth. Next: the `dailysummaries` rollup already exists; repoint the
+> all-time reads (leaderboard, `/summary`, `metrics >90d`) at it and tighten the raw TTL. Then
+> shard raw `activities` on `userId` (hashed) so per-user queries stay single-shard; archive
+> anything past the TTL to a columnar warehouse for trend analysis.
+
+**E12. You changed the write model recently — walk me through it.**
+> Ingest was an append-only event log: one row per 30–90s flush, each repeating the metadata
+> plus four mostly-zero analytics objects. I added a pure `planActivityWrite` that decides how
+> to persist a flush, and the route now does an atomic `Activity.findOneAndUpdate` with `$inc`
+> into a `(user, project, language, 10-minute window)` document. `$inc.duration` is the real
+> measured seconds — every total (hours, lines, streak, leaderboard) is byte-for-byte the same;
+> only time-of-day resolution drops to a 10-minute grid, which is the finest any dashboard
+> reads. Row count fell ~10×. I also made the sub-docs sparse, dropped a dead `date` field,
+> added the `timestamp` index, and built a nightly `dailysummaries` rollup + 400-day TTL.
+> `ACTIVITY_BUCKET_MS=0` is the rollback switch. It's covered by 4 new pure-function test
+> suites; there's still no integration test against a real DB.
 
 **E12. Race conditions in the DB layer?**
 > Double-join (unique index → 500 instead of 409); `team.members.push` lost update;
@@ -640,8 +682,9 @@
 > stable unless *their* activity changes.
 
 **I9. "commits" on the leaderboard — what is it actually?**
-> It's `activityCount` — the number of activity documents — not `gitAnalytics.commits`. It's
-> mislabelled. Should sum the real git commits.
+> It's `activityCount` — `$sum { $ifNull: ['$flushCount', 1] }`, i.e. the number of flushes
+> (since bucketing; was raw doc count). Still not `gitAnalytics.commits` — mislabelled. Should
+> sum the real git commits.
 
 **I10. Privacy issue with the leaderboard?**
 > It returns every user's email. Should return a display name or handle only.
@@ -654,6 +697,15 @@
 ---
 
 ## J. Groups
+
+**J0. What are groups for?**
+> They're the reason the project exists. My friends and I run coding contests and daily-practice
+> streaks; a group is how you scope the competition — everyone joins, everyone's editor is
+> tracked automatically, and `GET /:groupId/details` returns the member list plus a per-member
+> leaderboard (`codingHours`, `totalLinesAdded`). The original idea also included comparing
+> *errors* — the extension does record each member's failed commands/builds/repeated failures
+> — but the group leaderboard doesn't surface that yet; it's the top item on my list and a
+> read-path change only (extend the same `$group` with `$sum` of the failure counters).
 
 **J1. How are groups created?**
 > `POST /api/groups/create` with name, description, visibility, and (for private) a password.
@@ -699,6 +751,15 @@
 **J9. How would you build a group activity feed?**
 > Either poll a `GET /:groupId/feed` endpoint that queries recent `activities` for member IDs,
 > or — for real-time — a WebSocket room per group that the ingest path publishes to.
+
+**J10. The original goal was comparing errors and contest-week activity — how would you finish that?**
+> Two small changes. **Errors:** the group-details endpoint already `$group`s member activity
+> for hours and lines; add `$sum` of `terminalAnalytics.failedCommands` / `failedBuilds` /
+> `debuggingSessions` and a computed `buildSuccessRate`, then render the columns. **Contest
+> weeks:** add `?from=&to=` to `/:groupId/details` and a `$match` on `timestamp`; store
+> `contestStart`/`contestEnd` on the group and default the window to that. The 10-minute
+> bucketing doesn't interfere — buckets are stamped `bucketStart`, so a time-range `$match`
+> still works. Both are read-path only, no schema change.
 
 ---
 
@@ -1140,9 +1201,11 @@
 
 **P4. What did you learn?**
 > How much of "it works" is timezone handling and clock semantics; that measuring developer
-> activity honestly is harder than it sounds (elapsed ≠ focused, net lines ≠ real work); and
-> the value of auditing your own code — writing `IMPROVEMENT_PLAN.md` changed how I saw the
-> project.
+> activity honestly is harder than it sounds (elapsed ≠ focused, net lines ≠ real work); the
+> value of auditing your own code — writing `IMPROVEMENT_PLAN.md` changed how I saw the
+> project; and, most recently, that the write model matters — going from one row per flush to
+> a 10-minute `$inc` bucket cut write volume ~10× with zero change to the numbers, once I
+> convinced myself `$inc` of real seconds is exactly the same sum as separate rows.
 
 **P5. What would you do differently starting over?**
 > Aggregate in MongoDB from day one; use a real test framework and an in-memory Mongo for
@@ -1156,10 +1219,11 @@
 **P7. Walk me through a bug you fixed.**
 > The `date` field. Backdated flushes (a queued flush after being offline) were being filed
 > under the *ingest* day, not the day the work happened, because `date` defaulted to `Date.now`
-> and the handler didn't set it from `timestamp`. Fix: derive one `when` instant from the
-> body's `timestamp` (guarded for NaN) and write it to both `timestamp` and `date`. Read paths
-> already used `timestamp`, so nothing broke in the meantime, but a backfill is still
-> outstanding for old rows.
+> and the handler didn't set it from `timestamp`. First fix: derive one `when` instant from the
+> body's `timestamp` and write it to both fields. Then, doing the write-reduction work, I
+> confirmed nothing actually *read* `date` (the `date:` tokens in the aggregations are the
+> `$dateToString` parameter, referencing `$timestamp`) — so I deleted the field and its index
+> entirely, with a one-off `$unset` migration. Fewer bytes per row, one less index to maintain.
 
 **P8. How do you approach code review / quality?**
 > The `IMPROVEMENT_PLAN.md` is the evidence — I catalogued findings by severity with problem /
