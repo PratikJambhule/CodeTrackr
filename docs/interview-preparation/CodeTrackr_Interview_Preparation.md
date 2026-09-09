@@ -384,10 +384,13 @@ For each: **what / where in CodeTrackr / why / alternative / why the choice hold
 
 ### MongoDB driver via Mongoose — no ORM/query builder beyond it. `node-cron` for scheduling.
 
-- **`node-cron`:** `'0 * * * *'` hourly + immediate run. Fine on a long-lived Render process;
-  **broken on serverless** (H-13).
-- **Alternative:** Vercel Cron, a GitHub Action on a schedule, BullMQ repeatable jobs, or
-  Atlas Triggers.
+- **`node-cron`:** `'0 * * * *'` hourly + `'30 3 * * *'` nightly rollup + an immediate run.
+  Fine on a long-lived Render process; was **broken on serverless** (H-13) — ✅ fixed
+  2026-09-09: `initScheduler()` is behind `if (require.main === module)`, and
+  `POST /api/internal/run-{notifications,rollup}` (behind `INTERNAL_CRON_SECRET`) let an
+  external scheduler drive it.
+- **Alternative triggers:** Vercel Cron, a GitHub Action on a schedule, BullMQ repeatable
+  jobs, or Atlas Triggers hitting the internal routes.
 
 ### Chart.js 4 + react-chartjs-2 + chartjs-plugin-datalabels
 
@@ -1254,14 +1257,18 @@ Format: **Current → Vulnerability → Attack → Fix.**
   no `X-Powered-By`. CSP is left off (helmet's default) since the SPA is served from Vercel.
 - (The old `server.js.old` had `helmet`; it was dropped in the rewrite and re-added here.)
 
-### 14.4 No input validation on ingest
+### 14.4 Ingest input validation — ✅ fixed 2026-09-09 (M-4, partial)
 
-- **Current:** only `if (!fileName || !language || !duration)`; `Number(duration)` accepts
-  `1e12`, negatives (partly clamped by normalisers for sub-docs, not for `duration` itself),
-  and a client-supplied `timestamp`.
-- **Attack:** one request writes `duration: 999999999` → instant leaderboard #1; backdate
-  `timestamp` to fabricate history.
-- **Fix:** `express-validator` — `duration` int `1..3600`, `timestamp` within `[now-24h, now]`,
+- **Was:** only `if (!fileName || !language || !duration)` — `Number(duration)` accepted
+  `1e12` and negatives, and `timestamp` was unbounded. One request with `duration: 999999999`
+  → instant leaderboard #1.
+- **Now:** a pure `services/ingestValidation.js` (`validateIngestPayload`, 23 unit assertions)
+  runs on `/track` and each `/track/batch` element: `duration ∈ (0, 3600]`, `fileName ≤ 255`,
+  `language ≤ 64`, `projectName ≤ 128`, `timestamp ∈ [now-24h, now+60s]` → `400 { details }`.
+- **Still open:** `timestamp` is client-supplied (bounded, not server-set); no per-key quota
+  (only the per-IP `/api/extension` limiter); no idempotency key (#10, deferred).
+- **Chosen** a pure module over `express-validator` — more testable, slots ahead of the
+  normalise/plan pipeline. Original sketch was: `express-validator` — `duration` int `1..3600`, `timestamp` within `[now-24h, now]`,
   `language`/`fileName` length caps, reject unknown top-level keys.
 
 ### 14.5 Error messages leaked internals — ✅ fixed 2026-09-09
@@ -1337,7 +1344,7 @@ Format: **Current → Vulnerability → Attack → Fix.**
 | Extension offline | buffered minutes kept in memory, retried next tick; best-effort flush on deactivate | restart loses un-flushed time | persist the buffer to `context.globalState`; a small on-disk queue |
 | Frontend API failure | `console.error`, page stays in empty/loading or shows an error card | inconsistent; `Groups` uses `alert()` | a shared fetch hook with typed errors + toasts; React Query retry |
 | Metrics/ML failure | `500 {success:false}` → "Could not load your insights" + retry | fine | + a cached last-good result |
-| Notification cron on serverless | never fires (frozen between requests); cold start re-runs the immediate sweep | duplicate reminders / none at all (H-13) | Vercel Cron / external scheduler hitting a protected internal route |
+| ~~Notification cron on serverless~~ ✅ fixed 2026-09-09 | was: never fires / cold-start re-run (H-13) | — | `require.main` guard + `POST /api/internal/run-*` behind `INTERNAL_CRON_SECRET` |
 | Unhandled rejection | Express 5 turns it into a 500 | no logging context | central handler + `process.on('unhandledRejection')` |
 
 ---
@@ -1413,7 +1420,7 @@ run via `node tests/x.test.js`. `package.json` `test` scripts chain them with `&
 **CI:** GitHub Actions (`.github/workflows/ci.yml`, added 2026‑09‑09) runs the backend +
 extension suites and the frontend build on every push / PR.
 
-**Backend (`backend/tests/`, 11 suites, ~114 assertions):**
+**Backend (`backend/tests/`, 12 suites, ~142 assertions):**
 
 | Suite | Technique | Covers |
 |---|---|---|
@@ -1427,7 +1434,8 @@ extension suites and the frontend build on every push / PR.
 | `activityModel.test.js` | schema introspection | `Activity` sub-doc leaves are sparse (no `default: 0`); `date` path gone; `bucketStart`/`files`/`flushCount` present; the 5 index specs incl. the partial-unique bucket key (2026‑09‑08) |
 | `ingestWiring.test.js` | **static source scan** | `/track` uses `planActivityWrite`; `ACTIVITY_BUCKET_MS` default 600000; bucket writes are `findOneAndUpdate … upsert`; `11000` retry; the read paths tolerate bucketed docs (2026‑09‑08) |
 | `rollup.test.js` | unit (pure) | `buildDaySummary` — seconds/lines summed, `flushCount` missing ⇒ 1, per-language breakdown, project de-dup, focus `longestBlockMs` maxed (2026‑09‑08) |
-| `quickWins.test.js` | **static source scan** | `JWT_SECRET` boot-guard + no `'your_jwt_secret'`; `11000`→409 on group join; `GET /health` on `readyState`; `helmet` + rate-limit on `/auth`+`/api/extension` (test-skip); central `(err,req,res,next)` handler + zero response-body `.message` leaks (2026‑09‑09) |
+| `quickWins.test.js` | **static source scan** | `JWT_SECRET` boot-guard + no `'your_jwt_secret'`; `11000`→409 on group join; `GET /health` on `readyState`; `helmet` + rate-limit on `/auth`+`/api/extension` (test-skip); central `(err,req,res,next)` handler + zero response-body `.message` leaks; `require.main` bootstrap guard; `/api/internal` + `INTERNAL_CRON_SECRET`; `{goalId:1,type:1}` index (2026‑09‑09) |
+| `ingestValidation.test.js` | unit (pure) | `validateIngestPayload` — `duration ∈ (0,3600]`, `fileName`/`language`/`projectName` length caps, `timestamp ∈ [now-24h, now+60s]`; numeric-string coercion; null body (2026‑09‑09) |
 
 **Extension (`extension/tests/`, ~37 assertions):**
 
@@ -1556,15 +1564,18 @@ Walk it in order (this is `CodeTrackr_Architecture.md` §9 as a checklist):
 `AUTH_BYPASS` (dev only). `config/passport.js` **throws at import** if the three `GOOGLE_*`
 are missing — the API won't boot without them.
 
-### 19.3 The serverless / scheduler mismatch (H-13)
+### 19.3 The serverless / scheduler mismatch (H-13) — ✅ fixed 2026-09-09
 
-`app.js` calls `initScheduler()` and `app.listen()` unconditionally. On Vercel serverless:
-every cold start re-runs the immediate `checkUpcomingDeadlines()` + `checkOverdueGoals()`
-sweep; the hourly `cron.schedule('0 * * * *')` never fires because the process is frozen
-between requests. Fix: guard `app.listen()` behind `require.main === module`; move the
-schedule to Vercel Cron / an external trigger hitting a protected
-`POST /api/internal/run-notifications`; add `{ goalId:1, type:1 }` index for
-`checkOverdueGoals`'s per-goal `findOne`.
+**Was:** `app.js` called `initScheduler()` + `app.listen()` unconditionally, so on Vercel
+serverless every cold start re-ran the immediate sweep and the hourly `cron.schedule('0 * * * *')`
+never fired (process frozen between requests).
+**Now:** both are inside `if (require.main === module)` — `require('../app')` (the serverless
+entry) starts no server and no scheduler. `routes/internal.js` exposes
+`POST /api/internal/run-notifications` and `/run-rollup` behind `INTERNAL_CRON_SECRET`
+(constant-time compare, **404** when unset/wrong). Added the `{ goalId:1, type:1 }` index for
+`checkOverdueGoals`'s per-goal `findOne`. CI imports `app.js` with junk env and asserts no
+side effects. **Operator:** set `INTERNAL_CRON_SECRET` and point an external scheduler
+(GitHub Actions `schedule:` / cron-job.org) at the two routes.
 
 ### 19.4 How I'd deploy it properly [RECOMMENDED IMPROVEMENT]
 
@@ -1691,7 +1702,7 @@ Each: **Decision → Reason → Alternative → Trade-off → When the alternati
 | 2 | Leaderboard scans all activity + all users in Node | O(A+U) per request, no cache/window/pagination | times out at ~10k users | `UserStats` rollup + Redis sorted set |
 | 3 | Analytics aggregate in JS | ships/parses every doc, O(N) memory | slow reads, wasted DB egress | MongoDB `$group` pipelines |
 | 4 | Missing `{userId:1,timestamp:-1}` index | every query filters `timestamp` but indexes are on `date` | full per-user scans | add the index; drop the `date` index |
-| 5 | `node-cron` on serverless | frozen between requests | notifications never fire (H-13) | Vercel Cron / external trigger |
+| 5 | ~~`node-cron` on serverless~~ ✅ fixed 2026-09-09 | was: frozen between requests (H-13) | — | `require.main` guard + external `/api/internal/run-*` trigger |
 | 6 | ~~No helmet / rate limit / validation~~ ✅ mostly fixed 2026-09-09 | — | — | `helmet` + rate limits on `/auth`+`/api/extension`; ingest bounds-checked. Group `/join` still unlimited |
 | 7 | ~~Frontend doesn't typecheck~~ ✅ fixed 2026-09-09 | was 29 `tsc -b` errors | — | `npm run build` is green; CI enforces it |
 | 8 | ~~Dashboard "Repeated Failures" is mock~~ ✅ fixed 2026-09-09 | was fabricated commands | — | now renders `terminalSummary.repeatedFailedCommands` |
@@ -2002,7 +2013,7 @@ the engine / precompute rollups.
 > to a short-lived JWT the dashboard issues, so at least it expires and is scoped.
 
 **12. Can users cheat the leaderboard?**
-> Trivially. There's no rate limit or validation on ingest, so one `curl` with a valid key and
+> Harder as of 2026-09-09: `/api/extension` is IP-rate-limited (120/min) and `duration` is capped at 3600/flush. But there's still no idempotency key or per-key quota, so one `curl` with a valid key and
 > `duration: 999999` puts you at #1. Defences: validate `duration` (1–3600s), rate-limit per
 > key, require an idempotency key per flush, and run anomaly detection on the
 > duration-vs-edits ratio.

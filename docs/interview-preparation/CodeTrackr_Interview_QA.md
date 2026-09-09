@@ -314,7 +314,7 @@
 > `node-cron` `'0 * * * *'` plus an immediate run on startup. `checkUpcomingDeadlines` finds
 > in-progress goals due in 6–7 hours that haven't been reminded and creates a notification;
 > `checkOverdueGoals` does the same for past-deadline goals. On serverless it's broken (H-13):
-> every cold start re-runs the immediate sweep and the hourly cron never fires. The fix is
+> every cold start re-ran the immediate sweep and the hourly cron never fired. ✅ Fixed 2026-09-09:
 > Vercel Cron or an external trigger hitting a protected internal route.
 
 **D10. What does `AUTH_BYPASS` do and is it safe?**
@@ -776,12 +776,12 @@
 > Fixed: analytics/leaderboard now require auth + ownership; legacy open write/read endpoints
 > deleted; group passwords scrypt-hashed; `AUTH_BYPASS` refused in production; IDORs on
 > goals/teams closed. Still open: the API key is plaintext and non-expiring; no rate limiting
-> anywhere; no security headers (`helmet` unused); no request validation on ingest; error
+> on group `/join` or analytics; `helmet` + rate-limit on `/auth`+`/api/extension` (2026-09-09); ingest is bounds-checked (2026-09-09); error
 > the leaderboard leaks emails; no idempotency on ingest; the
 > group search regex is a ReDoS vector. (`JWT_SECRET` fallback fixed 2026-09-09.)
 
 **K2. Biggest security risk?**
-> The API key model combined with no ingest validation or rate limiting. A valid key plus one
+> The API key model (plaintext, non-expiring, unscoped). Ingest is bounds-checked and IP-rate-limited as of 2026-09-09, but there's still no idempotency key or per-key quota, so a valid key plus a slow
 > `curl` with `duration: 999999999` corrupts the global leaderboard, and there's nothing to
 > stop it.
 

@@ -94,13 +94,13 @@ workspace; each is installed and deployed independently.
 | Layer | Stack |
 |---|---|
 | Extension | TypeScript 5, esbuild (CJS bundle, `--external:vscode`), `@vscode/vsce`, axios; `@types/vscode ^1.85` |
-| Backend | Node 18, Express **5**, Mongoose **8**, jsonwebtoken, passport + passport-google-oauth20, cookie-parser, cors, dotenv, node-cron, serverless-http. **`helmet` + `express-rate-limit` wired 2026-09-09** on `/auth` + `/api/extension` (M‑3); `express-validator` still unused (M‑4). `three`/`postprocessing` in backend deps are spurious. |
+| Backend | Node 18, Express **5**, Mongoose **8**, jsonwebtoken, passport + passport-google-oauth20, cookie-parser, cors, dotenv, node-cron, serverless-http. **`helmet` + `express-rate-limit` wired 2026-09-09** on `/auth` + `/api/extension` (M‑3). Ingest is bounds-checked by a pure `services/ingestValidation.js` (M‑4, 2026-09-09); `express-validator` remains installed-but-unused. `three`/`postprocessing` in backend deps are spurious. |
 | Database | MongoDB Atlas (connection via `MONGO_URI`) |
 | Frontend | React **19**, Vite **7**, TypeScript ~5.9, Tailwind **3**, react-router-dom **7**, chart.js 4 + react-chartjs-2 + chartjs-plugin-datalabels, lucide-react, gsap, three/ogl/postprocessing (decorative visuals). **`@tanstack/react-query` is a dependency but unused.** |
 | Auth | Google OAuth 2.0 → JWT in httpOnly cookie (web); random API key in `x-api-key` header (extension) |
 | ML/Insights | **None.** Pure deterministic JavaScript statistics (`metricsDerive.js`). No Python, no trained model, no LLM. |
 | Deploy | Backend: Render (`codetrackr-backend-uckp.onrender.com`, per extension default) — also has a Vercel serverless config. Frontend: Vercel (`code-trackr-frontend.vercel.app`). DB: MongoDB Atlas. |
-| Testing | Plain `node:assert` scripts. **11 backend suites (~114 assertions)**, 2 extension suites (~37). No framework, no integration/e2e/DB tests, **zero frontend tests**. GitHub Actions CI runs backend + extension tests and the frontend build on every push (2026‑09‑09). |
+| Testing | Plain `node:assert` scripts. **12 backend suites (~142 assertions)**, 2 extension suites (~37). No framework, no integration/e2e/DB tests, **zero frontend tests**. GitHub Actions CI runs backend + extension tests and the frontend build on every push (2026‑09‑09). |
 
 ---
 
@@ -387,8 +387,10 @@ scale. Group leaderboard (`/api/groups/:id/details`) is the same pattern scoped 
   — ✅ **fixed 2026-09-09 (M‑10)**: a central `(err,req,res,next)` handler logs the full error with a correlation id and returns `{error, id}`; routes `next(err)`.
 - Mongo connection: `mongoose.connect(...).catch(err => console.error(...))` — the process
   **keeps running without a DB**; requests then fail per-query.
-- Ingest validation: only `if (!fileName || !language || !duration)` → 400. `!duration`
-  wrongly rejects a legitimate `0`; negatives / `1e12` / `NaN`→coerced are accepted (M‑4).
+- Ingest validation (2026-09-09, M‑4): `services/ingestValidation.js` `validateIngestPayload`
+  bounds `duration ∈ (0, 3600]`, `fileName ≤ 255`, `language ≤ 64`, `projectName ≤ 128`,
+  `timestamp ∈ [now-24h, now+60s]` → `400 { message, details }`. `timestamp` is still
+  client-supplied (bounded, not server-set); no per-key ingest quota.
 - Extension offline: retained in memory, no disk queue, lost on restart.
 - ML/metrics failure: caught → `500 { success:false }`; the Insights page shows "Could not
   load your insights" + Try again.
@@ -431,9 +433,10 @@ is an SPA rewrite (`/(.*)` → `/index.html`).
 
 **Backend deploy:** the extension's default `apiBase` points at **Render**
 (`codetrackr-backend-uckp.onrender.com`); `backend/vercel.json` also exists (serverless via
-`api/index.js` + `serverless-http`). If deployed serverless, `node-cron` in
-`notificationScheduler` **does not work** (cold starts re-run the immediate sweep; the hourly
-cron never fires) — H‑13, unfixed. `app.js` calls `app.listen()` unconditionally.
+`api/index.js` + `serverless-http`). H‑13 **fixed 2026-09-09:** `initScheduler()` + `app.listen()` are inside
+`if (require.main === module)`, so `require('../app')` (the serverless entry) starts nothing.
+The schedule is driven externally via `POST /api/internal/run-{notifications,rollup}` behind
+`INTERNAL_CRON_SECRET` (404 when unset/wrong). Operator wires the external scheduler.
 
 **DB:** MongoDB Atlas (TLS, `family:4`, 15 s server-selection timeout).
 
@@ -459,12 +462,13 @@ sparseness, `planActivityWrite`), `activityModel` (10 — schema/index shape), `
 (9 — source scan that `/track` uses the planner + reads tolerate bucketed docs), `rollup`
 (7 — `buildDaySummary`). Extension `activation` gained `payloadHasSignal` + manifest checks.
 
-Plus, since 2026‑09‑09 (quick-wins batch): `quickWins` (`backend/tests/quickWins.test.js` —
-source scans for the `JWT_SECRET` boot-guard, no `'your_jwt_secret'` fallback, `11000`→409 on
-group join, `GET /health`, `helmet` + rate-limit wiring, and the central error handler +
-zero response-body `.message` leaks).
+Plus, since 2026‑09‑09 (quick-wins batch): `quickWins` (14 — source scans for the `JWT_SECRET`
+boot-guard, no `'your_jwt_secret'` fallback, `11000`→409 on group join, `GET /health`,
+`helmet` + rate-limit wiring, central error handler + zero response-body `.message` leaks, the
+`require.main` bootstrap guard, `/api/internal` + its secret, the `{goalId:1,type:1}` index)
+and `ingestValidation` (23 pure — `validateIngestPayload` bounds).
 
-**Total ≈ 114 backend assertions across 11 suites + 37 extension.** No test framework, **no
+**Total ≈ 142 backend assertions across 12 suites + 37 extension.** No test framework, **no
 integration/API/DB/e2e tests, no frontend tests.** Nothing has been run against a real
 database — the bucketing/rollup/wiring logic is proven at the pure-function / source-scan
 level only (a `supertest` + `mongodb-memory-server` integration test is the tracked next step,

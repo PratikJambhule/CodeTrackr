@@ -109,7 +109,7 @@ own row; the extension (2.3.0) also **drops a flush entirely when it carries no 
 
 | Path | Responsibility |
 |---|---|
-| `app.js` | Express bootstrap: `trust proxy`, **`helmet()`**, CORS allowlist (`FRONTEND_URL` + localhost:5173/5174, `credentials:true`), `express.json()`, `cookie-parser`, `passport.initialize()`, **`rateLimit` on `/auth` + `/api/extension`** (skipped under `NODE_ENV=test`), `GET /` liveness + **`GET /health` readiness (503 if Mongo down)**, `JWT_SECRET` boot-guard, `mongoose.connect`, mount 10 routers, `initScheduler()`, `app.listen()`. *(helmet / rate-limit / `/health` / boot-guard added 2026-09-09.)* |
+| `app.js` | Express bootstrap: `JWT_SECRET` boot-guard, `trust proxy`, **`helmet()`**, CORS allowlist (`FRONTEND_URL` + localhost:5173/5174, `credentials:true`), `express.json()`, `cookie-parser`, `passport.initialize()`, **`rateLimit` on `/auth` + `/api/extension`** (skipped under `NODE_ENV=test`), `GET /` liveness + **`GET /health` readiness (503 if Mongo down)**, `mongoose.connect`, mount 11 routers (incl. `/api/internal`), **central `(err,req,res,next)` handler**, then `if (require.main === module) { initScheduler(); app.listen() }`. *(helmet / rate-limit / `/health` / boot-guard / error handler / `require.main` guard all added 2026-09-09.)* |
 | `api/index.js` | `module.exports = (req,res) => serverless(app)(req,res)` — Vercel serverless adapter. |
 | `config/passport.js` | Google OAuth 2.0 strategy. Find-or-create `User` by `googleId`; new users get `generateApiKey()`. **Throws at import** if any `GOOGLE_*` env var is missing. |
 | `middleware/auth.js` | `isAuthenticated` (JWT from `req.cookies.token`), `verifyApiKey` (`User.findOne({ apiKey })`), `AUTH_BYPASS` handling (refused in production). |
@@ -195,7 +195,8 @@ own row; the extension (2.3.0) also **drops a flush entirely when it carries no 
                      │
                      ▼
  (7) routes/extension.js handler → persistFlush(normalized, when):
-       validate: fileName && language && duration  (else 400)
+       validateIngestPayload(req.body): duration ∈ (0,3600], fileName/language/projectName
+         length caps, timestamp ∈ [now-24h, now+60s]  (else 400 { details }) — 2026-09-09
        when = parse(timestamp) || now  (guarded for NaN)
        normalize{Terminal,Editor,Focus,Git}Analytics(req.body)  // clamp ≥ 0; missing ⇒ ABSENT
        plan = planActivityWrite(normalized, when, ACTIVITY_BUCKET_MS)   // default 600000
@@ -555,12 +556,14 @@ Failure points, in order (this is also the debugging runbook):
 ```
 
 - `backend/vercel.json` shows a **serverless** deploy was also set up (`api/index.js` +
-  `serverless-http`). If the backend actually runs serverless, `node-cron` in
-  `notificationScheduler` is broken (H-13): each cold start re-runs the immediate sweep and
-  the hourly schedule never fires because the process is frozen between requests.
-- No Dockerfile, Procfile, or CI config in the repo. `frontend` build =
-  `tsc -b && vite build` (✅ green as of 2026-09-09); `backend` start = `node app.js`;
-  `extension` build = `tsc --noEmit && esbuild --minify`.
+  `serverless-http`). The `node-cron`-on-serverless problem (H-13) is **fixed 2026-09-09**:
+  `initScheduler()` + `app.listen()` are inside `if (require.main === module)`, so
+  `require('../app')` starts nothing; `POST /api/internal/run-{notifications,rollup}` (behind
+  `INTERNAL_CRON_SECRET`, 404 when unset/wrong) let an external scheduler drive the jobs.
+- **GitHub Actions CI** added 2026-09-09 (`.github/workflows/ci.yml`) — backend + extension
+  `npm test` + an `app.js` import-smoke, and the frontend build, on every push / PR. No
+  Dockerfile or Procfile. `frontend` build = `tsc -b && vite build` (✅ green as of 2026-09-09);
+  `backend` start = `node app.js`; `extension` build = `tsc --noEmit && esbuild --minify`.
 
 ---
 

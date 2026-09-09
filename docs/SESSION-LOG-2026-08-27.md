@@ -323,6 +323,44 @@ circular graph for the diff message. Fixed by reducing every operand to a primit
 
 ---
 
+## 10. Quick-wins batch — Tier 1 + security (2026-09-09)
+
+11 items from `docs/interview-preparation/CodeTrackr_Quick_Wins.md`, one commit each.
+Spec + plan under `docs/superpowers/{specs,plans}/2026-09-09-quick-wins-tier1-security.md`.
+
+- **#5** timestamp index — already shipped in the DB-write batch, marked done.
+- **#7** `JWT_SECRET` fail-fast at boot; dropped the `'your_jwt_secret'` fallback ×3 (M-9).
+- **#6** duplicate group join → **409** not 500 (`error.code === 11000`) (M-14).
+- **#11** `GET /health` readiness — 503 when `mongoose.connection.readyState !== 1` (L-8).
+- **#8** "Repeated Failures" dashboard panel wired to real `terminalSummary.repeatedFailedCommands` (M-15).
+- **#3** `helmet()` global + `express-rate-limit` on `/auth` (50/15min) and `/api/extension`
+  (120/min), skipped under `NODE_ENV=test` (M-3).
+- **#1** fixed 29 frontend `tsc -b` errors; `npm run build` green. `TextType.tsx` got a
+  `TextTypeProps` interface (also fixed the 4 `string`→`never` errors); the half-built
+  `Goals.tsx` to-do scaffolding was removed (M-13).
+- **#2** `.github/workflows/ci.yml` — backend + extension `npm test`, frontend `npm run build`
+  on every push / PR; a backend `app.js` import-smoke step (L-9).
+- **#4** central `(err, req, res, next)` handler in `app.js` (correlation id, generic body);
+  ~19 route `catch`-tail 500s across 6 files → `next(err)`; deliberate 4xx kept (M-10).
+- **#12** pure `services/ingestValidation.js` — `duration ∈ (0, 3600]`, length caps,
+  `timestamp ∈ [now-24h, now+60s]`; wired into `/track` + `/track/batch` (M-4, partial).
+- **#15** `initScheduler()` + `app.listen()` behind `if (require.main === module)`;
+  `routes/internal.js` → `POST /api/internal/run-{notifications,rollup}` behind
+  `INTERNAL_CRON_SECRET` (404 when unset/wrong); `{goalId:1,type:1}` index on `Notification` (H-13).
+
+New tests: `backend/tests/quickWins.test.js` (14 source-scan assertions),
+`backend/tests/ingestValidation.test.js` (23 pure). Backend suites 10 → 12, ~104 → ~142 assertions.
+
+**Deferred to a follow-up spec:** #9 `UserStats` leaderboard rollup (decided: live
+running-total, `$inc` on ingest), #10 idempotency key, #13 React Query, #14 goal completion,
+all of Tier 3 (#16–#25, incl. the `supertest` + `mongodb-memory-server` integration test).
+
+**Operator TODO after merge:** set `JWT_SECRET` + `INTERNAL_CRON_SECRET` in Render; wire an
+external scheduler to `POST /api/internal/run-notifications` (hourly) + `/run-rollup` (daily)
+with `x-internal-secret`; point the platform health check at `/health`; push so CI runs.
+
+---
+
 ## Appendix A — Why this is a file and not claude-mem
 
 claude-mem was requested for context saving and was attempted repeatedly. Every call failed:

@@ -471,8 +471,8 @@ too (password-gated, not hidden); no rate limit on join, so passwords can be gue
 |---|---|
 | API key is plain text, never expires, no limits | leak = someone fakes your activity |
 | Rate limiting only on `/auth` + `/api/extension` (2026-09-09) | group `/join` password guessing still unlimited |
-| No security headers (`helmet` unused) | missing basic browser protections |
-| No input validation on activity | `duration: 1e12` accepted; fake data is trivial |
+| ~~No security headers~~ ✅ `helmet()` added 2026-09-09 | HSTS, `nosniff`, no `X-Powered-By` |
+| ~~No input validation on activity~~ ✅ 2026-09-09 | `duration` capped at 3600, length/timestamp bounds; still no idempotency key |
 | ~~Errors return `error.message`~~ ✅ fixed 2026-09-09 | central handler, generic body + id |
 | Leaderboard shows every email | privacy |
 | No duplicate/replay protection | resend a request → counted again |
@@ -533,7 +533,7 @@ the frontend; one end-to-end test with Playwright.
 - GitHub Actions CI on push (2026-09-09): backend + extension tests, frontend build. Still no CD, no Dockerfile.
 
 **One gotcha:** the deadline-reminder cron job uses `node-cron`. That works on Render (always
-on) but **breaks on serverless** — the process is frozen between requests, so the hourly job
+on) and — since 2026-09-09 — is serverless-safe: `initScheduler()`/`app.listen()` are behind a `require.main` guard, and an external trigger hits `POST /api/internal/run-*`. Before the fix the hourly job
 never fires. **BETTER:** use Vercel Cron or an external scheduler hitting a protected
 endpoint.
 
@@ -679,8 +679,12 @@ document store?"**
 1. **API key** — plain text, never expires, no limits.
 2. **Leaderboard** — reads the whole table every request; no cache, no pagination; leaks emails.
 3. **Analytics maths runs in JavaScript**, not the database — downloads records to add up (bounded now that they're bucketed, still not ideal).
-4. **Cron breaks on serverless** (and it now also runs the nightly rollup).
-5. **No rate limiting / security headers / input validation** (libraries installed, not wired up).
+4. ~~Cron breaks on serverless~~ ✅ fixed 2026-09-09 — `require.main` guard + an external
+   trigger (`POST /api/internal/run-*` behind a secret) drives both the hourly sweep and the
+   nightly rollup.
+5. **Rate limiting is only on `/auth` + `/api/extension`** (group `/join` and analytics are
+   still uncapped; no per-key ingest quota). `helmet` and ingest bounds-checking landed
+   2026-09-09.
 6. ~~Frontend build fails~~ ✅ fixed 2026-09-09 (was 29 TypeScript errors).
 7. **Fake data on the dashboard** ("Repeated Failures" panel); **unsaved to-dos**; **dead Teams page**.
 8. **The group leaderboard doesn't show the error comparison yet** — the original motive; the data's collected, the view isn't built.

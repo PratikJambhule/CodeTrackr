@@ -27,7 +27,7 @@
 6. Analytics endpoints do `Activity.find()` **then aggregate in JavaScript** (tech debt, M-1).
 7. Leaderboard aggregates the **entire** `activities` collection + **all** users in Node — no cache/window/pagination (H-7).
 8. Insights = **deterministic statistics** (`metricsDerive.js`), **not ML**; LLM layer designed, not built.
-9. `node-cron` hourly job for deadline notifications — **broken on serverless** (H-13).
+9. `node-cron` deadline job — was **broken on serverless** (H-13); fixed 2026-09-09 (`require.main` guard + `POST /api/internal/run-*` behind a secret).
 10. Deploy: frontend **Vercel**, backend **Render** (Vercel serverless config also present), DB **Atlas**. CI: GitHub Actions (2026-09-09) — tests + build on push.
 
 ---
@@ -37,13 +37,13 @@
 | Layer | Stack | Note |
 |---|---|---|
 | Extension | TypeScript 5, esbuild bundle, `@vscode/vsce`, axios | `onStartupFinished`; 5 trackers; `consumeInterval()` = snapshot+reset |
-| Backend | Node 18, **Express 5**, **Mongoose 8**, jsonwebtoken, passport-google-oauth20, cookie-parser, cors, node-cron, serverless-http | `helmet` + `express-rate-limit` **wired 2026-09-09** (`/auth`, `/api/extension`); `express-validator` still unused |
+| Backend | Node 18, **Express 5**, **Mongoose 8**, jsonwebtoken, passport-google-oauth20, cookie-parser, cors, node-cron, serverless-http | `helmet` + `express-rate-limit` **wired 2026-09-09** (`/auth`, `/api/extension`); ingest bounds-checked by a pure validator (2026-09-09); `express-validator` unused |
 | DB | MongoDB Atlas | 8 collections (`+dailysummaries`); `activities` is high-volume, now bucketed |
 | Frontend | **React 19**, **Vite 7**, TS ~5.9, **Tailwind 3**, react-router-dom 7, chart.js 4 + react-chartjs-2, lucide-react | `@tanstack/react-query` **installed, unused**; 28-theme `ThemeContext` |
 | Auth | Google OAuth → JWT cookie (web); random 64-hex API key (extension) | `JWT_SECRET` required at boot — app throws if unset (was an unsafe `'your_jwt_secret'` fallback), fixed 2026-09-09 |
 | "ML" | pure JS stats — coefficient of variation, weighted score, medians | no model/training/inference/LLM/Python |
 | Deploy | Vercel + Render + Atlas | GitHub Actions CI (2026-09-09); no Dockerfile, no CD, no observability |
-| Tests | plain `node:assert` — 11 backend suites (~114 assertions) + 2 extension suites; CI on push | **zero frontend tests; nothing run vs a real DB** |
+| Tests | plain `node:assert` — 12 backend suites (~142 assertions) + 2 extension suites; CI on push | **zero frontend tests; nothing run vs a real DB** |
 
 **Why MongoDB:** append-only, self-contained, schema-evolving docs; per-user-window access; no hot-path joins; free tier.
 **Where SQL wins:** groups/teams/goals relational integrity + transactions; the leaderboard `GROUP BY`.
@@ -232,14 +232,14 @@ fetch(/api/metrics?days=&timezone=)  // NO :userId — IDOR-proof by design →
 30. **truePeakWindow?** → most productive hour (weighted commits/lines/churn), not busiest.
 31. **Insights cached?** → no; recomputed every load.
 32. **Insufficient data?** → focus cards show "—" until extension 2.1.0; estimation needs 2 goals.
-33. **Cheat the leaderboard?** → yes: `curl` `/track` with `duration:3600` in a loop; no rate limit / validation.
+33. **Cheat the leaderboard?** → harder as of 2026-09-09: `/api/extension` is IP-rate-limited (120/min) and `duration` is capped at 3600/flush. Still no idempotency key or per-key quota, so a valid key + a slow loop still inflates hours (#10 deferred).
 34. **Prevent cheating?** → validate duration, rate-limit per key, idempotency key, corroborate with edit/focus/git signals.
-35. **Tests?** → `node:assert` scripts; **11 backend suites (~114 assertions) + 2 extension**; GitHub Actions CI on push; **no frontend tests, nothing vs a real DB**.
+35. **Tests?** → `node:assert` scripts; **12 backend suites (~142 assertions) + 2 extension**; GitHub Actions CI on push; **no frontend tests, nothing vs a real DB**.
 36. **`routeGuards.test.js`?** → static scan; fails if a sensitive route loses its auth middleware.
 37. **Error handling?** → per-route `try/catch` → `next(err)` → **central handler** → `500 {error, id}` (correlation id, no leak; since 2026-09-09). Deliberate 4xx stay per-route.
-38. **Deploy?** → Vercel (FE) + Render (BE) + Atlas; `node-cron` breaks on serverless (H-13); GitHub Actions CI as of 2026-09-09.
+38. **Deploy?** → Vercel (FE) + Render (BE) + Atlas; GitHub Actions CI (2026-09-09); the `node-cron`-on-serverless problem is fixed (H-13, 2026-09-09) — `require.main` guard + external `/api/internal/run-*` trigger.
 39. **Frontend build?** → ✅ green (was 29 `tsc -b` errors, fixed 2026-09-09; M-13). CI enforces it.
-40. **Biggest weakness?** → the API key model + no ingest validation/rate limiting; and testing depth.
+40. **Biggest weakness?** → the API key model (plaintext, non-expiring, unscoped); the O(n) leaderboard; and testing depth (nothing runs vs a real DB). *(Ingest validation + `helmet` + rate-limit + central error handler landed 2026-09-09.)*
 
 ---
 

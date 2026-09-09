@@ -1,6 +1,6 @@
 # Quick Wins: Tier 1 + Security Batch — Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** Land 11 Quick-Wins items (Tier 1 + `#11`/`#12`/`#15`) as 11 focused commits, each with a paper-trail entry, without breaking the green test suite.
 
@@ -22,6 +22,9 @@
 - After the final task, all suites (10→13 backend, 2 extension) are green and `frontend npm run build` exits 0.
 
 ---
+
+> **STATUS: COMPLETE 2026-09-09** — all 11 items shipped across 17 commits; backend 12 suites + extension 2 green, frontend build green. Operator TODO in the spec §7 / SESSION-LOG §10.
+
 
 ## File Structure
 
@@ -61,13 +64,13 @@
 
 **Interfaces:** none (no code).
 
-- [ ] **Step 1: Confirm the index already ships**
+- [x] **Step 1: Confirm the index already ships**
 
 Run: `cd backend && grep -n "index({ userId: 1, timestamp: -1 })" models/Activity.js`
 Expected: one hit (`activitySchema.index({ userId: 1, timestamp: -1 });`).
 If absent, STOP — the DB-write batch is not merged; re-plan.
 
-- [ ] **Step 2: Mark it in `Quick_Wins.md`**
+- [x] **Step 2: Mark it in `Quick_Wins.md`**
 
 In `docs/interview-preparation/CodeTrackr_Quick_Wins.md`, change the `## 5.` heading line:
 ```
@@ -83,11 +86,11 @@ Add directly under that heading:
 > the dead `{userId:1,date:-1}` index and the `date` field are gone. Verified by `activityModel.test.js`.
 ```
 
-- [ ] **Step 3: Mark it in `IMPROVEMENT_PLAN.md`**
+- [x] **Step 3: Mark it in `IMPROVEMENT_PLAN.md`**
 
 In `docs/IMPROVEMENT_PLAN.md`, the Status section already says "Also folds in the missing `{userId:1,timestamp:-1}` index." Leave it. Add a new line to the end of the **Status** section's write-reduction paragraph list is not needed. Instead, confirm no numbered finding is stale: search `grep -n "timestamp:-1\|date:-1" docs/IMPROVEMENT_PLAN.md` and if any numbered finding still says the index is "missing", append ` — ✅ FIXED 2026-09-08` to that finding line.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 cd "C:\Users\soham\Downloads\codetrackr\CodeTrackr-main"
@@ -112,7 +115,7 @@ Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>"
 **Interfaces:**
 - Produces: `backend/tests/quickWins.test.js` — a `node:assert` script following the `check(name, fn)` + `passed`/`failed` + `process.exit(failed === 0 ? 0 : 1)` pattern from `tests/ingestWiring.test.js`. Later tasks (`#3`, `#4`, `#6`, `#11`, `#15`) append `check(...)` blocks to it.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `backend/tests/quickWins.test.js`:
 ```js
@@ -145,12 +148,12 @@ console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed === 0 ? 0 : 1);
 ```
 
-- [ ] **Step 2: Run it to verify it fails**
+- [x] **Step 2: Run it to verify it fails**
 
 Run: `cd backend && node tests/quickWins.test.js`
 Expected: FAIL on both checks (`your_jwt_secret` still present, no guard yet).
 
-- [ ] **Step 3: Add the boot guard**
+- [x] **Step 3: Add the boot guard**
 
 In `backend/app.js`, immediately after line 7 (`require("dotenv").config();`) and before `const app = express();`:
 ```js
@@ -160,36 +163,36 @@ if (!process.env.JWT_SECRET) {
 }
 ```
 
-- [ ] **Step 4: Remove the fallbacks**
+- [x] **Step 4: Remove the fallbacks**
 
 - `backend/middleware/auth.js:87` — change `jwt.verify(token, process.env.JWT_SECRET || 'your_jwt_secret')` to `jwt.verify(token, process.env.JWT_SECRET)`.
 - `backend/routes/auth.js:23` — change `jwt.sign(payload, process.env.JWT_SECRET || 'your_jwt_secret', { expiresIn: '1d' })` to `jwt.sign(payload, process.env.JWT_SECRET, { expiresIn: '1d' })`.
 - `backend/routes/auth.js:54` — change `jwt.verify(token, process.env.JWT_SECRET || 'your_jwt_secret')` to `jwt.verify(token, process.env.JWT_SECRET)`.
 
-- [ ] **Step 5: Wire the new test into `npm test`**
+- [x] **Step 5: Wire the new test into `npm test`**
 
 In `backend/package.json`, append ` && node tests/quickWins.test.js` to the end of the `test` script string.
 
-- [ ] **Step 6: Run tests**
+- [x] **Step 6: Run tests**
 
 Run: `cd backend && node tests/quickWins.test.js`
 Expected: PASS (2 checks).
 Run: `cd backend && npm test`
 Expected: all suites PASS.
 
-- [ ] **Step 7: Smoke `app.js`**
+- [x] **Step 7: Smoke `app.js`**
 
 Run: `cd backend && JWT_SECRET=smoke MONGO_URI=mongodb://127.0.0.1:1/none node -e "const a=require('./app.js'); if(typeof a!=='function') throw new Error('bad export'); console.log('smoke ok'); process.exit(0)"`
 Expected: `smoke ok`, exit 0.
 Run: `cd backend && MONGO_URI=x node -e "try{require('./app.js')}catch(e){console.log('threw:',e.message);process.exit(0)} process.exit(1)"`
 Expected: `threw: JWT_SECRET is required ...` (proves fail-fast).
 
-- [ ] **Step 8: Docs**
+- [x] **Step 8: Docs**
 
 - `docs/IMPROVEMENT_PLAN.md` — change the `M-9` line to start with `- **M-9. ✅ FIXED 2026-09-09.** ` and reword to past tense ("`JWT_SECRET` had a literal fallback `'your_jwt_secret'`; the app now refuses to boot without the env var.").
 - `docs/interview-preparation/CodeTrackr_Quick_Wins.md` — append ` — ✅ DONE 2026-09-09` to the `## 7.` heading.
 
-- [ ] **Step 9: Commit**
+- [x] **Step 9: Commit**
 
 ```bash
 cd "C:\Users\soham\Downloads\codetrackr\CodeTrackr-main"
@@ -211,7 +214,7 @@ Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>"
 **Interfaces:**
 - Consumes: `check(name, fn)` + `read()` helpers from `quickWins.test.js` (Task 2).
 
-- [ ] **Step 1: Add the failing test**
+- [x] **Step 1: Add the failing test**
 
 In `backend/tests/quickWins.test.js`, before the final `console.log(\`\n${passed}...\`)` line, add:
 ```js
@@ -231,12 +234,12 @@ check('the join catch no longer leaks error.message', () => {
 });
 ```
 
-- [ ] **Step 2: Run to verify it fails**
+- [x] **Step 2: Run to verify it fails**
 
 Run: `cd backend && node tests/quickWins.test.js`
 Expected: FAIL on the two new `#6` checks.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 Replace `backend/routes/groups.js:251-254`:
 ```js
@@ -256,18 +259,18 @@ with:
     }
 ```
 
-- [ ] **Step 4: Run tests**
+- [x] **Step 4: Run tests**
 
 Run: `cd backend && node tests/quickWins.test.js` → PASS.
 Run: `cd backend && npm test` → all PASS (`routeGuards.test.js` still green — the auth middleware is untouched).
 
-- [ ] **Step 5: Docs**
+- [x] **Step 5: Docs**
 
 - `docs/IMPROVEMENT_PLAN.md` — under `## MEDIUM`, add a new bullet:
   `- **M-14. ✅ FIXED 2026-09-09.** A duplicate group join (double-click / race) returned 500. The \`groupmembers\` unique compound index throws \`11000\`; the join handler now maps that to \`409 Conflict\`.`
 - `docs/interview-preparation/CodeTrackr_Quick_Wins.md` — append ` — ✅ DONE 2026-09-09` to the `## 6.` heading.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 cd "C:\Users\soham\Downloads\codetrackr\CodeTrackr-main"
@@ -286,7 +289,7 @@ Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>"
 - Modify: `backend/tests/quickWins.test.js` (append)
 - Modify: `docs/IMPROVEMENT_PLAN.md`, `docs/interview-preparation/CodeTrackr_Quick_Wins.md`
 
-- [ ] **Step 1: Add the failing test**
+- [x] **Step 1: Add the failing test**
 
 In `backend/tests/quickWins.test.js`, before the final summary log, add:
 ```js
@@ -298,11 +301,11 @@ check('app.js exposes GET /health gated on mongoose readyState', () => {
 });
 ```
 
-- [ ] **Step 2: Run to verify it fails**
+- [x] **Step 2: Run to verify it fails**
 
 Run: `cd backend && node tests/quickWins.test.js` → FAIL on the `#11` check.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 In `backend/app.js`, immediately after line 38 (`app.get("/", (req, res) => res.json({ status: "ok", service: "CodeTrackr API" }));`):
 ```js
@@ -315,19 +318,19 @@ app.get('/health', (req, res) => {
 });
 ```
 
-- [ ] **Step 4: Run tests + smoke**
+- [x] **Step 4: Run tests + smoke**
 
 Run: `cd backend && node tests/quickWins.test.js` → PASS.
 Run: `cd backend && npm test` → all PASS.
 Run the `app.js` smoke from Global Constraints → `smoke ok`.
 
-- [ ] **Step 5: Docs**
+- [x] **Step 5: Docs**
 
 - `docs/IMPROVEMENT_PLAN.md` — new bullet under `## LOW`:
   `- **L-8. ✅ FIXED 2026-09-09.** \`GET /\` returned \`{status:'ok'}\` even with Mongo down. Added \`GET /health\` returning 503 when \`mongoose.connection.readyState !== 1\`. Point the platform health check at it.`
 - `docs/interview-preparation/CodeTrackr_Quick_Wins.md` — append ` — ✅ DONE 2026-09-09` to `## 11.`.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 cd "C:\Users\soham\Downloads\codetrackr\CodeTrackr-main"
@@ -348,12 +351,12 @@ Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>"
 **Interfaces:**
 - Consumes: backend `terminalSummary.repeatedFailedCommands` — array of `{ command: string, count: number, timestamps: string[] }`, already returned by `buildTerminalSummary` in `backend/routes/analytics.js` (sorted desc by count, sliced to 5).
 
-- [ ] **Step 1: Confirm the backend shape**
+- [x] **Step 1: Confirm the backend shape**
 
 Run: `cd backend && node -e "const s=require('fs').readFileSync('routes/analytics.js','utf8'); console.log(/repeatedFailedCommands = Array.from/.test(s), /command: key, count: 0/.test(s))"`
 Expected: `true true` (shape is `{command, count, timestamps}`).
 
-- [ ] **Step 2: Replace the mock arrays with the real source**
+- [x] **Step 2: Replace the mock arrays with the real source**
 
 In `frontend/src/pages/Dashboard.tsx`, delete lines 220-238 (the `repeatedFailuresDaily`, `repeatedFailuresWeekly`, and `repeatedFailuresMock` declarations) and replace with:
 ```tsx
@@ -363,7 +366,7 @@ In `frontend/src/pages/Dashboard.tsx`, delete lines 220-238 (the `repeatedFailur
   }>;
 ```
 
-- [ ] **Step 3: Update the render**
+- [x] **Step 3: Update the render**
 
 At `frontend/src/pages/Dashboard.tsx` ~line 1162-1180, replace the `repeatedFailuresMock.map(...)` block with:
 ```tsx
@@ -394,23 +397,23 @@ At `frontend/src/pages/Dashboard.tsx` ~line 1162-1180, replace the `repeatedFail
 ```
 (The `· {entry.time}` fragment is gone — the real data has no display-time string.)
 
-- [ ] **Step 4: Typecheck**
+- [x] **Step 4: Typecheck**
 
 Run: `cd frontend && npx tsc -b --noEmit 2>&1 | grep -c "error TS"`
 Expected: `29` **or fewer** — this change must not *add* errors. If `formatRelativeTime` / `Calendar` were the only newly-unused symbols, leave them for Task 8 (`#1`). Note the exact count.
 
-- [ ] **Step 5: Build**
+- [x] **Step 5: Build**
 
 Run: `cd frontend && npm run build`
 Expected: still fails at `tsc -b` (the other 29 errors) — that is expected until Task 8. Confirm the failure list does **not** mention `Dashboard.tsx` line ~1163 or `repeatedFailures`.
 
-- [ ] **Step 6: Docs**
+- [x] **Step 6: Docs**
 
 - `docs/IMPROVEMENT_PLAN.md` — new bullet under `## MEDIUM`:
   `- **M-15. ✅ FIXED 2026-09-09.** \`Dashboard.tsx\` rendered a hardcoded \`repeatedFailuresDaily/Weekly\` mock. The backend already computed \`terminalSummary.repeatedFailedCommands\`; the panel is now wired to it with an empty state.`
 - `docs/interview-preparation/CodeTrackr_Quick_Wins.md` — append ` — ✅ DONE 2026-09-09` to `## 8.`.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 cd "C:\Users\soham\Downloads\codetrackr\CodeTrackr-main"
@@ -429,12 +432,12 @@ Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>"
 - Modify: `backend/tests/quickWins.test.js` (append)
 - Modify: `docs/IMPROVEMENT_PLAN.md` (M-3), `docs/interview-preparation/CodeTrackr_Quick_Wins.md`
 
-- [ ] **Step 1: Confirm the deps exist**
+- [x] **Step 1: Confirm the deps exist**
 
 Run: `cd backend && node -e "require('helmet'); require('express-rate-limit'); console.log('ok')"`
 Expected: `ok`. If it throws, STOP (spec assumed they are installed).
 
-- [ ] **Step 2: Add the failing test**
+- [x] **Step 2: Add the failing test**
 
 Append to `backend/tests/quickWins.test.js` before the summary:
 ```js
@@ -453,11 +456,11 @@ check('rate-limit is skipped under NODE_ENV=test', () => {
 });
 ```
 
-- [ ] **Step 3: Run to verify it fails**
+- [x] **Step 3: Run to verify it fails**
 
 Run: `cd backend && node tests/quickWins.test.js` → FAIL on the three `#3` checks.
 
-- [ ] **Step 4: Implement**
+- [x] **Step 4: Implement**
 
 In `backend/app.js`:
 
@@ -490,7 +493,7 @@ app.use('/api/extension', rateLimit({
 }));
 ```
 
-- [ ] **Step 5: Run tests + smoke**
+- [x] **Step 5: Run tests + smoke**
 
 Run: `cd backend && node tests/quickWins.test.js` → PASS.
 Run: `cd backend && npm test` → all PASS.
@@ -509,12 +512,12 @@ const srv=app.listen(0,()=>{
 ```
 Expected: `x-powered-by: (absent - good)` and `x-content-type-options: nosniff`.
 
-- [ ] **Step 6: Docs**
+- [x] **Step 6: Docs**
 
 - `docs/IMPROVEMENT_PLAN.md` — `M-3` line → `- **M-3. ✅ FIXED 2026-09-09.** \`helmet()\` is now applied globally; \`express-rate-limit\` guards \`/auth\` (50 / 15 min) and \`/api/extension\` (120 / min), skipped under \`NODE_ENV=test\`.`
 - `docs/interview-preparation/CodeTrackr_Quick_Wins.md` — append ` — ✅ DONE 2026-09-09` to `## 3.`.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 cd "C:\Users\soham\Downloads\codetrackr\CodeTrackr-main"
@@ -534,7 +537,7 @@ Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>"
 
 **Interfaces:** none (docs). This task has no test cycle — its "test" is a `grep` sweep proving no stale claim remains, plus a human checkpoint.
 
-- [ ] **Step 1: Find every stale claim**
+- [x] **Step 1: Find every stale claim**
 
 Run each and note the hits:
 ```
@@ -546,7 +549,7 @@ grep -rn "Repeated Failures.*mock\|mock data\|hardcoded.*fail\|fake command" doc
 grep -rn "status.*ok.*unconditional\|health.*even when\|/health" docs/interview-preparation/ CODETRACKR_PROJECT_CONTEXT.md
 ```
 
-- [ ] **Step 2: `CODETRACKR_PROJECT_CONTEXT.md`**
+- [x] **Step 2: `CODETRACKR_PROJECT_CONTEXT.md`**
 
 - §3 tech table: change the helmet/rate-limit note from "installed but NOT wired in (M‑3/M‑4)" to "`helmet` wired globally; `express-rate-limit` on `/auth` + `/api/extension` (2026‑09‑09). `express-validator` still unused — ingest uses a pure validator (see §ingest)."
 - §security / "still open" list: remove the `JWT_SECRET` fallback item; add to the "fixed" side "app fails fast without `JWT_SECRET`". Remove "no `helmet`, no rate limiting".
@@ -554,21 +557,21 @@ grep -rn "status.*ok.*unconditional\|health.*even when\|/health" docs/interview-
 - Known-issues / frontend: remove "Repeated Failures panel is mock"; note "wired to real `repeatedFailedCommands` (2026‑09‑09)".
 - API surface / deploy: add `GET /health` (503 when DB down).
 
-- [ ] **Step 3: `CodeTrackr_Interview_Cheat_Sheet.md`**
+- [x] **Step 3: `CodeTrackr_Interview_Cheat_Sheet.md`**
 
 - "Security — one page" → **STILL OPEN** list: delete "No `helmet`, no rate limiting anywhere"; delete the `JWT_SECRET` fallback bullet; move any now-fixed item to a short "**FIXED 2026‑09‑09**" sub-list (helmet+rate-limit, fail-fast JWT, 409 on dup join, `/health`, real Repeated-Failures data).
 - "Things NOT to claim / traps": delete "The Dashboard 'Repeated Failures' panel is **mock data** — don't demo it as real."
 - "Database — one page": `groupmembers` row — "Double-join → unique index → **500** (should be 409)" → "→ **409**".
 - Top-40: Q26 "Double-join? → 500 (should be 409)" → "→ **409** (detects `11000`)".
 
-- [ ] **Step 4: `CodeTrackr_Interview_QA.md`**
+- [x] **Step 4: `CodeTrackr_Interview_QA.md`**
 
 - Security section: JWT_SECRET answer → past tense ("had a fallback; now fails fast"). helmet/rate-limit answer → "wired 2026‑09‑09".
 - The "double-join" Q → 409.
 - Any "Repeated Failures is mock" mention → "now real".
 - Add a one-line Q/A: **"What's your readiness check?"** → `GET /health` returns 503 when `mongoose.connection.readyState !== 1`; `GET /` stays liveness.
 
-- [ ] **Step 5: `CodeTrackr_Interview_Preparation.md`**
+- [x] **Step 5: `CodeTrackr_Interview_Preparation.md`**
 
 - §3 (tech stack) — the "`helmet`/`express-rate-limit`/`express-validator` installed, NOT used" line → "`helmet` + `express-rate-limit` wired 2026‑09‑09; `express-validator` still unused (ingest validated by a pure module)".
 - §7.2 middleware pipeline — add helmet + the two limiters + `/health`.
@@ -576,22 +579,22 @@ grep -rn "status.*ok.*unconditional\|health.*even when\|/health" docs/interview-
 - Security section — move JWT fallback + helmet + rate-limit to a "fixed" subsection.
 - §16 weaknesses / traps — drop the Repeated-Failures-mock caveat.
 
-- [ ] **Step 6: `CodeTrackr_Interview_Guide_Condensed.md` + `CodeTrackr_Architecture.md`**
+- [x] **Step 6: `CodeTrackr_Interview_Guide_Condensed.md` + `CodeTrackr_Architecture.md`**
 
 - Condensed: weaknesses list — renumber/reword to drop "no helmet / no rate limit", "JWT fallback", "Repeated Failures mock"; the "double-join 500" line → 409.
 - Architecture §2.2 — route table: note the central pieces (helmet, limiters, `/health`) in `app.js`'s row. §8 — "Double-join → **500**" → "**409**". §7.1 endpoint table — add `GET /health`.
 
-- [ ] **Step 7: Verify no stale claim remains**
+- [x] **Step 7: Verify no stale claim remains**
 
 Re-run the Step 1 greps. Every remaining hit must be either (a) in a spec/plan file under `docs/superpowers/` (fine — historical), or (b) explicitly phrased as "was … now …". No bare present-tense stale claim.
 
-- [ ] **Step 8: Full green check**
+- [x] **Step 8: Full green check**
 
 Run: `cd backend && npm test` → all PASS.
 Run: `cd extension && npm test` → all PASS.
 Run: `cd frontend && npx tsc -b --noEmit 2>&1 | grep -c "error TS"` → note count (~29, unchanged — Task 8 fixes it).
 
-- [ ] **Step 9: Commit**
+- [x] **Step 9: Commit**
 
 ```bash
 cd "C:\Users\soham\Downloads\codetrackr\CodeTrackr-main"
@@ -601,7 +604,7 @@ git commit -m "docs: sync interview docs for quick-wins batch 1 (#5,#7,#6,#11,#8
 Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>"
 ```
 
-- [ ] **Step 10: CHECKPOINT — stop for review**
+- [x] **Step 10: CHECKPOINT — stop for review**
 
 Report to the user: 6 items done (`#5`, `#7`, `#6`, `#11`, `#8`, `#3`), 7 commits, all suites green, `app.js` smoke + header check pass, docs synced. Wait for approval before Task 8.
 
@@ -615,12 +618,12 @@ Report to the user: 6 items done (`#5`, `#7`, `#6`, `#11`, `#8`, `#3`), 7 commit
 
 **Interfaces:** none. The deliverable test is `npx tsc -b --noEmit` exiting 0 and `npm run build` exiting 0.
 
-- [ ] **Step 1: Capture the exact error list**
+- [x] **Step 1: Capture the exact error list**
 
 Run: `cd frontend && npx tsc -b --noEmit 2>&1 | grep "error TS" > /tmp/ts-errors.txt; cat /tmp/ts-errors.txt; wc -l /tmp/ts-errors.txt`
 Expected: 29 lines. Categorise: `TS6133` (unused — ~20), `TS2322` `string`→`never` (4: `Groups.tsx`, `Profile.tsx`, `Goals.tsx`, `Dashboard.tsx`), `TS7031/7034/7005` implicit-any (5, all `TextType.tsx`).
 
-- [ ] **Step 2: Fix the `TS6133` unused symbols**
+- [x] **Step 2: Fix the `TS6133` unused symbols**
 
 For each `TS6133` line, open the file at that line and remove the unused import specifier or the unused declaration:
 - `Teams.tsx` — remove `user` (unused destructure from a hook or unused var).
@@ -630,7 +633,7 @@ For each `TS6133` line, open the file at that line and remove the unused import 
   **Do not delete** anything the JSX still references — grep the file for each symbol first: `grep -n "toggleTodo\|addTodo\|..." src/pages/Goals.tsx`. If the JSX references it, the symbol is not actually unused — re-read the tsc error; more likely it is a sibling.
 - After each file, re-run `npx tsc -b --noEmit 2>&1 | grep "Goals.tsx"` (etc.) to watch the count drop.
 
-- [ ] **Step 3: Fix the 4 `TS2322` `string`→`never`**
+- [x] **Step 3: Fix the 4 `TS2322` `string`→`never`**
 
 These are almost always `useState([])` inferred as `never[]`, then `setState(['a','b'])`. For each:
 - `Groups.tsx:~280` — find the `useState` whose setter receives a `string`; annotate: `useState<string[]>([])`.
@@ -639,27 +642,27 @@ These are almost always `useState([])` inferred as `never[]`, then `setState(['a
 - `Dashboard.tsx` — same.
 Inspect each declaration; use the real element type (`string[]`, `number[]`, or a named interface already in the file). **Never** use `as never`, `as any`, or `@ts-ignore`.
 
-- [ ] **Step 4: Fix the 5 implicit-any in `TextType.tsx`**
+- [x] **Step 4: Fix the 5 implicit-any in `TextType.tsx`**
 
 - `text`, `onSentenceComplete`, `variableSpeed` destructured props: add a `type TextTypeProps = { text: string | string[]; onSentenceComplete?: (sentence: string, index: number) => void; variableSpeed?: { min: number; max: number }; /* keep existing props */ }` and type the component `({ ... }: TextTypeProps)`. Read the component body to get the real shapes; match what the callers in the codebase pass (`grep -rn "TextType" src/`).
 - `timeout` var (`TS7034`/`TS7005`): declare it `let timeout: ReturnType<typeof setTimeout> | null = null;` (or `useRef<ReturnType<typeof setTimeout> | null>(null)` if it is a ref).
 
-- [ ] **Step 5: Verify typecheck is clean**
+- [x] **Step 5: Verify typecheck is clean**
 
 Run: `cd frontend && npx tsc -b --noEmit`
 Expected: exit 0, no output.
 
-- [ ] **Step 6: Verify the build**
+- [x] **Step 6: Verify the build**
 
 Run: `cd frontend && npm run build`
 Expected: exit 0; `dist/` produced. Note any Vite warnings but they are not failures.
 
-- [ ] **Step 7: Docs**
+- [x] **Step 7: Docs**
 
 - `docs/IMPROVEMENT_PLAN.md` — `M-13` → `- **M-13. ✅ FIXED 2026-09-09.** 29 \`tsc -b\` errors resolved (dead imports/vars + 4 \`never[]\` state annotations + 5 implicit-any in \`TextType.tsx\`). \`npm run build\` is green. The half-built to-do scaffolding in \`Goals.tsx\` was removed (see deferred #14).` Also update the "New finding — the frontend does not compile" callout near the top to `— ✅ FIXED 2026-09-09`.
 - `docs/interview-preparation/CodeTrackr_Quick_Wins.md` — append ` — ✅ DONE 2026-09-09` to `## 1.`.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 cd "C:\Users\soham\Downloads\codetrackr\CodeTrackr-main"
@@ -677,7 +680,7 @@ Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>"
 - Create: `.github/workflows/ci.yml`
 - Modify: `docs/IMPROVEMENT_PLAN.md`, `docs/interview-preparation/CodeTrackr_Quick_Wins.md`
 
-- [ ] **Step 1: Create the workflow**
+- [x] **Step 1: Create the workflow**
 
 Create `.github/workflows/ci.yml`:
 ```yaml
@@ -726,26 +729,26 @@ jobs:
 ```
 (No `env:` block — the backend suite runs only pure/source-scan tests and never loads `app.js`. Task 14 adds an `app.js` import-smoke step with `JWT_SECRET`.)
 
-- [ ] **Step 2: Validate the YAML locally**
+- [x] **Step 2: Validate the YAML locally**
 
 Run: `node -e "const y=require('js-yaml'); const d=y.load(require('fs').readFileSync('.github/workflows/ci.yml','utf8')); console.log(Object.keys(d.jobs))"`
 Expected: `[ 'backend', 'frontend', 'extension' ]`.
 If `js-yaml` is not installed, run `python -c "import yaml,sys; print(list(yaml.safe_load(open('.github/workflows/ci.yml'))['jobs']))"`.
 If neither is available, eyeball for tab characters: `grep -nP "\t" .github/workflows/ci.yml` must return nothing.
 
-- [ ] **Step 3: Sanity-check that the three commands work locally**
+- [x] **Step 3: Sanity-check that the three commands work locally**
 
 Run: `cd backend && npm ci --dry-run 2>&1 | tail -1` (confirms the lockfile resolves — do NOT actually run `npm ci`, it wipes `node_modules`).
 Run: `cd extension && npm test` → PASS.
 The frontend build was verified green in Task 8.
 
-- [ ] **Step 4: Docs**
+- [x] **Step 4: Docs**
 
 - `docs/IMPROVEMENT_PLAN.md` — new bullet under `## LOW`:
   `- **L-9. ✅ FIXED 2026-09-09.** Added \`.github/workflows/ci.yml\` — backend + extension \`npm test\` and \`frontend npm run build\` on every push / PR. First real run is on the next push.`
 - `docs/interview-preparation/CodeTrackr_Quick_Wins.md` — append ` — ✅ DONE 2026-09-09` to `## 2.`.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 cd "C:\Users\soham\Downloads\codetrackr\CodeTrackr-main"
@@ -762,7 +765,7 @@ Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>"
 **Files:**
 - Modify: `CODETRACKR_PROJECT_CONTEXT.md`, and the 5 interview docs
 
-- [ ] **Step 1: Find stale "build fails" / "no CI" claims**
+- [x] **Step 1: Find stale "build fails" / "no CI" claims**
 
 ```
 cd "C:\Users\soham\Downloads\codetrackr\CodeTrackr-main"
@@ -770,7 +773,7 @@ grep -rn "29 .*error\|tsc -b.*fail\|build is red\|does not compile\|frontend bui
 grep -rn "no CI\|No CI\|nothing enforced\|no automated\|no \.github" docs/interview-preparation/ CODETRACKR_PROJECT_CONTEXT.md
 ```
 
-- [ ] **Step 2: Update every hit**
+- [x] **Step 2: Update every hit**
 
 For each doc (`CONTEXT.md`, `Cheat_Sheet.md`, `QA.md`, `Preparation.md` §3/§16/§17, `Guide_Condensed.md`, `Architecture.md` §10):
 - "`tsc -b` has 29 pre-existing errors / build fails (M-13)" → "build is green as of 2026‑09‑09; CI keeps it that way".
@@ -778,15 +781,15 @@ For each doc (`CONTEXT.md`, `Cheat_Sheet.md`, `QA.md`, `Preparation.md` §3/§16
 - `Cheat_Sheet.md` Q39 "Frontend build? → **fails**" → "→ green (was 29 `tsc -b` errors, fixed 2026‑09‑09)".
 - `Cheat_Sheet.md` traps "Don't claim the frontend builds" → delete (it now does).
 
-- [ ] **Step 3: Verify**
+- [x] **Step 3: Verify**
 
 Re-run Step 1 greps — every remaining hit is historical (spec/plan files) or "was…now…".
 
-- [ ] **Step 4: Checkpoint green check**
+- [x] **Step 4: Checkpoint green check**
 
 Run: `cd backend && npm test` → PASS. `cd extension && npm test` → PASS. `cd frontend && npm run build` → exit 0.
 
-- [ ] **Step 5: Commit + CHECKPOINT**
+- [x] **Step 5: Commit + CHECKPOINT**
 
 ```bash
 cd "C:\Users\soham\Downloads\codetrackr\CodeTrackr-main"
@@ -807,7 +810,7 @@ Report: build green, CI added, docs synced. Wait for approval before Task 11.
 - Modify: `backend/tests/quickWins.test.js` (append)
 - Modify: `docs/IMPROVEMENT_PLAN.md` (M-10), `docs/interview-preparation/CodeTrackr_Quick_Wins.md`
 
-- [ ] **Step 1: Add the failing test**
+- [x] **Step 1: Add the failing test**
 
 Append to `backend/tests/quickWins.test.js` before the summary:
 ```js
@@ -833,12 +836,12 @@ check('no route echoes error.message / err.message to the client', () => {
 });
 ```
 
-- [ ] **Step 2: Run to verify it fails**
+- [x] **Step 2: Run to verify it fails**
 
 Run: `cd backend && node tests/quickWins.test.js`
 Expected: FAIL — no handler, ~20 files leak `error.message`.
 
-- [ ] **Step 3: Add the handler to `app.js`**
+- [x] **Step 3: Add the handler to `app.js`**
 
 In `backend/app.js`, after the last `app.use('/auth', authRoutes);` line and before `const PORT = ...`:
 ```js
@@ -853,7 +856,7 @@ app.use((err, req, res, next) => {
 });
 ```
 
-- [ ] **Step 4: Convert the route catch-tails, one file at a time**
+- [x] **Step 4: Convert the route catch-tails, one file at a time**
 
 For **each** of the 10 route files, apply this transformation and re-run `node tests/quickWins.test.js` after each so you catch a mistake immediately:
 
@@ -872,12 +875,12 @@ Reference — `routes/extension.js` `/track` catch becomes:
 and the handler signature gains `next`: `router.post('/track', verifyApiKey, async (req, res, next) => {`.
 Do the same for `/track/batch`. (Every converted handler needs `next` in its signature — add it.)
 
-- [ ] **Step 5: Run the full suite**
+- [x] **Step 5: Run the full suite**
 
 Run: `cd backend && node tests/quickWins.test.js` → PASS (handler present, 0 leak offenders).
 Run: `cd backend && npm test` → all PASS. Pay attention to `routeGuards.test.js` and `ingestWiring.test.js` — they scan the same route files; if either regexes for a pattern you changed, fix the test's expectation only if the behaviour is genuinely still correct (it should be — you only touched `catch` tails).
 
-- [ ] **Step 6: Smoke**
+- [x] **Step 6: Smoke**
 
 Run the `app.js` smoke → `smoke ok`.
 Run an error-path check:
@@ -897,12 +900,12 @@ const srv=app.listen(0,()=>{
 ```
 Expected: `status 500 body {"error":"Internal server error","id":"..."}`, no leak.
 
-- [ ] **Step 7: Docs**
+- [x] **Step 7: Docs**
 
 - `docs/IMPROVEMENT_PLAN.md` — `M-10` → `- **M-10. ✅ FIXED 2026-09-09.** Added a central \`(err,req,res,next)\` handler that logs the full error with a correlation id and returns \`{error, id}\`. All ~20 route \`catch\` tails that echoed \`error.message\` now \`next(err)\`. \`try/catch\` wrappers kept (Express-5 auto-forward cleanup deferred).`
 - `docs/interview-preparation/CodeTrackr_Quick_Wins.md` — append ` — ✅ DONE 2026-09-09` to `## 4.`.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 cd "C:\Users\soham\Downloads\codetrackr\CodeTrackr-main"
@@ -918,14 +921,14 @@ Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>"
 
 **Files:** `CODETRACKR_PROJECT_CONTEXT.md`, the 5 interview docs.
 
-- [ ] **Step 1: Find stale claims**
+- [x] **Step 1: Find stale claims**
 
 ```
 cd "C:\Users\soham\Downloads\codetrackr\CodeTrackr-main"
 grep -rn "echo.*err.message\|echoes error.message\|leak.*internal\|no central error\|no error-handling middleware\|per-route try/catch\|500 {message, error" docs/interview-preparation/ CODETRACKR_PROJECT_CONTEXT.md
 ```
 
-- [ ] **Step 2: Update**
+- [x] **Step 2: Update**
 
 - `CONTEXT.md` §backend / §security — "every route try/catches and echoes `error.message`" → "central error handler with correlation ids (2026‑09‑09); routes `next(err)`".
 - `Cheat_Sheet.md` "Security — one page": "Errors echo `err.message` (internal leak). No central error handler." → move to the FIXED sub-list.
@@ -934,12 +937,12 @@ grep -rn "echo.*err.message\|echoes error.message\|leak.*internal\|no central er
 - `Architecture.md` §2.2 — `routes/*.js` row: "`try/catch` → `500 {message, error}`" → "`try/catch` → `next(err)` → central handler → `500 {error, id}`".
 - `Guide_Condensed.md` — the error-handling line + weaknesses list.
 
-- [ ] **Step 3: Verify + green check**
+- [x] **Step 3: Verify + green check**
 
 Re-run Step 1 grep (only historical/was-now hits remain).
 Run: `cd backend && npm test` → PASS.
 
-- [ ] **Step 4: Commit + CHECKPOINT**
+- [x] **Step 4: Commit + CHECKPOINT**
 
 ```bash
 cd "C:\Users\soham\Downloads\codetrackr\CodeTrackr-main"
@@ -967,7 +970,7 @@ Report: `#4` done, ~20 files converted, leak-check + error-path smoke pass. Wait
   - `value` echoes the accepted primitive fields (`duration` as Number, `fileName`, `language`, `projectName`, `timestamp` as the original string or undefined).
   - Consumed by `routes/extension.js` `/track` (whole body) and `/track/batch` (each element).
 
-- [ ] **Step 1: Write the failing unit tests**
+- [x] **Step 1: Write the failing unit tests**
 
 Create `backend/tests/ingestValidation.test.js`:
 ```js
@@ -1020,12 +1023,12 @@ console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed === 0 ? 0 : 1);
 ```
 
-- [ ] **Step 2: Run to verify it fails**
+- [x] **Step 2: Run to verify it fails**
 
 Run: `cd backend && node tests/ingestValidation.test.js`
 Expected: FAIL — `Cannot find module '../services/ingestValidation'`.
 
-- [ ] **Step 3: Implement the validator**
+- [x] **Step 3: Implement the validator**
 
 Create `backend/services/ingestValidation.js`:
 ```js
@@ -1084,12 +1087,12 @@ function validateIngestPayload(body) {
 module.exports = { validateIngestPayload, MAX_DURATION };
 ```
 
-- [ ] **Step 4: Run the unit tests**
+- [x] **Step 4: Run the unit tests**
 
 Run: `cd backend && node tests/ingestValidation.test.js`
 Expected: all PASS (6 ok + 12 bad).
 
-- [ ] **Step 5: Wire it into `/track`**
+- [x] **Step 5: Wire it into `/track`**
 
 In `backend/routes/extension.js`:
 - Add to the require block near the top: `const { validateIngestPayload } = require('../services/ingestValidation');`
@@ -1112,7 +1115,7 @@ In `backend/routes/extension.js`:
   ```
   (Keep the destructure above it; `duration` is still used via `Number(duration)` below — that is fine, `v` has already bounded it.)
 
-- [ ] **Step 6: Wire it into `/track/batch`**
+- [x] **Step 6: Wire it into `/track/batch`**
 
 In `/track/batch`, right after the `Array.isArray(activities)` check, add:
 ```js
@@ -1129,7 +1132,7 @@ In `/track/batch`, right after the `Array.isArray(activities)` check, add:
 ```
 (The batch stays all-or-nothing, matching its existing write semantics.)
 
-- [ ] **Step 7: Add the wiring scan**
+- [x] **Step 7: Add the wiring scan**
 
 Append to `backend/tests/ingestWiring.test.js` (before its final summary):
 ```js
@@ -1140,22 +1143,22 @@ check('/track validates the payload with ingestValidation', () => {
 });
 ```
 
-- [ ] **Step 8: Wire the new suite into `npm test`**
+- [x] **Step 8: Wire the new suite into `npm test`**
 
 In `backend/package.json`, append ` && node tests/ingestValidation.test.js` to the `test` script.
 
-- [ ] **Step 9: Run everything**
+- [x] **Step 9: Run everything**
 
 Run: `cd backend && npm test`
 Expected: all PASS, including `ingestValidation` and the updated `ingestWiring`.
 Run the `app.js` smoke → `smoke ok`.
 
-- [ ] **Step 10: Docs**
+- [x] **Step 10: Docs**
 
 - `docs/IMPROVEMENT_PLAN.md` — `M-4` → `- **M-4. ✅ FIXED 2026-09-09 (partial).** Ingest is bounds-checked by a pure \`validateIngestPayload\`: \`duration\` in \`(0, 3600]\` (fixes the \`0\` false-reject and the \`1e12\` accept), \`fileName\`/\`language\`/\`projectName\` length caps, \`timestamp\` must be within \`[now-24h, now+60s]\`. \`timestamp\` is still client-supplied but no longer unbounded. Not \`express-validator\` — a pure module is more testable.`
 - `docs/interview-preparation/CodeTrackr_Quick_Wins.md` — append ` — ✅ DONE 2026-09-09` to `## 12.`; note the `express-validator`→pure-module deviation in one line under the heading.
 
-- [ ] **Step 11: Commit**
+- [x] **Step 11: Commit**
 
 ```bash
 cd "C:\Users\soham\Downloads\codetrackr\CodeTrackr-main"
@@ -1181,7 +1184,7 @@ Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>"
 - Consumes: `notificationScheduler` exports `checkUpcomingDeadlines`, `checkOverdueGoals`, `rollupDaily` (all already exported at `services/notificationScheduler.js:114`).
 - Produces: `POST /api/internal/run-notifications` and `POST /api/internal/run-rollup`, both requiring header `x-internal-secret: <process.env.INTERNAL_CRON_SECRET>`; 404 when the secret is unset or wrong.
 
-- [ ] **Step 1: Add the failing test**
+- [x] **Step 1: Add the failing test**
 
 Append to `backend/tests/quickWins.test.js` before the summary:
 ```js
@@ -1211,11 +1214,11 @@ check('Notification model indexes {goalId, type}', () => {
 });
 ```
 
-- [ ] **Step 2: Run to verify it fails**
+- [x] **Step 2: Run to verify it fails**
 
 Run: `cd backend && node tests/quickWins.test.js` → FAIL on the four `#15` checks (`routes/internal.js` missing → the `read` throws; wrap the whole `#15` block is fine, the harness catches it per-check — but the top-level `read('routes/internal.js')` runs outside a `check`. Move it inside: change the test to `const internalSrc = fs.existsSync(path.join(__dirname,'..','routes','internal.js')) ? read('routes/internal.js') : '';`).
 
-- [ ] **Step 3: Create `routes/internal.js`**
+- [x] **Step 3: Create `routes/internal.js`**
 
 ```js
 const express = require('express');
@@ -1258,7 +1261,7 @@ router.post('/run-rollup', requireCronSecret, async (req, res, next) => {
 module.exports = router;
 ```
 
-- [ ] **Step 4: Mount it + guard the bootstrap in `app.js`**
+- [x] **Step 4: Mount it + guard the bootstrap in `app.js`**
 
 - Add to the route requires block (near line 61): `const internalRoutes = require('./routes/internal');`
 - Add to the route mounts (near line 73, after `/auth`): `app.use('/api/internal', internalRoutes);`
@@ -1286,7 +1289,7 @@ module.exports = router;
   }
   ```
 
-- [ ] **Step 5: Add the Notification index**
+- [x] **Step 5: Add the Notification index**
 
 In `backend/models/Notification.js`, before `module.exports`:
 ```js
@@ -1295,14 +1298,14 @@ In `backend/models/Notification.js`, before `module.exports`:
 notificationSchema.index({ goalId: 1, type: 1 });
 ```
 
-- [ ] **Step 6: Run tests + smoke**
+- [x] **Step 6: Run tests + smoke**
 
 Run: `cd backend && node tests/quickWins.test.js` → PASS.
 Run: `cd backend && npm test` → all PASS.
 Run: `cd backend && JWT_SECRET=smoke MONGO_URI=mongodb://127.0.0.1:1/none node -e "const a=require('./app.js'); if(typeof a!=='function') throw 0; setTimeout(()=>{console.log('no server started, smoke ok'); process.exit(0)}, 300)"`
 Expected: `no server started, smoke ok` and the process exits on its own (proves `app.listen` did not run).
 
-- [ ] **Step 7: Add the app-import smoke to CI**
+- [x] **Step 7: Add the app-import smoke to CI**
 
 In `.github/workflows/ci.yml`, in the `backend` job, after the `npm test` step:
 ```yaml
@@ -1314,12 +1317,12 @@ In `.github/workflows/ci.yml`, in the `backend` job, after the `npm test` step:
         run: node -e "const a=require('./app.js'); if(typeof a!=='function'){process.exit(1)} setTimeout(()=>process.exit(0),500)"
 ```
 
-- [ ] **Step 8: Docs**
+- [x] **Step 8: Docs**
 
 - `docs/IMPROVEMENT_PLAN.md` — `### H-13` → append to the heading ` — ✅ FIXED 2026-09-09` and add a line: `**Done:** \`initScheduler()\` + \`app.listen()\` guarded by \`require.main === module\`; \`POST /api/internal/run-notifications\` + \`/run-rollup\` behind \`INTERNAL_CRON_SECRET\` (404 when unset/wrong); \`{goalId:1,type:1}\` index added. Operator wires an external scheduler (see rollout).`
 - `docs/interview-preparation/CodeTrackr_Quick_Wins.md` — append ` — ✅ DONE 2026-09-09` to `## 15.`.
 
-- [ ] **Step 9: Commit**
+- [x] **Step 9: Commit**
 
 ```bash
 cd "C:\Users\soham\Downloads\codetrackr\CodeTrackr-main"
@@ -1339,7 +1342,7 @@ Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>"
 - Modify: `memory/codetrackr-overview.md`, `memory/MEMORY.md`
 - Modify: `docs/superpowers/plans/2026-09-09-quick-wins-tier1-security.md` (tick boxes + STATUS banner)
 
-- [ ] **Step 1: Interview-doc sweep for `#12` + `#15`**
+- [x] **Step 1: Interview-doc sweep for `#12` + `#15`**
 
 ```
 cd "C:\Users\soham\Downloads\codetrackr\CodeTrackr-main"
@@ -1353,7 +1356,7 @@ Update every hit:
 - H-13 / serverless-cron everywhere → "fixed 2026‑09‑09: `require.main` guard + external trigger route".
 - `Architecture.md` §1 box, §2.2, §10 (the whole serverless paragraph), §7.1 endpoint table (`/api/internal/*`, `/health`).
 
-- [ ] **Step 2: Session log**
+- [x] **Step 2: Session log**
 
 Append to `docs/SESSION-LOG-2026-08-27.md`:
 ```markdown
@@ -1384,12 +1387,12 @@ external scheduler to `POST /api/internal/run-notifications` (hourly) + `/run-ro
 with `x-internal-secret`; point the platform health check at `/health`; push for CI.
 ```
 
-- [ ] **Step 3: Memory**
+- [x] **Step 3: Memory**
 
 - `memory/codetrackr-overview.md` — update the "honest findings" line: `helmet`/rate-limit now wired, build green, CI added, central error handler, ingest bounded, serverless-safe. Keep the still-true ones (plaintext API key, O(n) leaderboard, no idempotency key, insights not cached).
 - `memory/MEMORY.md` — if the one-line pointer mentions "broken frontend build" or "no CI", update it.
 
-- [ ] **Step 4: Full verification**
+- [x] **Step 4: Full verification**
 
 Run and confirm all green:
 ```
@@ -1400,12 +1403,12 @@ cd "C:\Users\soham\Downloads\codetrackr\CodeTrackr-main" && git status
 ```
 Expected: backend 12 suites PASS, extension 2 PASS, frontend build exit 0, working tree clean except this plan file.
 
-- [ ] **Step 5: Tick the plan + STATUS banner**
+- [x] **Step 5: Tick the plan + STATUS banner**
 
-In this plan file, check every `- [ ]` box that is done and add at the top under the header:
+In this plan file, check every `- [x]` box that is done and add at the top under the header:
 `> **STATUS: COMPLETE 2026-09-09** — all 11 items shipped, 15 commits, all suites green.`
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 cd "C:\Users\soham\Downloads\codetrackr\CodeTrackr-main"
@@ -1415,7 +1418,7 @@ git commit -m "docs: sync interview docs + session log for quick-wins batch (#12
 Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>"
 ```
 
-- [ ] **Step 7: FINAL CHECKPOINT**
+- [x] **Step 7: FINAL CHECKPOINT**
 
 Report to the user: 11 items done, 15 commits, full suite green, doc + memory synced, operator TODO list surfaced. Then invoke `superpowers:finishing-a-development-branch` to decide how to integrate (the branch already has unrelated prior work, so likely "keep as-is" or a squash-merge decision is the user's).
 
