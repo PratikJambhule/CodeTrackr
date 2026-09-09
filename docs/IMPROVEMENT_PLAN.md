@@ -132,10 +132,10 @@ is added (this closes Quick-Wins #5). Live migration: `node backend/scripts/migr
 **Files:** `extension/src/extension.ts`, `extension/src/syncService.ts`, `extension/src/logger.ts`.
 **Risk:** Requires an extension republish to reach users.
 
-### H-13. `node-cron` scheduler is incompatible with serverless deploy
+### H-13. `node-cron` scheduler is incompatible with serverless deploy — ✅ FIXED 2026-09-09
 **Problem:** `app.js` calls `initScheduler()` at module load and `app.listen()` unconditionally. On Vercel (`api/index.js`), each cold start re-runs the immediate `checkUpcomingDeadlines()` + `checkOverdueGoals()` sweep, and the hourly cron never fires because the process is frozen between requests. `checkOverdueGoals` does an unindexed `findOne` per overdue goal on every invocation.
-**Fix:** Guard `app.listen()` behind `require.main === module`. Move the schedule to Vercel Cron / an external scheduler hitting a protected `POST /api/internal/run-notifications`. Add an index on `{goalId:1, type:1}`.
-**Files:** `backend/app.js`, `backend/services/notificationScheduler.js`, `backend/vercel.json`.
+**Done 2026-09-09:** `initScheduler()` + `app.listen()` are now inside `if (require.main === module)` — `require('../app')` (the serverless entry) starts no server and no scheduler. A new `routes/internal.js` exposes `POST /api/internal/run-notifications` and `/run-rollup` behind `INTERNAL_CRON_SECRET` (constant-time compare; **404** — not 401 — when the secret is unset or wrong, so the route isn't discoverable). Added the `{goalId:1, type:1}` index on `Notification`. CI now imports `app.js` with junk env and asserts no side effects. **Operator:** set `INTERNAL_CRON_SECRET` and wire an external scheduler (GitHub Actions `schedule:` / cron-job.org) to hit the two routes hourly / daily with `x-internal-secret`.
+**Files:** `backend/app.js`, `backend/routes/internal.js` (new), `backend/models/Notification.js`, `.github/workflows/ci.yml`.
 
 ---
 

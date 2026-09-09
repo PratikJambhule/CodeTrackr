@@ -377,7 +377,12 @@ metric.
 
 ---
 
-## 15. Make the app serverless-safe (guard `app.listen`, move the cron) 🟢
+## 15. Make the app serverless-safe (guard `app.listen`, move the cron) 🟢 — ✅ DONE 2026-09-09
+
+> **Shipped.** `initScheduler()` + `app.listen()` are behind `if (require.main === module)`.
+> New `routes/internal.js`: `POST /api/internal/run-notifications` + `/run-rollup` behind
+> `INTERNAL_CRON_SECRET` (constant-time; 404 when unset/wrong). `{goalId:1,type:1}` index added.
+> CI asserts `require('./app.js')` has no side effects. **Operator wires the external scheduler.**
 
 **The flaw:** `app.js` calls `initScheduler()` and `app.listen()` unconditionally. On a
 serverless deploy the hourly `node-cron` job **never fires** (the process is frozen between

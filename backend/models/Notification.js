@@ -34,4 +34,7 @@ const notificationSchema = new mongoose.Schema({
   }
 });
 
+// Supports checkOverdueGoals()'s per-goal `findOne({ goalId, type })`.
+notificationSchema.index({ goalId: 1, type: 1 });
+
 module.exports = mongoose.model('Notification', notificationSchema);

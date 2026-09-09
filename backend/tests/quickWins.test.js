@@ -79,5 +79,31 @@ check('no route puts (error|err).message in a JSON response body', () => {
   assert.strictEqual(offenders.length, 0, `still leak (error|err).message in a response body: ${offenders.join(', ')}`);
 });
 
+console.log('\nquick-wins: serverless-safe bootstrap (#15)');
+check('initScheduler and app.listen are guarded by require.main === module', () => {
+  assert.ok(/require\.main\s*===\s*module/.test(appSrc), 'no require.main guard');
+  const guardIdx = appSrc.indexOf('require.main === module');
+  const tail = appSrc.slice(guardIdx);
+  assert.ok(/initScheduler\(\)/.test(tail), 'initScheduler() not inside the guard');
+  assert.ok(/app\.listen\(/.test(tail), 'app.listen() not inside the guard');
+  const head = appSrc.slice(0, guardIdx);
+  assert.ok(!/^\s*initScheduler\(\);/m.test(head), 'initScheduler() still called at top level');
+});
+check('app.js mounts /api/internal', () => {
+  assert.ok(/app\.use\(\s*['"]\/api\/internal['"]/.test(appSrc), '/api/internal not mounted');
+});
+const internalPath = path.join(__dirname, '..', 'routes', 'internal.js');
+const internalSrc = fs.existsSync(internalPath) ? fs.readFileSync(internalPath, 'utf8') : '';
+check('internal routes require a shared secret and 404 when unset/wrong', () => {
+  assert.ok(internalSrc, 'routes/internal.js is missing');
+  assert.ok(/INTERNAL_CRON_SECRET/.test(internalSrc), 'no INTERNAL_CRON_SECRET check');
+  assert.ok(/run-notifications/.test(internalSrc) && /run-rollup/.test(internalSrc), 'missing routes');
+  assert.ok(/status\(404\)/.test(internalSrc), 'unauthenticated hit should 404, not 401');
+});
+check('Notification model indexes {goalId, type}', () => {
+  const n = read('models/Notification.js');
+  assert.ok(/index\(\s*\{\s*goalId:\s*1,\s*type:\s*1\s*\}/.test(n), 'missing {goalId:1,type:1} index');
+});
+
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed === 0 ? 0 : 1);

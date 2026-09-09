@@ -16,6 +16,12 @@ jobs:
         working-directory: backend
       - run: npm test
         working-directory: backend
+      - name: app.js imports without side effects
+        working-directory: backend
+        env:
+          JWT_SECRET: ci-placeholder
+          MONGO_URI: mongodb://127.0.0.1:1/none
+        run: node -e "const a=require('./app.js'); if(typeof a!=='function'){process.exit(1)} setTimeout(()=>process.exit(0),500)"
 
   frontend:
     runs-on: ubuntu-latest

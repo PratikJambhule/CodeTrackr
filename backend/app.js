@@ -87,6 +87,7 @@ const extensionRoutes = require('./routes/extension');
 const notificationRoutes = require('./routes/notifications');
 const metricsRoutes = require('./routes/metrics');
 const authRoutes = require('./routes/auth');
+const internalRoutes = require('./routes/internal');
 
 console.log('📍 Mounting routes...');
 app.use('/api/analytics', analyticsRoutes);
@@ -99,6 +100,7 @@ app.use('/api/extension', extensionRoutes);
 app.use('/api/notifications', notificationRoutes);
 app.use('/api/metrics', metricsRoutes);
 app.use('/auth', authRoutes);
+app.use('/api/internal', internalRoutes);
 
 // Central error handler — one place that logs the full error server-side with a
 // short correlation id and returns a generic body. Routes call `next(err)`
@@ -116,12 +118,16 @@ app.use((err, req, res, next) => {
 
 const PORT = process.env.PORT || 5050;
 
-// Initialize notification scheduler
-const { initScheduler } = require('./services/notificationScheduler');
-initScheduler();
-
-app.listen(PORT, () => {
-  console.log(`Server is running on port ${PORT}`);
-});
+// Only start a server + in-process scheduler when run directly (`node app.js`).
+// Under a serverless handler this module is `require`d, so it must have no side
+// effects: the schedule is driven externally via POST /api/internal/run-* with
+// the INTERNAL_CRON_SECRET header (see IMPROVEMENT_PLAN H-13).
+if (require.main === module) {
+  const { initScheduler } = require('./services/notificationScheduler');
+  initScheduler();
+  app.listen(PORT, () => {
+    console.log(`Server is running on port ${PORT}`);
+  });
+}
 
 module.exports = app;
