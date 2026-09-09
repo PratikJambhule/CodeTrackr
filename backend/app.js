@@ -41,6 +41,13 @@ app.use(passport.initialize());
 // Health
 app.get("/", (req, res) => res.json({ status: "ok", service: "CodeTrackr API" }));
 
+// Readiness: 503 when the DB connection isn't usable, so the platform doesn't
+// route traffic to a broken instance. `GET /` stays the liveness ping.
+app.get("/health", (req, res) => {
+  const up = mongoose.connection.readyState === 1;
+  res.status(up ? 200 : 503).json({ status: up ? "ok" : "degraded", db: up });
+});
+
 // DB
 mongoose.connect(process.env.MONGO_URI, {
   serverSelectionTimeoutMS: 15000,

@@ -283,7 +283,7 @@ pattern, unique indexes again.
 
 ---
 
-## 11. `GET /health` readiness endpoint 🟢
+## 11. `GET /health` readiness endpoint 🟢 — ✅ DONE 2026-09-09
 
 **The gap:** `/` returns `{ status: 'ok' }` unconditionally — even when Mongo is down.
 

@@ -38,5 +38,12 @@ check('the join catch no longer leaks error.message', () => {
   assert.ok(!/error:\s*error\.message/.test(joinHandler), 'join handler still echoes error.message');
 });
 
+console.log('\nquick-wins: /health readiness (#11)');
+check('app.js exposes GET /health gated on mongoose readyState', () => {
+  assert.ok(/app\.get\(\s*['"]\/health['"]/.test(appSrc), 'no GET /health route');
+  assert.ok(/mongoose\.connection\.readyState/.test(appSrc), '/health does not check readyState');
+  assert.ok(/503/.test(appSrc), '/health never returns 503');
+});
+
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed === 0 ? 0 : 1);
