@@ -128,7 +128,7 @@ function normalizeTerminalAnalytics(body) {
 }
 
 // POST endpoint for VS Code extension to send coding activity
-router.post('/track', verifyApiKey, async (req, res) => {
+router.post('/track', verifyApiKey, async (req, res, next) => {
     try {
         const {
             fileName,
@@ -181,17 +181,12 @@ router.post('/track', verifyApiKey, async (req, res) => {
         const { status, body } = await persistFlush(normalized, when);
         res.status(status).json(body);
     } catch (error) {
-        console.error('Track activity error:', error);
-        res.status(500).json({
-            success: false,
-            message: 'Failed to track activity',
-            error: error.message
-        });
+        return next(error);
     }
 });
 
 // POST endpoint for batch activity tracking (multiple activities at once)
-router.post('/track/batch', verifyApiKey, async (req, res) => {
+router.post('/track/batch', verifyApiKey, async (req, res, next) => {
     try {
         const { activities } = req.body;
 
@@ -233,17 +228,12 @@ router.post('/track/batch', verifyApiKey, async (req, res) => {
             count: processed
         });
     } catch (error) {
-        console.error('Batch track activity error:', error);
-        res.status(500).json({
-            success: false,
-            message: 'Failed to track activities',
-            error: error.message
-        });
+        return next(error);
     }
 });
 
 // GET endpoint to verify API key (for extension setup)
-router.get('/verify', verifyApiKey, async (req, res) => {
+router.get('/verify', verifyApiKey, async (req, res, next) => {
     res.json({
         success: true,
         message: 'API key is valid',

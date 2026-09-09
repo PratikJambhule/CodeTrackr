@@ -8,7 +8,7 @@ const { isAuthenticated } = require('../middleware/auth');
 const { hashPassword, verifyPassword, isHashed } = require('../services/passwordHash');
 
 // Create a new group
-router.post('/create', isAuthenticated, async (req, res) => {
+router.post('/create', isAuthenticated, async (req, res, next) => {
     try {
         const { groupName, groupDescription, visibility, password } = req.body;
 
@@ -46,12 +46,12 @@ router.post('/create', isAuthenticated, async (req, res) => {
         });
     } catch (error) {
         console.error('Error creating group:', error);
-        res.status(400).json({ message: 'Error creating group', error: error.message });
+        res.status(400).json({ message: 'Error creating group' });
     }
 });
 
 // Get all groups where the logged-in user is a member (My Groups)
-router.get('/my-groups', isAuthenticated, async (req, res) => {
+router.get('/my-groups', isAuthenticated, async (req, res, next) => {
     try {
         const memberships = await GroupMember.find({ userId: req.user._id })
             .populate({
@@ -67,12 +67,12 @@ router.get('/my-groups', isAuthenticated, async (req, res) => {
         res.json({ success: true, groups });
     } catch (error) {
         console.error('Error fetching my groups:', error);
-        res.status(500).json({ message: 'Error fetching your groups', error: error.message });
+        return next(error);
     }
 });
 
 // Get all groups the user is NOT a member of (Discover Groups)
-router.get('/discover', isAuthenticated, async (req, res) => {
+router.get('/discover', isAuthenticated, async (req, res, next) => {
     try {
         const { search } = req.query;
 
@@ -95,12 +95,12 @@ router.get('/discover', isAuthenticated, async (req, res) => {
         res.json({ success: true, groups });
     } catch (error) {
         console.error('Error fetching discover groups:', error);
-        res.status(500).json({ message: 'Error fetching groups', error: error.message });
+        return next(error);
     }
 });
 
 // Get group details with members and leaderboard
-router.get('/:groupId/details', isAuthenticated, async (req, res) => {
+router.get('/:groupId/details', isAuthenticated, async (req, res, next) => {
     try {
         const { groupId } = req.params;
 
@@ -194,12 +194,12 @@ router.get('/:groupId/details', isAuthenticated, async (req, res) => {
         });
     } catch (error) {
         console.error('Error fetching group details:', error);
-        res.status(500).json({ message: 'Error fetching group details', error: error.message });
+        return next(error);
     }
 });
 
 // Join a group
-router.post('/:groupId/join', isAuthenticated, async (req, res) => {
+router.post('/:groupId/join', isAuthenticated, async (req, res, next) => {
     try {
         const { groupId } = req.params;
         const { password } = req.body;
@@ -252,13 +252,12 @@ router.post('/:groupId/join', isAuthenticated, async (req, res) => {
         if (error && error.code === 11000) {
             return res.status(409).json({ message: 'You are already a member of this group' });
         }
-        console.error('Error joining group:', error);
-        return res.status(500).json({ message: 'Error joining group' });
+        return next(error);
     }
 });
 
 // Leave a group
-router.post('/:groupId/leave', isAuthenticated, async (req, res) => {
+router.post('/:groupId/leave', isAuthenticated, async (req, res, next) => {
     try {
         const { groupId } = req.params;
         console.log(`Leave group request: groupId=${groupId}, userId=${req.user._id}`);
@@ -295,7 +294,7 @@ router.post('/:groupId/leave', isAuthenticated, async (req, res) => {
         });
     } catch (error) {
         console.error('Error leaving group:', error);
-        res.status(500).json({ message: 'Error leaving group', error: error.message });
+        return next(error);
     }
 });
 

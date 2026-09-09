@@ -179,7 +179,7 @@ async function computeStreak(userIdStr, timezoneOffset) {
 }
 
 // GET user's analytics data - Daily view with hourly breakdown
-router.get('/:userId', isAuthenticated, async (req, res) => {
+router.get('/:userId', isAuthenticated, async (req, res, next) => {
     try {
         const { userId } = req.params;
         const { timezone } = req.query; // Get timezone offset from query (in minutes)
@@ -356,13 +356,12 @@ router.get('/:userId', isAuthenticated, async (req, res) => {
         });
 
     } catch (error) {
-        console.error('Error fetching analytics:', error);
-        res.status(500).json({ message: 'Error fetching analytics data', error: error.message });
+        return next(error);
     }
 });
 
 // GET user's weekly analytics data - day-wise breakdown for last 7 days
-router.get('/weekly/:userId', isAuthenticated, async (req, res) => {
+router.get('/weekly/:userId', isAuthenticated, async (req, res, next) => {
     try {
         const { userId } = req.params;
         const { timezone } = req.query;
@@ -509,13 +508,12 @@ router.get('/weekly/:userId', isAuthenticated, async (req, res) => {
         });
 
     } catch (error) {
-        console.error('Error fetching weekly analytics:', error);
-        res.status(500).json({ message: 'Error fetching weekly analytics data', error: error.message });
+        return next(error);
     }
 });
 
 // GET user's daily and per-stack coding activity (legacy endpoint)
-router.get('/summary/:userId', isAuthenticated, async (req, res) => {
+router.get('/summary/:userId', isAuthenticated, async (req, res, next) => {
     try {
         const { userId } = req.params;
 
@@ -550,12 +548,12 @@ router.get('/summary/:userId', isAuthenticated, async (req, res) => {
         res.json({ dailyTotals, stackTotals });
 
     } catch (error) {
-        res.status(500).json({ message: 'Error fetching analytics data', error: error.message });
+        return next(error);
     }
 });
 
 // GET time slot detailed analytics
-router.get('/timeslot/:userId', isAuthenticated, async (req, res) => {
+router.get('/timeslot/:userId', isAuthenticated, async (req, res, next) => {
     try {
         const { userId } = req.params;
         const { start, end, timezone } = req.query;
@@ -665,8 +663,7 @@ router.get('/timeslot/:userId', isAuthenticated, async (req, res) => {
         });
 
     } catch (error) {
-        console.error('Error fetching time slot analytics:', error);
-        res.status(500).json({ message: 'Error fetching time slot analytics', error: error.message });
+        return next(error);
     }
 });
 

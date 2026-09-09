@@ -119,7 +119,7 @@ you think about abuse vectors, you read the git history.
 
 ---
 
-## 4. Central error handler — stop leaking internals 🟢
+## 4. Central error handler — stop leaking internals 🟢 — ✅ DONE 2026-09-09
 
 **The flaw:** every route does its own `try/catch` and returns
 `res.status(500).json({ message, error: error.message })` — that ships Mongoose error text,

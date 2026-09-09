@@ -7,7 +7,7 @@ const { isAuthenticated } = require('../middleware/auth');
 const { sameUser } = require('../services/authorization');
 
 // Create a new team
-router.post('/create', isAuthenticated, async (req, res) => {
+router.post('/create', isAuthenticated, async (req, res, next) => {
     try {
         const { name, description } = req.body;
         const createdBy = req.user.id;
@@ -22,22 +22,22 @@ router.post('/create', isAuthenticated, async (req, res) => {
         await newTeam.save();
         res.status(201).json(newTeam);
     } catch (error) {
-        res.status(500).json({ message: 'Error creating team', error: error.message });
+        return next(error);
     }
 });
 
 // Get all teams for the logged-in user
-router.get('/', isAuthenticated, async (req, res) => {
+router.get('/', isAuthenticated, async (req, res, next) => {
     try {
         const teams = await Team.find({ members: req.user.id }).populate('members', 'name profilePictureUrl');
         res.json(teams);
     } catch (error) {
-        res.status(500).json({ message: 'Error fetching teams', error: error.message });
+        return next(error);
     }
 });
 
 // Get a single team's details
-router.get('/:teamId', isAuthenticated, async (req, res) => {
+router.get('/:teamId', isAuthenticated, async (req, res, next) => {
     try {
         const { teamId } = req.params;
         const team = await Team.findById(teamId).populate('members', 'name email profilePictureUrl');
@@ -53,12 +53,12 @@ router.get('/:teamId', isAuthenticated, async (req, res) => {
 
         res.json(team);
     } catch (error) {
-        res.status(500).json({ message: 'Error fetching team details', error: error.message });
+        return next(error);
     }
 });
 
 // Add a member to a team
-router.post('/:teamId/members', isAuthenticated, async (req, res) => {
+router.post('/:teamId/members', isAuthenticated, async (req, res, next) => {
     try {
         const { teamId } = req.params;
         const { email } = req.body;
@@ -87,7 +87,7 @@ router.post('/:teamId/members', isAuthenticated, async (req, res) => {
         res.json(team);
 
     } catch (error) {
-        res.status(500).json({ message: 'Error adding member', error: error.message });
+        return next(error);
     }
 });
 

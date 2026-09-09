@@ -5,7 +5,7 @@ const Activity = require('../models/Activity');
 const { isAuthenticated } = require('../middleware/auth');
 
 // Create a new goal
-router.post('/create', isAuthenticated, async (req, res) => {
+router.post('/create', isAuthenticated, async (req, res, next) => {
     try {
         const { title, description, targetHours, techStack, deadline } = req.body;
         const userId = req.user.id;
@@ -22,22 +22,22 @@ router.post('/create', isAuthenticated, async (req, res) => {
         await newGoal.save();
         res.status(201).json(newGoal);
     } catch (error) {
-        res.status(500).json({ message: 'Error creating goal', error: error.message });
+        return next(error);
     }
 });
 
 // Get all goals for the logged-in user
-router.get('/', isAuthenticated, async (req, res) => {
+router.get('/', isAuthenticated, async (req, res, next) => {
     try {
         const goals = await Goal.find({ userId: req.user.id });
         res.json(goals);
     } catch (error) {
-        res.status(500).json({ message: 'Error fetching goals', error: error.message });
+        return next(error);
     }
 });
 
 // Get progress for a specific goal
-router.get('/:goalId/progress', isAuthenticated, async (req, res) => {
+router.get('/:goalId/progress', isAuthenticated, async (req, res, next) => {
     try {
         const { goalId } = req.params;
         // Scope by owner: findById leaked another user's goal title,
@@ -66,7 +66,7 @@ router.get('/:goalId/progress', isAuthenticated, async (req, res) => {
         });
 
     } catch (error) {
-        res.status(500).json({ message: 'Error fetching goal progress', error: error.message });
+        return next(error);
     }
 });
 

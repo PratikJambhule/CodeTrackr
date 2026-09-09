@@ -100,6 +100,19 @@ app.use('/api/notifications', notificationRoutes);
 app.use('/api/metrics', metricsRoutes);
 app.use('/auth', authRoutes);
 
+// Central error handler — one place that logs the full error server-side with a
+// short correlation id and returns a generic body. Routes call `next(err)`
+// instead of echoing `err.message` (which leaked Mongoose/internal detail).
+app.use((err, req, res, next) => {
+  const id = Math.random().toString(36).slice(2, 10);
+  console.error(`[err:${id}] ${req.method} ${req.originalUrl}`, err);
+  const status = err.status || err.statusCode || 500;
+  res.status(status).json({
+    error: status === 500 ? 'Internal server error' : (err.publicMessage || 'Request failed'),
+    id,
+  });
+});
+
 
 const PORT = process.env.PORT || 5050;
 

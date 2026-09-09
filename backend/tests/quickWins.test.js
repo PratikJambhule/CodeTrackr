@@ -59,5 +59,25 @@ check('rate-limit is skipped under NODE_ENV=test', () => {
   assert.ok(/NODE_ENV\s*===\s*['"]test['"]/.test(appSrc), 'no test-env skip on the limiter');
 });
 
+console.log('\nquick-wins: central error handler (#4)');
+check('app.js registers a 4-arg error handler after the routers', () => {
+  assert.ok(/app\.use\(\s*\(\s*err\s*,\s*req\s*,\s*res\s*,\s*next\s*\)\s*=>/.test(appSrc),
+    'no (err, req, res, next) handler');
+  const handlerIdx = appSrc.search(/app\.use\(\s*\(\s*err\s*,/);
+  const lastRouteIdx = appSrc.lastIndexOf("app.use('/auth'");
+  assert.ok(handlerIdx > lastRouteIdx, 'error handler is not after the route mounts');
+});
+check('no route puts (error|err).message in a JSON response body', () => {
+  const routesDir = path.join(__dirname, '..', 'routes');
+  const leak = /(error|message|details|detail)\s*:\s*(error|err|e)\.message/;
+  const offenders = [];
+  for (const f of fs.readdirSync(routesDir)) {
+    if (!f.endsWith('.js')) continue;
+    const s = fs.readFileSync(path.join(routesDir, f), 'utf8');
+    if (leak.test(s)) offenders.push(f);
+  }
+  assert.strictEqual(offenders.length, 0, `still leak (error|err).message in a response body: ${offenders.join(', ')}`);
+});
+
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed === 0 ? 0 : 1);

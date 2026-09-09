@@ -5,7 +5,7 @@ const User = require('../models/user');
 const { isAuthenticated } = require('../middleware/auth');
 
 // GET global leaderboard data
-router.get('/', isAuthenticated, async (req, res) => {
+router.get('/', isAuthenticated, async (req, res, next) => {
     try {
         // First, get all users
         const allUsers = await User.find({}).select('_id name email profilePictureUrl').lean();
@@ -129,8 +129,7 @@ router.get('/', isAuthenticated, async (req, res) => {
         res.json(leaderboardData);
 
     } catch (error) {
-        console.error('Error fetching leaderboard:', error);
-        res.status(500).json({ message: 'Error fetching leaderboard data', error: error.message });
+        return next(error);
     }
 });
 
