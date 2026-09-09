@@ -12,6 +12,7 @@ const {
     hasSignal,
     bucketStartFor
 } = require('../services/activityBucket');
+const { validateIngestPayload } = require('../services/ingestValidation');
 
 // Default: merge flushes into 10-minute buckets. Set ACTIVITY_BUCKET_MS=0 to
 // fall back to one document per flush (Activity.create), byte-for-byte as before.
@@ -149,11 +150,15 @@ router.post('/track', verifyApiKey, async (req, res, next) => {
             ...req.body
         });
 
-        // Validate required fields
-        if (!fileName || !language || !duration) {
+        // Bounds-check the payload: duration in (0, 3600], string length caps,
+        // timestamp within [now-24h, now+60s]. Replaces the old truthiness check
+        // that accepted `duration: 1e12`, negatives and a far-backdated timestamp.
+        const v = validateIngestPayload(req.body);
+        if (!v.ok) {
             return res.status(400).json({
                 success: false,
-                message: 'Missing required fields: fileName, language, and duration are required'
+                message: 'Invalid activity payload',
+                details: v.errors
             });
         }
 
@@ -195,6 +200,18 @@ router.post('/track/batch', verifyApiKey, async (req, res, next) => {
                 success: false,
                 message: 'activities must be a non-empty array'
             });
+        }
+
+        // Same bounds check as /track, per element. The batch is all-or-nothing.
+        for (let i = 0; i < activities.length; i++) {
+            const v = validateIngestPayload(activities[i]);
+            if (!v.ok) {
+                return res.status(400).json({
+                    success: false,
+                    message: `Invalid activity at index ${i}`,
+                    details: v.errors
+                });
+            }
         }
 
         // Persist each activity through the same bucketing path as /track.

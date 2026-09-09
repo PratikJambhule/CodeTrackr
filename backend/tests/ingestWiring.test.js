@@ -48,5 +48,12 @@ check('leaderboard activityCount is flush-based via flushCount', () => {
   assert.ok(/\$ifNull:\s*\[\s*['"]\$flushCount['"]/.test(leaderboardSrc));
 });
 
+console.log('\ningest payload validation (#12)');
+check('/track and /track/batch bounds-check with ingestValidation', () => {
+  assert.ok(/require\(['"]\.\.\/services\/ingestValidation['"]\)/.test(src), 'validator not required');
+  assert.ok(/validateIngestPayload\(req\.body\)/.test(src), '/track does not call the validator');
+  assert.ok(/validateIngestPayload\(activities\[i\]\)/.test(src), '/track/batch does not validate each element');
+});
+
 console.log(`\n${passed} passed, ${failed} failed\n`);
 process.exit(failed === 0 ? 0 : 1);

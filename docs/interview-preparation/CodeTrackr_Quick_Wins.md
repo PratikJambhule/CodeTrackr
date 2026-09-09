@@ -306,7 +306,13 @@ route traffic to a broken instance."*
 
 ---
 
-## 12. Validate the ingest payload 🟡
+## 12. Validate the ingest payload 🟡 — ✅ DONE 2026-09-09
+
+> **Shipped** as a pure `services/ingestValidation.js` module (unit-tested, 23 assertions)
+> rather than `express-validator` middleware — more testable and it fits ahead of the existing
+> normalise → `planActivityWrite` pipeline. Bounds: `duration ∈ (0, 3600]`, length caps on
+> `fileName`/`language`/`projectName`, `timestamp` within `[now-24h, now+60s]`. Wired into
+> `/track` and `/track/batch` (batch stays all-or-nothing).
 
 **The flaw:** the only check is `if (!fileName || !language || !duration)`. So `duration: 0`
 is wrongly rejected, and `duration: 1e12`, negatives, and a client-chosen `timestamp` are
