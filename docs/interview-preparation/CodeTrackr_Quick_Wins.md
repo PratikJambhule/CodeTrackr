@@ -92,7 +92,7 @@ frontend typecheck on every push, so a regression can't merge silently."*
 
 ---
 
-## 3. Wire up the security middleware that's already installed 🟢
+## 3. Wire up the security middleware that's already installed 🟢 — ✅ DONE 2026-09-09
 
 **The flaw:** `helmet` and `express-rate-limit` are in `backend/package.json` but **never
 used**. No security headers, no rate limit on anything — including `/auth/google` and the

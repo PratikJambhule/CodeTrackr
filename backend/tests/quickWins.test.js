@@ -45,5 +45,19 @@ check('app.js exposes GET /health gated on mongoose readyState', () => {
   assert.ok(/503/.test(appSrc), '/health never returns 503');
 });
 
+console.log('\nquick-wins: helmet + rate-limit (#3)');
+check('app.js requires and uses helmet', () => {
+  assert.ok(/require\(['"]helmet['"]\)/.test(appSrc), 'helmet not required');
+  assert.ok(/app\.use\(\s*helmet\(/.test(appSrc), 'helmet() not used');
+});
+check('app.js rate-limits /auth and /api/extension', () => {
+  assert.ok(/require\(['"]express-rate-limit['"]\)/.test(appSrc), 'express-rate-limit not required');
+  assert.ok(/app\.use\(\s*['"]\/auth['"]\s*,\s*rateLimit\(/.test(appSrc), 'no limiter on /auth');
+  assert.ok(/app\.use\(\s*['"]\/api\/extension['"]\s*,\s*rateLimit\(/.test(appSrc), 'no limiter on /api/extension');
+});
+check('rate-limit is skipped under NODE_ENV=test', () => {
+  assert.ok(/NODE_ENV\s*===\s*['"]test['"]/.test(appSrc), 'no test-env skip on the limiter');
+});
+
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed === 0 ? 0 : 1);

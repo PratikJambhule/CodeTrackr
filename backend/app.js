@@ -4,6 +4,8 @@ const mongoose = require("mongoose");
 const cors = require("cors");
 const cookieParser = require('cookie-parser');
 const passport = require('passport');
+const helmet = require('helmet');
+const rateLimit = require('express-rate-limit');
 require("dotenv").config();
 
 if (!process.env.JWT_SECRET) {
@@ -14,6 +16,10 @@ const app = express();
 
 // Trust proxy for production (required for secure cookies on Render/Vercel)
 app.set("trust proxy", 1);
+
+// Standard security headers (HSTS, nosniff, no X-Powered-By, frameguard).
+// CSP is off by default in helmet — the SPA is served from Vercel, not here.
+app.use(helmet());
 
 // CORS: allow requests from frontend (FRONTEND_URL) and local dev ports
 const allowedOrigins = [
@@ -37,6 +43,17 @@ app.use(cors({
 app.use(express.json());
 app.use(cookieParser());
 app.use(passport.initialize());
+
+// Per-IP rate limits on the two abuse-prone surfaces. Skipped in tests.
+const rlSkip = () => process.env.NODE_ENV === 'test';
+app.use('/auth', rateLimit({
+  windowMs: 15 * 60 * 1000, max: 50, skip: rlSkip,
+  standardHeaders: true, legacyHeaders: false,
+}));
+app.use('/api/extension', rateLimit({
+  windowMs: 60 * 1000, max: 120, skip: rlSkip,
+  standardHeaders: true, legacyHeaders: false,
+}));
 
 // Health
 app.get("/", (req, res) => res.json({ status: "ok", service: "CodeTrackr API" }));
