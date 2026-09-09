@@ -333,8 +333,8 @@ draws it.
 
 - **`npm run build` is green** as of 2026-09-09 — the TypeScript check had 29 old errors (mostly
   unused imports). `vite build` alone works. It's a cleanup job, not a design flaw.
-- The dashboard's **"Repeated Failures" panel shows fake hard-coded data**, not the real
-  numbers (which the backend does calculate).
+- The dashboard's **"Repeated Failures" panel** now shows the real `repeatedFailedCommands`
+  (fixed 2026-09-09; it used to render fake hard-coded data).
 - The **Goals page to-do list isn't saved** — it only lives in React state until you refresh.
 - The **Teams page isn't linked** anywhere.
 

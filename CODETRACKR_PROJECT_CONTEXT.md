@@ -100,7 +100,7 @@ workspace; each is installed and deployed independently.
 | Auth | Google OAuth 2.0 → JWT in httpOnly cookie (web); random API key in `x-api-key` header (extension) |
 | ML/Insights | **None.** Pure deterministic JavaScript statistics (`metricsDerive.js`). No Python, no trained model, no LLM. |
 | Deploy | Backend: Render (`codetrackr-backend-uckp.onrender.com`, per extension default) — also has a Vercel serverless config. Frontend: Vercel (`code-trackr-frontend.vercel.app`). DB: MongoDB Atlas. |
-| Testing | Plain `node:assert` scripts. 6 backend suites, 2 extension suites. No framework, no integration/e2e/DB tests, **zero frontend tests**. |
+| Testing | Plain `node:assert` scripts. **11 backend suites (~114 assertions)**, 2 extension suites (~37). No framework, no integration/e2e/DB tests, **zero frontend tests**. GitHub Actions CI runs backend + extension tests and the frontend build on every push (2026‑09‑09). |
 
 ---
 
@@ -459,9 +459,16 @@ sparseness, `planActivityWrite`), `activityModel` (10 — schema/index shape), `
 (9 — source scan that `/track` uses the planner + reads tolerate bucketed docs), `rollup`
 (7 — `buildDaySummary`). Extension `activation` gained `payloadHasSignal` + manifest checks.
 
-**Total ≈ 104 backend assertions across 10 suites + 37 extension.** No test framework, **no
+Plus, since 2026‑09‑09 (quick-wins batch): `quickWins` (`backend/tests/quickWins.test.js` —
+source scans for the `JWT_SECRET` boot-guard, no `'your_jwt_secret'` fallback, `11000`→409 on
+group join, `GET /health`, `helmet` + rate-limit wiring, and the central error handler +
+zero response-body `.message` leaks).
+
+**Total ≈ 114 backend assertions across 11 suites + 37 extension.** No test framework, **no
 integration/API/DB/e2e tests, no frontend tests.** Nothing has been run against a real
-database — the bucketing/rollup logic is proven at the pure-function level only.
+database — the bucketing/rollup/wiring logic is proven at the pure-function / source-scan
+level only (a `supertest` + `mongodb-memory-server` integration test is the tracked next step,
+Quick-Wins #24).
 
 ---
 
@@ -471,7 +478,7 @@ database — the bucketing/rollup logic is proven at the pure-function level onl
 2. Leaderboard / group leaderboard: unbounded full-collection scan, no cache, no pagination; exposes emails.
 3. Analytics aggregate in JS, not MongoDB; daily endpoint pulls 7 days to show 1 (M‑1).
 4. `node-cron` scheduler incompatible with serverless (H‑13) — now also runs the nightly rollup.
-5. `helmet` + rate limits on `/auth` + `/api/extension` added 2026-09-09 (M‑3); ingest bounds-checked 2026-09-09 (M‑4). Group `/join` still unlimited.
+5. `helmet` + rate limits on `/auth` + `/api/extension` added 2026-09-09 (M‑3). Group `/join` still unlimited; ingest still has no per-key quota or bounds check on the payload (M‑4 open).
 6. ~~Frontend does not typecheck~~ ✅ fixed 2026-09-09 (M‑13) — `npm run build` green, enforced by CI.
 7. Dashboard "Repeated Failures" now shows real data (2026-09-09); Goals to-dos are non-persistent; Teams UI is orphaned.
 8. `userId` is String on `activities`, ObjectId elsewhere → coercion gymnastics, blocks `$lookup` (M‑6).
@@ -490,11 +497,13 @@ explosion; the dead `date` field/index; idle < 2 min inflating totals.)*
 
 ## 18. Recommended improvements (NOT built — keep separate from the above)
 
-**Short term:** hash API keys at rest (`keyId` + secret, prefix); add `helmet` +
-`express-rate-limit` on `/auth` and `/api/extension`; add `express-validator` bounds on
-ingest (`0 < duration ≤ 3600`); central error middleware; wire the real
-`repeatedFailedCommands` into the dashboard; move the scheduler to Vercel Cron / an external
-trigger. *(Done 2026‑09‑08: `{userId:1,timestamp:-1}` index; 10-min bucketing; drop `date`.)*
+**Short term:** hash API keys at rest (`keyId` + secret, prefix); bounds-check the ingest
+payload (`0 < duration ≤ 3600`, length caps, timestamp window); per-key rate limit +
+idempotency key on ingest; a rate limiter on group `/join`.
+*(Done 2026‑09‑08: `{userId:1,timestamp:-1}` index; 10-min bucketing; drop `date`.
+Done 2026‑09‑09 — quick-wins batch: `helmet` + `express-rate-limit` on `/auth` + `/api/extension`;
+central error middleware; wire the real `repeatedFailedCommands`; `JWT_SECRET` fail-fast;
+409 on duplicate join; `GET /health`; fix the frontend build; GitHub Actions CI.)*
 
 **Medium term:** `UserStats` rollup collection updated on ingest → leaderboard reads N docs
 for N users; **repoint `/leaderboard`, `/summary`, `/metrics >90d` at `dailysummaries` and
@@ -521,7 +530,17 @@ metrics, tracing); CI (typecheck + both test suites) + automated Marketplace pub
   Spec `docs/superpowers/specs/2026-09-08-db-write-reduction-design.md`, plan
   `docs/superpowers/plans/2026-09-08-db-write-reduction.md`. `ACTIVITY_BUCKET_MS=0` = legacy.
   **Follow-up open:** repoint all-time reads at `dailysummaries` + tighten the TTL (with `UserStats`).
-- `H-7`, `H-8` (leaderboard scans), `H-13` (serverless cron), most `MEDIUM`/`LOW` items **open**.
+- **Quick-wins batch (Tier 1 + security), 2026‑09‑09 — IN PROGRESS:** done so far —
+  `#5` (index, folded from the DB batch), `#7` `JWT_SECRET` fail-fast (M‑9), `#6` 409 on
+  duplicate group join (M‑14), `#11` `GET /health` (L‑8), `#8` real Repeated-Failures data
+  (M‑15), `#3` `helmet` + rate-limit (M‑3), `#1` frontend build green (M‑13), `#2` GitHub
+  Actions CI (L‑9), `#4` central error handler (M‑10). Remaining: `#12` ingest validation
+  (M‑4), `#15` serverless-safe bootstrap + external cron (H‑13). Deferred to a follow-up:
+  `#9` `UserStats` leaderboard rollup (decided: live running-total), `#10` idempotency key,
+  `#13` React Query, `#14` goal completion, all of Tier 3. Spec/plan under
+  `docs/superpowers/{specs,plans}/2026-09-09-quick-wins-tier1-security.md`.
+- `H-7`, `H-8` (leaderboard scans) **open**; `H-13` (serverless cron) being addressed by `#15`;
+  most other `MEDIUM`/`LOW` items **open**.
 - Extension packaged as `2.3.0`; Marketplace publication is manual / unverified.
 - Frontend build is ✅ green (`tsc -b && vite build`) as of 2026-09-09; CI runs it on every push.
 - No work has touched a live database. **Migrations to run on deploy:**

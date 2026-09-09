@@ -1410,8 +1410,10 @@ Assume ~2 active hours/user/day. Since 2026‑09‑08 that's ~**12 bucket writes
 
 **Framework:** none. Plain `node:assert` scripts with a hand-rolled `check(name, fn)` counter,
 run via `node tests/x.test.js`. `package.json` `test` scripts chain them with `&&`.
+**CI:** GitHub Actions (`.github/workflows/ci.yml`, added 2026‑09‑09) runs the backend +
+extension suites and the frontend build on every push / PR.
 
-**Backend (`backend/tests/`, ~57 assertions):**
+**Backend (`backend/tests/`, 11 suites, ~114 assertions):**
 
 | Suite | Technique | Covers |
 |---|---|---|
@@ -1421,8 +1423,13 @@ run via `node tests/x.test.js`. `package.json` `test` scripts chain them with `&
 | `authorization.test.js` | unit | `sameUser`, `assertOwnership` (403 vs 404 vs 401), `isBypassAllowed` (never in prod) |
 | `routeGuards.test.js` | **static source scan** — regex over route files | fails if any sensitive route loses `isAuthenticated` / ownership; the H-1 regression guard |
 | `passwordHash.test.js` | unit (async) | scrypt round-trip, wrong password, salting, legacy plaintext acceptance, null-safety |
+| `activityBucket.test.js` | unit (pure) | bucket math (`bucketStartFor`), `hasSignal`, `buildBucketUpdate` shape, `planActivityWrite` legacy/merge/bucket modes (2026‑09‑08) |
+| `activityModel.test.js` | schema introspection | `Activity` sub-doc leaves are sparse (no `default: 0`); `date` path gone; `bucketStart`/`files`/`flushCount` present; the 5 index specs incl. the partial-unique bucket key (2026‑09‑08) |
+| `ingestWiring.test.js` | **static source scan** | `/track` uses `planActivityWrite`; `ACTIVITY_BUCKET_MS` default 600000; bucket writes are `findOneAndUpdate … upsert`; `11000` retry; the read paths tolerate bucketed docs (2026‑09‑08) |
+| `rollup.test.js` | unit (pure) | `buildDaySummary` — seconds/lines summed, `flushCount` missing ⇒ 1, per-language breakdown, project de-dup, focus `longestBlockMs` maxed (2026‑09‑08) |
+| `quickWins.test.js` | **static source scan** | `JWT_SECRET` boot-guard + no `'your_jwt_secret'`; `11000`→409 on group join; `GET /health` on `readyState`; `helmet` + rate-limit on `/auth`+`/api/extension` (test-skip); central `(err,req,res,next)` handler + zero response-body `.message` leaks (2026‑09‑09) |
 
-**Extension (`extension/tests/`):**
+**Extension (`extension/tests/`, ~37 assertions):**
 
 | Suite | Technique | Covers |
 |---|---|---|
@@ -1463,8 +1470,9 @@ run via `node tests/x.test.js`. `package.json` `test` scripts chain them with `&
   `truePeakWindow.hour ∈ 0..23`; golden-file test of `buildMetrics` against a fixed seeded DB.
 - **E2E:** Playwright against a compose stack (Mongo + API + built frontend), plus a headless
   extension host test (`@vscode/test-electron`, already a devDep).
-- **CI:** GitHub Action — `tsc -b` (must pass, so fix M-13 first), both test suites,
-  `node --check` on backend, `vsce package --no-dependencies` dry run.
+- **CI:** ✅ `.github/workflows/ci.yml` added 2026‑09‑09 — 3 jobs: backend `npm test`, extension
+  `npm test` (its `pretest` builds the bundle), frontend `npm run build` (`tsc -b` + `vite build`).
+  Still to add: `node --check`, a `vsce package` dry run, and lint.
 
 ---
 
@@ -1537,7 +1545,9 @@ Walk it in order (this is `CodeTrackr_Architecture.md` §9 as a checklist):
 - **Extension:** `vsce package` → `.vsix`; publisher `CodeTrackr-ext`;
   `codetrackr-vscode-2.2.0.vsix` committed. `PUBLISHING_v2.0.0.md` documents the Azure DevOps
   PAT + `vsce publish` flow.
-- **No** Dockerfile, Procfile, `render.yaml`, GitHub Actions, or any CI.
+- **No** Dockerfile, Procfile, or `render.yaml`. **GitHub Actions CI added 2026‑09‑09**
+  (`.github/workflows/ci.yml`) — backend + extension tests + frontend build on push / PR;
+  no CD (deploys stay manual).
 
 ### 19.2 Env vars
 

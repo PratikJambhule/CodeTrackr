@@ -1084,9 +1084,9 @@
 **N17.**
 > **Q:** What if two requests arrive simultaneously? **A:** Ingest is a single insert, atomic.
 > **Follow-up:** What about the group-join path?
-> **A:** Two concurrent joins → the unique compound index rejects the second → currently a 500,
-> should be a 409. No data corruption. The genuine lost-update risk is `team.members.push`,
-> which I'd fix with `$addToSet`.
+> **A:** Two concurrent joins → the unique compound index rejects the second → the handler
+> detects `error.code === 11000` and returns a 409 (fixed 2026-09-09; was a 500). No data
+> corruption. The genuine lost-update risk is `team.members.push`, which I'd fix with `$addToSet`.
 
 **N18.**
 > **Q:** Can users manipulate leaderboard scores? **A:** Yes, trivially.

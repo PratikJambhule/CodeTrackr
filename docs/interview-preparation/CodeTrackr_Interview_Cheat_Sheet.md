@@ -43,7 +43,7 @@
 | Auth | Google OAuth → JWT cookie (web); random 64-hex API key (extension) | `JWT_SECRET` required at boot — app throws if unset (was an unsafe `'your_jwt_secret'` fallback), fixed 2026-09-09 |
 | "ML" | pure JS stats — coefficient of variation, weighted score, medians | no model/training/inference/LLM/Python |
 | Deploy | Vercel + Render + Atlas | GitHub Actions CI (2026-09-09); no Dockerfile, no CD, no observability |
-| Tests | plain `node:assert` — 10 backend suites (~104 assertions) + 2 extension suites | **zero frontend tests; nothing run vs a real DB** |
+| Tests | plain `node:assert` — 11 backend suites (~114 assertions) + 2 extension suites; CI on push | **zero frontend tests; nothing run vs a real DB** |
 
 **Why MongoDB:** append-only, self-contained, schema-evolving docs; per-user-window access; no hot-path joins; free tier.
 **Where SQL wins:** groups/teams/goals relational integrity + transactions; the leaderboard `GROUP BY`.
@@ -234,7 +234,7 @@ fetch(/api/metrics?days=&timezone=)  // NO :userId — IDOR-proof by design →
 32. **Insufficient data?** → focus cards show "—" until extension 2.1.0; estimation needs 2 goals.
 33. **Cheat the leaderboard?** → yes: `curl` `/track` with `duration:3600` in a loop; no rate limit / validation.
 34. **Prevent cheating?** → validate duration, rate-limit per key, idempotency key, corroborate with edit/focus/git signals.
-35. **Tests?** → `node:assert` scripts; **10 backend suites (~104 assertions) + 2 extension**; **no frontend tests, nothing vs a real DB**.
+35. **Tests?** → `node:assert` scripts; **11 backend suites (~114 assertions) + 2 extension**; GitHub Actions CI on push; **no frontend tests, nothing vs a real DB**.
 36. **`routeGuards.test.js`?** → static scan; fails if a sensitive route loses its auth middleware.
 37. **Error handling?** → per-route `try/catch` → `next(err)` → **central handler** → `500 {error, id}` (correlation id, no leak; since 2026-09-09). Deliberate 4xx stay per-route.
 38. **Deploy?** → Vercel (FE) + Render (BE) + Atlas; `node-cron` breaks on serverless (H-13); GitHub Actions CI as of 2026-09-09.
