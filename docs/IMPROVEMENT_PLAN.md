@@ -169,6 +169,7 @@ is added (this closes Quick-Wins #5). Live migration: `node backend/scripts/migr
 - **L-6.** `tsconfig` has `strict: false` in the extension; several `as any` casts hide real bugs (e.g. the stub context in H-12).
 - **L-7. Partially addressed 2026-08-27** (activity now stamped with interval start; idle-counting unchanged). Idle time under 2 minutes counts as coding time, so totals skew high. Consider counting only intervals containing a real edit event.
 - **L-8. ✅ FIXED 2026-09-09.** `GET /` returned `{status:'ok'}` even with Mongo down. Added `GET /health` returning 503 when `mongoose.connection.readyState !== 1`; `GET /` stays the liveness ping. Point the platform health check at `/health`.
+- **L-9. ✅ FIXED 2026-09-09.** No CI. Added `.github/workflows/ci.yml` — three jobs: `backend` (`npm ci && npm test`, node 18), `frontend` (`npm ci && npm run build`, node 20), `extension` (`npm ci && npm test`, node 18; `pretest` builds the bundle). Runs on every push / PR. First real run is on the next push.
 
 ---
 

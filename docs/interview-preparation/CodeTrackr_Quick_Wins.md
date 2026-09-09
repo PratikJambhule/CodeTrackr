@@ -48,7 +48,7 @@ narrowing bugs. Now `npm run build` is green and CI keeps it that way."*
 
 ---
 
-## 2. Add a CI workflow 🟢
+## 2. Add a CI workflow 🟢 — ✅ DONE 2026-09-09
 
 **The gap:** no CI at all — no `.github/workflows`, no automated check on push.
 
