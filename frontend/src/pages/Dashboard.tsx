@@ -217,25 +217,10 @@ export default function Dashboard({ user }: { user: any }) {
     { label: 'Debug Sessions', value: terminalSummary.debuggingSessions || 0, icon: <Timer className="w-6 h-6" />, color: 'from-slate-500 to-zinc-500' },
   ];
 
-  const repeatedFailuresDaily = [
-    { command: 'git status', count: 6, time: '4 hours ago' },
-    { command: 'npm run dev', count: 4, time: '8 hours ago' },
-    { command: 'node app.js', count: 3, time: '3 hours ago' },
-    { command: 'npm test', count: 2, time: '1 hour ago' },
-    { command: 'npm run build', count: 5, time: '6 hours ago' },
-  ];
-
-  const repeatedFailuresWeekly = [
-    { command: 'git status', count: 29, time: '2 days ago' },
-    { command: 'npm run build', count: 15, time: '5 days ago' },
-    { command: 'node app.js', count: 11, time: '3 hours ago' },
-    { command: 'npm run dev', count: 9, time: '1 day ago' },
-    { command: 'npm test', count: 8, time: '8 hours ago' },
-  ];
-
-  const repeatedFailuresMock = viewMode === 'weekly'
-    ? repeatedFailuresWeekly
-    : repeatedFailuresDaily;
+  const repeatedFailures = (currentData?.terminalSummary?.repeatedFailedCommands ?? []) as Array<{
+    command: string;
+    count: number;
+  }>;
 
   const dailyData = {
     labels: currentData?.dailyActivity?.map((d: any) => d.day) || [],
@@ -1160,7 +1145,12 @@ export default function Dashboard({ user }: { user: any }) {
               </GradientText>
             </h3>
             <div className="space-y-3">
-              {repeatedFailuresMock.map((entry, idx) => (
+              {repeatedFailures.length === 0 && (
+                <div className="text-sm" style={{ color: theme.colors.textSecondary }}>
+                  No repeated command failures in this period.
+                </div>
+              )}
+              {repeatedFailures.map((entry, idx) => (
                 <div
                   key={`${entry.command}-${idx}`}
                   className="rounded-lg px-4 py-3 border"
@@ -1173,7 +1163,7 @@ export default function Dashboard({ user }: { user: any }) {
                     {entry.command}
                   </div>
                   <div className="text-xs" style={{ color: theme.colors.textSecondary }}>
-                    Failed {entry.count} times · {entry.time}
+                    Failed {entry.count} {entry.count === 1 ? 'time' : 'times'}
                   </div>
                 </div>
               ))}

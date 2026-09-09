@@ -217,7 +217,7 @@ silent security hole."*
 
 ---
 
-## 8. Show real data in the "Repeated Failures" panel 🟢
+## 8. Show real data in the "Repeated Failures" panel 🟢 — ✅ DONE 2026-09-09
 
 **The flaw:** `frontend/src/pages/Dashboard.tsx` renders `repeatedFailuresDaily` /
 `repeatedFailuresWeekly` — **hardcoded fake arrays** — instead of
