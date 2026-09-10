@@ -21,6 +21,13 @@ function check(name, fn) {
   catch (err) { console.log(`  FAIL  ${name}: ${err.message}`); failed++; }
 }
 
+/** Remove // and /* *\/ comments so a scan can't match prose about old code. */
+function stripComments(src) {
+  return src
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/(^|[^:])\/\/.*$/gm, '$1');
+}
+
 /** Every router.<verb>('path', ...) declaration in a file. */
 function routeDeclarations(src) {
   const out = [];
@@ -63,12 +70,35 @@ check('metrics route takes no user id from the request', () => {
 });
 
 console.log('\ngoals and teams');
+check('every goals route requires authentication', () => {
+  const unguarded = routeDeclarations(read('goals.js'))
+    .filter((r) => !/isAuthenticated/.test(r.rest))
+    .map((r) => `${r.method.toUpperCase()} ${r.routePath}`);
+  assert.deepStrictEqual(unguarded, [], `unguarded: ${unguarded.join(', ')}`);
+});
 check('goal progress scopes the lookup to the session user', () => {
   const src = read('goals.js');
   assert.ok(
     /Goal\.findOne\(\s*\{[^}]*userId/s.test(src),
     'goal progress must look up by { _id, userId }, not findById'
   );
+});
+check('every goals route that mutates a goal is owner-scoped', () => {
+  const src = read('goals.js');
+  // Each PATCH handler must resolve the goal through an owner-scoped findOne
+  // before writing; findById would let anyone complete anyone else's goal.
+  const patches = routeDeclarations(src).filter((r) => r.method === 'patch');
+  assert.ok(patches.length >= 2, 'expected the complete/reopen transitions to exist');
+  assert.ok(!/Goal\.findById\(/.test(src), 'goals.js must not use findById');
+});
+check('goal activity is matched within the goal lifetime, not all history', () => {
+  // Strip comments first: these files document the defects they fixed, and a
+  // naive scan would match the description of the old code.
+  const src = stripComments(read('goals.js'));
+  // Regression: `{ language: goal.techStack, timestamp: { $lte: deadline } }`
+  // had no lower bound, so a goal was scored against every hour ever logged.
+  assert.ok(/\$gte:\s*from/.test(src), 'goal activity query needs a lower time bound');
+  assert.ok(!/language:\s*goal\.techStack/.test(src), 'exact free-text language match removed');
 });
 check('single-team read checks membership', () => {
   const src = read('team.js');

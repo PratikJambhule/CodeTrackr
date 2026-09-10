@@ -1,31 +1,63 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Brain, Timer, Activity, Sunrise, Target, RefreshCw } from 'lucide-react';
+import { Brain, Timer, Activity, Sunrise, Target, RefreshCw, Flame, Repeat } from 'lucide-react';
 import { useTheme } from '../contexts/ThemeContext';
 import GradientText from '../components/GradientText';
 import { API_URL } from '../config';
 
+type Confidence = 'insufficient' | 'low' | 'high';
+
+interface MetricMeta {
+  confidence: Confidence;
+  sampleSize: number;
+  unit: string;
+}
+
 interface Metrics {
   windowDays: number;
   deepWorkRatio: number;
-  flowBlocks: { medianMs: number; longestMs: number; deepBlockCount: number; blockCount: number };
+  flowBlocks: {
+    medianMs: number;
+    longestMs: number;
+    deepBlockCount: number;
+    blockCount: number;
+    totalMs: number;
+  };
+  /** Back-compat alias of volumeStability. */
   consistencyIndex: number;
-  truePeakWindow: { hour: number; score: number } | null;
-  estimationCalibration: { factor: number; sampleSize: number } | null;
+  volumeStability: number;
+  activeDaysRatio: number;
+  activeDays: number;
+  qualityStreak: number;
+  truePeakWindow: {
+    startHour: number;
+    endHour: number;
+    score: number;
+    minutes: number;
+    days: number;
+  } | null;
+  estimationCalibration: {
+    factor: number;
+    minFactor: number;
+    maxFactor: number;
+    sampleSize: number;
+  } | null;
   churnRatio: number;
   comprehensionLoad: number;
   contextSwitchesPerHour: number;
+  interruptionsPerHour: number;
   commits: number;
   totalHours: number;
+  focusedHours: number;
+  meta: Record<string, MetricMeta>;
 }
 
 const minutes = (ms: number) => Math.round(ms / 60000);
+const pct = (ratio: number) => `${Math.round(ratio * 100)}%`;
+const fmtHour = (h: number) => `${String(((h % 24) + 24) % 24).padStart(2, '0')}:00`;
 
-const hourLabel = (hour: number) => {
-  const start = ((hour % 24) + 24) % 24;
-  const end = (start + 1) % 24;
-  const fmt = (h: number) => `${String(h).padStart(2, '0')}:00`;
-  return `${fmt(start)}–${fmt(end)}`;
-};
+/** Human explanation of why a metric is being withheld. */
+const needMoreData = (meta?: MetricMeta) =>
+  meta ? `Needs more data — ${meta.sampleSize} of ${meta.unit} so far.` : 'Not enough data yet.';
 
 export default function Insights() {
   const { theme } = useTheme();
@@ -100,9 +132,73 @@ export default function Insights() {
     );
   }
 
-  // Focus data only exists from extension 2.1.0 onward. Showing a confident
-  // 0% to someone who simply has not upgraded would be misleading.
-  const hasFocusData = metrics.flowBlocks.blockCount > 0;
+  const meta = metrics.meta || {};
+  const ok = (key: string) => meta[key]?.confidence !== 'insufficient';
+  const isLow = (key: string) => meta[key]?.confidence === 'low';
+
+  /** A headline card. Renders "—" + a reason rather than a misleading number. */
+  const Stat = ({
+    icon,
+    title,
+    metricKey,
+    value,
+    explain,
+    wide = false,
+  }: {
+    icon: React.ReactNode;
+    title: string;
+    metricKey: string;
+    value: string;
+    explain: string;
+    wide?: boolean;
+  }) => (
+    <div className={`p-5 rounded-xl ${wide ? 'md:col-span-2' : ''}`} style={card}>
+      <div className="flex items-center gap-2 mb-1" style={{ color: theme.colors.primary }}>
+        {icon}
+        <h2 className="font-semibold">{title}</h2>
+        {isLow(metricKey) && (
+          <span
+            className="text-xs px-2 py-0.5 rounded-full"
+            style={{
+              color: theme.colors.textSecondary,
+              border: `1px solid ${theme.colors.textSecondary}55`,
+            }}
+            title={`Based on only ${meta[metricKey]?.sampleSize} ${meta[metricKey]?.unit}.`}
+          >
+            early
+          </span>
+        )}
+      </div>
+      <p className="text-4xl font-bold" style={{ color: theme.colors.text }}>
+        {ok(metricKey) ? value : '—'}
+      </p>
+      <p className="text-sm mt-2" style={{ color: theme.colors.textSecondary }}>
+        {ok(metricKey) ? explain : needMoreData(meta[metricKey])}
+      </p>
+    </div>
+  );
+
+  const peak = metrics.truePeakWindow;
+  const cal = metrics.estimationCalibration;
+
+  const secondary = [
+    { label: 'Commits', key: null as string | null, value: String(metrics.commits) },
+    { label: 'Rework ratio', key: 'churnRatio', value: pct(metrics.churnRatio) },
+    { label: 'Time reading', key: 'comprehensionLoad', value: pct(metrics.comprehensionLoad) },
+    {
+      label: 'File switches / hr',
+      key: 'contextSwitchesPerHour',
+      value: String(metrics.contextSwitchesPerHour),
+    },
+    {
+      label: 'Interruptions / hr',
+      key: 'contextSwitchesPerHour',
+      value: String(metrics.interruptionsPerHour),
+    },
+    { label: 'Active days', key: null, value: `${metrics.activeDays} of ${metrics.windowDays}` },
+    { label: 'Focused hours', key: null, value: String(metrics.focusedHours) },
+    { label: 'Deep blocks', key: 'flowBlocks', value: String(metrics.flowBlocks.deepBlockCount) },
+  ];
 
   return (
     <div
@@ -146,127 +242,122 @@ export default function Insights() {
         </div>
 
         <p className="mb-6 text-sm" style={{ color: theme.colors.textSecondary }}>
-          Based on {metrics.totalHours} hours tracked over the last {metrics.windowDays} days.
+          Based on {metrics.totalHours} hours tracked across {metrics.activeDays} active{' '}
+          {metrics.activeDays === 1 ? 'day' : 'days'} in the last {metrics.windowDays} days.
+          Anything marked <strong>—</strong> does not have enough data behind it yet.
         </p>
 
-        {!hasFocusData && (
-          <div
-            className="mb-6 p-4 rounded-xl"
-            style={{ ...card, border: `1px solid ${theme.colors.primary}66` }}
-          >
-            <p style={{ color: theme.colors.text }}>
-              Focus and flow metrics need CodeTrackr <strong>2.1.0 or newer</strong>. Update the
-              extension and they will start filling in — the other insights below work already.
-            </p>
-          </div>
-        )}
-
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {/* 1. Deep work ratio */}
-          <div className="p-5 rounded-xl" style={card}>
-            <div className="flex items-center gap-2 mb-1" style={{ color: theme.colors.primary }}>
-              <Brain className="w-5 h-5" />
-              <h2 className="font-semibold">Deep work</h2>
-            </div>
-            <p className="text-4xl font-bold" style={{ color: theme.colors.text }}>
-              {hasFocusData ? `${Math.round(metrics.deepWorkRatio * 100)}%` : '—'}
-            </p>
-            <p className="text-sm mt-2" style={{ color: theme.colors.textSecondary }}>
-              {hasFocusData
-                ? 'Share of your focused time spent in unbroken stretches of 25 minutes or more.'
-                : 'Waiting for data from extension 2.1.0.'}
-            </p>
-          </div>
+          <Stat
+            icon={<Brain className="w-5 h-5" />}
+            title="Deep work"
+            metricKey="deepWorkRatio"
+            value={pct(metrics.deepWorkRatio)}
+            explain="Share of the time you were actually working that fell in unbroken stretches of 25 minutes or more."
+          />
 
-          {/* 2. Flow blocks */}
-          <div className="p-5 rounded-xl" style={card}>
-            <div className="flex items-center gap-2 mb-1" style={{ color: theme.colors.primary }}>
-              <Timer className="w-5 h-5" />
-              <h2 className="font-semibold">Flow blocks</h2>
-            </div>
-            <p className="text-4xl font-bold" style={{ color: theme.colors.text }}>
-              {hasFocusData ? `${minutes(metrics.flowBlocks.longestMs)} min` : '—'}
-            </p>
-            <p className="text-sm mt-2" style={{ color: theme.colors.textSecondary }}>
-              {hasFocusData
-                ? `Longest unbroken stretch. Typical block ${minutes(
-                    metrics.flowBlocks.medianMs
-                  )} min across ${metrics.flowBlocks.blockCount} sessions.`
-                : 'Waiting for data from extension 2.1.0.'}
-            </p>
-          </div>
+          <Stat
+            icon={<Timer className="w-5 h-5" />}
+            title="Flow blocks"
+            metricKey="flowBlocks"
+            value={`${minutes(metrics.flowBlocks.longestMs)} min`}
+            explain={`Longest unbroken stretch. Typical block ${minutes(
+              metrics.flowBlocks.medianMs
+            )} min across ${metrics.flowBlocks.blockCount} blocks.`}
+          />
 
-          {/* 3. Consistency */}
-          <div className="p-5 rounded-xl" style={card}>
-            <div className="flex items-center gap-2 mb-1" style={{ color: theme.colors.primary }}>
-              <Activity className="w-5 h-5" />
-              <h2 className="font-semibold">Consistency</h2>
-            </div>
-            <p className="text-4xl font-bold" style={{ color: theme.colors.text }}>
-              {Math.round(metrics.consistencyIndex * 100)}%
-            </p>
-            <p className="text-sm mt-2" style={{ color: theme.colors.textSecondary }}>
-              {metrics.consistencyIndex >= 0.6
-                ? 'You code at a steady daily rhythm.'
-                : 'Your daily coding time swings a lot. Steady beats heroic.'}
-            </p>
-          </div>
+          <Stat
+            icon={<Activity className="w-5 h-5" />}
+            title="Steady volume"
+            metricKey="volumeStability"
+            value={pct(metrics.volumeStability)}
+            explain={
+              metrics.volumeStability >= 0.6
+                ? 'On the days you code, you put in a similar amount of time.'
+                : 'Your daily volume swings a lot between the days you code.'
+            }
+          />
 
-          {/* 4. True peak hours */}
-          <div className="p-5 rounded-xl" style={card}>
-            <div className="flex items-center gap-2 mb-1" style={{ color: theme.colors.primary }}>
-              <Sunrise className="w-5 h-5" />
-              <h2 className="font-semibold">Peak hour</h2>
-            </div>
-            <p className="text-4xl font-bold" style={{ color: theme.colors.text }}>
-              {metrics.truePeakWindow ? hourLabel(metrics.truePeakWindow.hour) : '—'}
-            </p>
-            <p className="text-sm mt-2" style={{ color: theme.colors.textSecondary }}>
-              {metrics.truePeakWindow
-                ? 'Your most productive hour, scored on commits and low rework — not simply the hour you are busiest.'
-                : 'Not enough data yet.'}
-            </p>
-          </div>
+          <Stat
+            icon={<Flame className="w-5 h-5" />}
+            title="Coding cadence"
+            metricKey="activeDaysRatio"
+            value={pct(metrics.activeDaysRatio)}
+            explain={`You coded on ${metrics.activeDays} of the last ${metrics.windowDays} days.${
+              metrics.qualityStreak > 0
+                ? ` Current streak with a deep block: ${metrics.qualityStreak} ${
+                    metrics.qualityStreak === 1 ? 'day' : 'days'
+                  }.`
+                : ''
+            }`}
+          />
 
-          {/* 5. Estimation accuracy */}
+          <Stat
+            icon={<Sunrise className="w-5 h-5" />}
+            title="Peak window"
+            metricKey="truePeakWindow"
+            value={peak ? `${fmtHour(peak.startHour)}–${fmtHour(peak.endHour)}` : '—'}
+            explain={
+              peak
+                ? `Your most productive two hours, scored on how much of what you wrote survived rather than on how busy you were. Seen on ${peak.days} separate days.`
+                : ''
+            }
+          />
+
+          <Stat
+            icon={<Repeat className="w-5 h-5" />}
+            title="Rework"
+            metricKey="churnRatio"
+            value={pct(metrics.churnRatio)}
+            explain="Share of the lines you wrote that you deleted again within ten minutes. Some rework is normal; a sustained high figure usually points at a design problem."
+          />
+
           <div className="p-5 rounded-xl md:col-span-2" style={card}>
             <div className="flex items-center gap-2 mb-1" style={{ color: theme.colors.primary }}>
               <Target className="w-5 h-5" />
               <h2 className="font-semibold">Estimation accuracy</h2>
+              {isLow('estimationCalibration') && (
+                <span
+                  className="text-xs px-2 py-0.5 rounded-full"
+                  style={{
+                    color: theme.colors.textSecondary,
+                    border: `1px solid ${theme.colors.textSecondary}55`,
+                  }}
+                >
+                  early
+                </span>
+              )}
             </div>
-            {metrics.estimationCalibration ? (
+            {cal ? (
               <>
                 <p className="text-4xl font-bold" style={{ color: theme.colors.text }}>
-                  {metrics.estimationCalibration.factor}×
+                  {cal.factor}×
                 </p>
                 <p className="text-sm mt-2" style={{ color: theme.colors.textSecondary }}>
-                  {metrics.estimationCalibration.factor > 1.1
-                    ? `You take about ${metrics.estimationCalibration.factor}× longer than you estimate.`
-                    : metrics.estimationCalibration.factor < 0.9
+                  {cal.factor > 1.1
+                    ? `You take about ${cal.factor}× longer than you estimate.`
+                    : cal.factor < 0.9
                     ? 'You finish goals faster than you estimate.'
                     : 'Your estimates are close to reality.'}{' '}
-                  Based on {metrics.estimationCalibration.sampleSize} completed goals.
+                  {cal.sampleSize > 1
+                    ? `Median across ${cal.sampleSize} completed goals, ranging ${cal.minFactor}×–${cal.maxFactor}×.`
+                    : 'Based on one completed goal, so treat it as a first data point.'}
                 </p>
               </>
             ) : (
               <p className="text-sm mt-2" style={{ color: theme.colors.textSecondary }}>
-                Complete at least two goals with a tech stack set, and this will compare your
-                estimates against the hours you actually logged.
+                Set a tech stack on a goal, then mark it complete from the Goals page. This will
+                compare your estimate against the hours actually logged for it while it was open.
               </p>
             )}
           </div>
         </div>
 
         <div className="mt-6 grid grid-cols-2 md:grid-cols-4 gap-4">
-          {[
-            { label: 'Commits', value: metrics.commits },
-            { label: 'Rework ratio', value: hasFocusData ? `${Math.round(metrics.churnRatio * 100)}%` : '—' },
-            { label: 'Time reading', value: hasFocusData ? `${Math.round(metrics.comprehensionLoad * 100)}%` : '—' },
-            { label: 'File switches / hr', value: hasFocusData ? metrics.contextSwitchesPerHour : '—' },
-          ].map((item) => (
+          {secondary.map((item) => (
             <div key={item.label} className="p-4 rounded-xl" style={card}>
               <p className="text-2xl font-bold" style={{ color: theme.colors.text }}>
-                {item.value}
+                {item.key && !ok(item.key) ? '—' : item.value}
               </p>
               <p className="text-xs mt-1" style={{ color: theme.colors.textSecondary }}>
                 {item.label}
@@ -276,7 +367,8 @@ export default function Insights() {
         </div>
 
         <p className="mt-6 text-xs" style={{ color: theme.colors.textSecondary }}>
-          These figures are private to you and are never shown on the leaderboard.
+          These figures are private to you and are never shown on the leaderboard. Times are shown
+          in your local timezone.
         </p>
       </div>
     </div>

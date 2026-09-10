@@ -18,6 +18,8 @@ interface Goal {
   targetHours: number;
   techStack: string;
   deadline: string;
+  status?: 'in-progress' | 'completed';
+  completedAt?: string | null;
   todos?: Todo[];
 }
 
@@ -50,6 +52,31 @@ export default function Goals() {
       }
     } catch (error) {
       console.error('Failed to fetch goals:', error);
+    }
+  };
+
+  /**
+   * Toggle a goal between in-progress and completed.
+   *
+   * This is the state transition the app was missing entirely: nothing outside
+   * the demo seed script ever set `status: 'completed'`, so the Insights
+   * "estimation accuracy" metric could never have any input.
+   */
+  const toggleGoalCompletion = async (goal: Goal) => {
+    const action = goal.status === 'completed' ? 'reopen' : 'complete';
+    try {
+      const res = await fetch(`${API_URL}/api/goals/${goal._id}/${action}`, {
+        method: 'PATCH',
+        credentials: 'include',
+      });
+      if (!res.ok) {
+        alert('Could not update the goal. Please try again.');
+        return;
+      }
+      fetchGoals();
+    } catch (error) {
+      console.error('Failed to update goal:', error);
+      alert('Could not reach the server.');
     }
   };
 
@@ -377,6 +404,28 @@ export default function Goals() {
                         {new Date(goal.deadline).toLocaleDateString()}
                       </span>
                     </div>
+                    {/* Completing a goal is what feeds the Insights estimation
+                        accuracy metric — before this button existed nothing in
+                        the app could ever set status to 'completed'. */}
+                    <button
+                      type="button"
+                      onClick={() => toggleGoalCompletion(goal)}
+                      className="cursor-target mt-3 w-full px-3 py-1.5 rounded-lg text-xs font-medium transition-colors"
+                      style={
+                        goal.status === 'completed'
+                          ? {
+                              backgroundColor: `${theme.colors.primary}22`,
+                              color: theme.colors.primary,
+                              border: `1px solid ${theme.colors.primary}55`,
+                            }
+                          : {
+                              color: theme.colors.textSecondary,
+                              border: `1px solid ${theme.colors.border}`,
+                            }
+                      }
+                    >
+                      {goal.status === 'completed' ? '✓ Completed — reopen' : 'Mark complete'}
+                    </button>
                   </div>
                 ))
               )}

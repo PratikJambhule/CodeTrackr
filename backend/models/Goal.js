@@ -33,6 +33,13 @@ const goalSchema = new mongoose.Schema({
         enum: ['in-progress', 'completed'],
         default: 'in-progress'
     },
+    // Set by PATCH /:goalId/complete. Bounds the activity window used for
+    // estimation calibration; without it the metric compared a goal's estimate
+    // against every hour ever logged in that stack.
+    completedAt: {
+        type: Date,
+        default: null
+    },
     reminderSent: {
         type: Boolean,
         default: false

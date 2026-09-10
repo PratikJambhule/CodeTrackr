@@ -35,22 +35,7 @@ async function dropDuplicateIndex() {
             } else {
                 throw err;
             }
-        }
-
-        // List indexes after dropping
-        console.log('\n📋 Indexes after dropping:');
-        const indexesAfter = await collection.indexes();
-        indexesAfter.forEach(index => {
-            console.log(`  - ${index.name}:`, JSON.stringify(index.key));
-        });
-
-        console.log('\n✅ Migration complete!');
-        
-    } catch (error) {
-        console.error('❌ Error:', error);
-    } finally {
-        await mongoose.disconnect();
-        console.log('👋 Disconnected from MongoDB');
+            
         process.exit(0);
     }
 }
