@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Brain, Timer, Activity, Sunrise, Target, RefreshCw, Flame, Repeat } from 'lucide-react';
+import { Brain, Timer, Activity, Sunrise, Target, RefreshCw, Flame, Repeat, Layers } from 'lucide-react';
 import { useTheme } from '../contexts/ThemeContext';
 import GradientText from '../components/GradientText';
 import { API_URL } from '../config';
@@ -10,7 +10,34 @@ interface MetricMeta {
   confidence: Confidence;
   sampleSize: number;
   unit: string;
+  /** The user's own 90-day value, when the baseline window supports it. */
+  baseline?: number;
+  /** Signed fractional change from that baseline (0.2 = +20%). */
+  delta?: number | null;
 }
+
+interface SessionSummary {
+  startMs: number;
+  endMs: number;
+  minutes: number;
+  archetype: string;
+  reason: string;
+  projects: string[];
+  languages: string[];
+  deepBlockCount: number;
+  commits: number;
+}
+
+type ArchetypeMix = Record<string, { sessions: number; minutes: number }>;
+
+const ARCHETYPE_LABELS: Record<string, string> = {
+  'deep-build': 'Deep build',
+  'debug-grind': 'Debug grind',
+  exploration: 'Exploration',
+  'admin-config': 'Admin / config',
+  mixed: 'Mixed',
+  unclassified: 'Too short to classify',
+};
 
 interface Metrics {
   windowDays: number;
@@ -49,6 +76,11 @@ interface Metrics {
   totalHours: number;
   focusedHours: number;
   meta: Record<string, MetricMeta>;
+  sessionCount: number;
+  sessionWindowDays: number;
+  archetypeMix: ArchetypeMix;
+  recentSessions: SessionSummary[];
+  baselineDays?: number;
 }
 
 const minutes = (ms: number) => Math.round(ms / 60000);
@@ -169,14 +201,33 @@ export default function Insights() {
           </span>
         )}
       </div>
-      <p className="text-4xl font-bold" style={{ color: theme.colors.text }}>
-        {ok(metricKey) ? value : '—'}
-      </p>
+      <div className="flex items-baseline gap-2 flex-wrap">
+        <p className="text-4xl font-bold" style={{ color: theme.colors.text }}>
+          {ok(metricKey) ? value : '—'}
+        </p>
+        {ok(metricKey) && <Trend metricKey={metricKey} />}
+      </div>
       <p className="text-sm mt-2" style={{ color: theme.colors.textSecondary }}>
         {ok(metricKey) ? explain : needMoreData(meta[metricKey])}
       </p>
     </div>
   );
+
+  /** Change against the user's own 90-day baseline, when one exists. */
+  const Trend = ({ metricKey }: { metricKey: string }) => {
+    const d = meta[metricKey]?.delta;
+    if (typeof d !== 'number' || Math.abs(d) < 0.05) return null;
+    const up = d > 0;
+    return (
+      <span
+        className="text-sm font-medium"
+        style={{ color: theme.colors.textSecondary }}
+        title={`Your ${metrics.baselineDays ?? 90}-day average is ${meta[metricKey]?.baseline}.`}
+      >
+        {up ? '▲' : '▼'} {Math.abs(Math.round(d * 100))}% vs your usual
+      </span>
+    );
+  };
 
   const peak = metrics.truePeakWindow;
   const cal = metrics.estimationCalibration;
@@ -365,6 +416,67 @@ export default function Insights() {
             </div>
           ))}
         </div>
+
+        {metrics.sessionCount > 0 && (
+          <div className="mt-6 p-5 rounded-xl" style={card}>
+            <div className="flex items-center gap-2 mb-3" style={{ color: theme.colors.primary }}>
+              <Layers className="w-5 h-5" />
+              <h2 className="font-semibold">
+                How you worked — {metrics.sessionCount}{' '}
+                {metrics.sessionCount === 1 ? 'session' : 'sessions'} over the last{' '}
+                {metrics.sessionWindowDays} days
+              </h2>
+            </div>
+
+            <div className="flex flex-wrap gap-2 mb-4">
+              {Object.entries(metrics.archetypeMix)
+                .filter(([, v]) => v.sessions > 0)
+                .sort((a, b) => b[1].minutes - a[1].minutes)
+                .map(([name, v]) => (
+                  <span
+                    key={name}
+                    className="px-3 py-1 rounded-full text-xs"
+                    style={{
+                      backgroundColor: `${theme.colors.primary}18`,
+                      color: theme.colors.text,
+                      border: `1px solid ${theme.colors.primary}44`,
+                    }}
+                  >
+                    {ARCHETYPE_LABELS[name] ?? name}: {v.sessions} ({v.minutes} min)
+                  </span>
+                ))}
+            </div>
+
+            <div className="space-y-2">
+              {metrics.recentSessions.slice(0, 6).map((s) => (
+                <div
+                  key={s.startMs}
+                  className="flex flex-wrap items-baseline justify-between gap-2 px-3 py-2 rounded-lg"
+                  style={{ backgroundColor: `${theme.colors.surface}80` }}
+                >
+                  <span className="text-sm" style={{ color: theme.colors.text }}>
+                    {new Date(s.startMs).toLocaleString([], {
+                      month: 'short',
+                      day: 'numeric',
+                      hour: '2-digit',
+                      minute: '2-digit',
+                    })}{' '}
+                    · {s.minutes} min · <strong>{ARCHETYPE_LABELS[s.archetype] ?? s.archetype}</strong>
+                  </span>
+                  <span className="text-xs" style={{ color: theme.colors.textSecondary }}>
+                    {s.reason}
+                  </span>
+                </div>
+              ))}
+            </div>
+
+            <p className="text-xs mt-3" style={{ color: theme.colors.textSecondary }}>
+              Sessions are grouped from your activity with a 30-minute break between them.
+              Because activity is recorded in 10-minute blocks, start and end times are accurate
+              to about ±10 minutes.
+            </p>
+          </div>
+        )}
 
         <p className="mt-6 text-xs" style={{ color: theme.colors.textSecondary }}>
           These figures are private to you and are never shown on the leaderboard. Times are shown

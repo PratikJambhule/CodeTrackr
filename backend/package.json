@@ -5,7 +5,7 @@
   "scripts": {
     "start": "node app.js",
     "dev": "nodemon app.js",
-    "test": "node tests/streak.test.js && node tests/ingest.test.js && node tests/metrics.test.js && node tests/authorization.test.js && node tests/routeGuards.test.js && node tests/passwordHash.test.js && node tests/activityBucket.test.js && node tests/activityModel.test.js && node tests/ingestWiring.test.js && node tests/rollup.test.js && node tests/quickWins.test.js && node tests/ingestValidation.test.js && node tests/metricsService.test.js"
+    "test": "node tests/streak.test.js && node tests/ingest.test.js && node tests/metrics.test.js && node tests/authorization.test.js && node tests/routeGuards.test.js && node tests/passwordHash.test.js && node tests/activityBucket.test.js && node tests/activityModel.test.js && node tests/ingestWiring.test.js && node tests/rollup.test.js && node tests/quickWins.test.js && node tests/ingestValidation.test.js && node tests/metricsService.test.js && node tests/sessionize.test.js && node tests/insightsBaseline.test.js"
   },
   "dependencies": {
     "axios": "^1.13.2",

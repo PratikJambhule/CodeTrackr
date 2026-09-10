@@ -26,13 +26,47 @@ const {
     estimationCalibration,
     DEEP_BLOCK_MS,
 } = require('./metricsDerive');
+const { sessionize, archetypeMix } = require('./sessionize');
+const { getBaseline, deltaFrom } = require('./insightsBaseline');
+
+/**
+ * Sessionization needs raw buckets (a daily summary has no within-day
+ * structure), so it is capped independently of the metrics window: 30 days of
+ * one user's buckets is a few hundred documents, but 365 would not be.
+ */
+const MAX_SESSION_DAYS = 30;
+
+/** Only the fields sessionize() reads — keeps the payload small. */
+const SESSION_PROJECTION = {
+    bucketStart: 1, timestamp: 1, duration: 1, projectName: 1, language: 1,
+    'editorAnalytics.linesInserted': 1, 'editorAnalytics.linesDeleted': 1,
+    'editorAnalytics.churnLines': 1, 'editorAnalytics.readMs': 1,
+    'editorAnalytics.writeMs': 1, 'editorAnalytics.fileSwitches': 1,
+    'editorAnalytics.undoCount': 1,
+    'focusAnalytics.focusedMs': 1, 'focusAnalytics.blurEvents': 1,
+    'focusAnalytics.flowBlocksMs': 1,
+    'gitAnalytics.commits': 1, 'gitAnalytics.filesChanged': 1,
+    'terminalAnalytics.totalCommands': 1, 'terminalAnalytics.failedCommands': 1,
+    'terminalAnalytics.terminalErrorCount': 1, 'terminalAnalytics.buildRuns': 1,
+    'terminalAnalytics.failedBuilds': 1, 'terminalAnalytics.testRuns': 1,
+    'terminalAnalytics.debuggingSessions': 1,
+};
 
 /** 'YYYY-MM-DD' for an instant shifted into the user's local day. */
 function localDayKey(date, offsetMs) {
     return new Date(date.getTime() - offsetMs).toISOString().slice(0, 10);
 }
 
-async function buildMetrics(userId, { days = 30, timezoneOffset = 0 } = {}) {
+/**
+ * @param withBaseline  set false when this call IS the baseline computation,
+ *                      otherwise getBaseline -> buildMetrics -> getBaseline
+ *                      recurses forever.
+ * @param withSessions  set false to skip the raw-document read entirely.
+ */
+async function buildMetrics(
+    userId,
+    { days = 30, timezoneOffset = 0, withBaseline = true, withSessions = true } = {}
+) {
     const userIdStr = String(userId);
     const now = Date.now();
     const since = new Date(now - days * 24 * 3600 * 1000);
@@ -178,6 +212,11 @@ async function buildMetrics(userId, { days = 30, timezoneOffset = 0 } = {}) {
             sampleSize: round2(focusedHours),
             unit: 'focused hours',
         },
+        interruptionsPerHour: {
+            confidence: confidenceFor(focusedHours, THRESHOLDS.contextSwitchesPerHour),
+            sampleSize: round2(focusedHours),
+            unit: 'focused hours',
+        },
         estimationCalibration: {
             confidence: calibration
                 ? confidenceFor(calibration.sampleSize, THRESHOLDS.estimationCalibration)
@@ -187,8 +226,36 @@ async function buildMetrics(userId, { days = 30, timezoneOffset = 0 } = {}) {
         },
     };
 
-    return {
+    // Sessions come from raw buckets: a daily summary loses the within-day
+    // structure that gap-splitting depends on.
+    let sessions = [];
+    if (withSessions) {
+        const sessionDays = Math.min(days, MAX_SESSION_DAYS);
+        const sessionSince = new Date(now - sessionDays * 24 * 3600 * 1000);
+        const docs = await Activity
+            .find({ userId: userIdStr, timestamp: { $gte: sessionSince } }, SESSION_PROJECTION)
+            .sort({ timestamp: 1 })
+            .lean();
+        sessions = sessionize(docs);
+    }
+
+    const result = {
         windowDays: days,
+        sessionWindowDays: withSessions ? Math.min(days, MAX_SESSION_DAYS) : 0,
+        sessionCount: sessions.length,
+        archetypeMix: archetypeMix(sessions),
+        // Newest first, and trimmed: the page shows a short recent list.
+        recentSessions: sessions.slice(-20).reverse().map((s) => ({
+            startMs: s.startMs,
+            endMs: s.endMs,
+            minutes: Math.round(s.durationSec / 60),
+            archetype: s.archetype,
+            reason: s.archetypeReason,
+            projects: s.projects,
+            languages: s.languages,
+            deepBlockCount: s.deepBlockCount,
+            commits: s.commits,
+        })),
         // --- flat scalars: unchanged API surface ---
         deepWorkRatio: deepWorkRatio(flowBlocksMs),
         flowBlocks: blockStats,
@@ -216,6 +283,27 @@ async function buildMetrics(userId, { days = 30, timezoneOffset = 0 } = {}) {
         // --- confidence sidecar ---
         meta,
     };
+
+    // Attach the user's own 90-day baseline and the change from it. Failures
+    // here are non-fatal: a missing comparison is fine, a broken page is not.
+    if (withBaseline) {
+        const cached = await getBaseline(
+            userIdStr,
+            { timezoneOffset },
+            (id, opts) => buildMetrics(id, { ...opts, withBaseline: false, withSessions: false })
+        );
+        if (cached) {
+            result.baselineDays = cached.days;
+            result.baselineComputedAt = cached.computedAt;
+            for (const [key, value] of Object.entries(cached.baseline || {})) {
+                if (!result.meta[key]) continue;
+                result.meta[key].baseline = value;
+                result.meta[key].delta = deltaFrom(result[key], value);
+            }
+        }
+    }
+
+    return result;
 }
 
 /**

@@ -12,6 +12,7 @@
 const assert = require('assert');
 const Activity = require('../models/Activity');
 const Goal = require('../models/Goal');
+const UserInsights = require('../models/UserInsights');
 const { buildMetrics } = require('../services/metricsService');
 
 let passed = 0, failed = 0;
@@ -22,7 +23,10 @@ async function check(name, fn) {
 
 const MIN = 60000;
 const realAggregate = Activity.aggregate.bind(Activity);
+const realActivityFind = Activity.find.bind(Activity);
 const realGoalFind = Goal.find.bind(Goal);
+const realInsightsFind = UserInsights.findOne.bind(UserInsights);
+const realInsightsUpdate = UserInsights.updateOne.bind(UserInsights);
 
 /** Classify a pipeline the way buildMetrics builds them. */
 function kindOf(pipeline) {
@@ -34,7 +38,12 @@ function kindOf(pipeline) {
   return 'unknown';
 }
 
-function installStub({ totals, daily, hourly, goals = [], goalHours = 0 }) {
+let lastBaselineWrite = null;
+
+function installStub({
+  totals, daily, hourly, goals = [], goalHours = 0,
+  sessionDocs = [], cachedInsights = null,
+}) {
   Activity.aggregate = async (pipeline) => {
     switch (kindOf(pipeline)) {
       case 'totals': return totals ? [totals] : [];
@@ -44,11 +53,23 @@ function installStub({ totals, daily, hourly, goals = [], goalHours = 0 }) {
       default: return [];
     }
   };
+  // Chainable find(...).sort(...).lean() used for sessionization.
+  Activity.find = () => ({ sort: () => ({ lean: async () => sessionDocs }) });
   Goal.find = () => ({ lean: async () => goals });
+
+  lastBaselineWrite = null;
+  UserInsights.findOne = () => ({ lean: async () => cachedInsights });
+  UserInsights.updateOne = async (_filter, update) => {
+    lastBaselineWrite = update?.$set || null;
+    return { acknowledged: true };
+  };
 }
 function restore() {
   Activity.aggregate = realAggregate;
+  Activity.find = realActivityFind;
   Goal.find = realGoalFind;
+  UserInsights.findOne = realInsightsFind;
+  UserInsights.updateOne = realInsightsUpdate;
 }
 
 // A realistic-ish 30-day window: steady weekday work, some deep blocks.
@@ -238,6 +259,129 @@ const richHourly = [
     return buildMetrics('u6', { days: 30, timezoneOffset: 0 }).then((r) => {
       assert.strictEqual(r.estimationCalibration, null);
     });
+  });
+
+  console.log('\nbuildMetrics — sessions and archetypes');
+  const S0 = Date.UTC(2026, 8, 10, 9, 0, 0);
+  const bucket = (min, over = {}) => ({
+    bucketStart: new Date(S0 + min * 60000),
+    timestamp: new Date(S0 + min * 60000),
+    duration: 600,
+    projectName: 'app',
+    language: 'typescript',
+    editorAnalytics: { linesInserted: 0, churnLines: 0, readMs: 0, writeMs: 0, fileSwitches: 0, ...over.editor },
+    focusAnalytics: { focusedMs: 0, blurEvents: 0, flowBlocksMs: [], ...over.focus },
+    gitAnalytics: { commits: 0, filesChanged: 0 },
+    terminalAnalytics: { totalCommands: 0, buildRuns: 0, failedBuilds: 0, debuggingSessions: 0, ...over.terminal },
+  });
+
+  installStub({
+    totals: richTotals, daily: richDaily, hourly: richHourly,
+    sessionDocs: [
+      bucket(0, { editor: { linesInserted: 120, churnLines: 6, writeMs: 500000, readMs: 100000 }, focus: { flowBlocksMs: [35 * MIN] } }),
+      bucket(10, { editor: { linesInserted: 90, churnLines: 4, writeMs: 500000, readMs: 100000 } }),
+      // long break, then a debugging stretch
+      bucket(240, { editor: { linesInserted: 5, churnLines: 3, writeMs: 200000, readMs: 400000 }, terminal: { totalCommands: 9, buildRuns: 4, failedBuilds: 4, debuggingSessions: 1 } }),
+      bucket(250, { editor: { linesInserted: 3, churnLines: 2, writeMs: 200000, readMs: 400000 }, terminal: { totalCommands: 6, buildRuns: 3, failedBuilds: 2 } }),
+    ],
+  });
+  const withSessions = await buildMetrics('u7', { days: 30, timezoneOffset: 0 });
+
+  await check('splits the raw buckets into sessions', () => {
+    assert.strictEqual(withSessions.sessionCount, 2);
+  });
+  await check('labels each session with an archetype and a reason', () => {
+    const kinds = withSessions.recentSessions.map((s) => s.archetype);
+    assert.ok(kinds.includes('deep-build'), `got ${kinds.join(', ')}`);
+    assert.ok(kinds.includes('debug-grind'), `got ${kinds.join(', ')}`);
+    assert.ok(withSessions.recentSessions.every((s) => typeof s.reason === 'string' && s.reason));
+  });
+  await check('reports the archetype mix in sessions and minutes', () => {
+    assert.strictEqual(withSessions.archetypeMix['deep-build'].sessions, 1);
+    assert.strictEqual(withSessions.archetypeMix['debug-grind'].sessions, 1);
+    assert.strictEqual(withSessions.archetypeMix['deep-build'].minutes, 20);
+  });
+  await check('recentSessions is newest-first and capped', () => {
+    assert.ok(withSessions.recentSessions.length <= 20);
+    assert.ok(withSessions.recentSessions[0].startMs >= withSessions.recentSessions[1].startMs);
+  });
+  await check('the session window is capped independently of the metrics window', () => {
+    assert.strictEqual(withSessions.sessionWindowDays, 30);
+  });
+  await check('a 365-day metrics window still caps sessionization at 30 days', async () => {
+    const wide = await buildMetrics('u7', { days: 365, timezoneOffset: 0 });
+    assert.strictEqual(wide.sessionWindowDays, 30);
+  });
+
+  console.log('\nbuildMetrics — 90-day baseline (lazily cached)');
+
+  await check('a fresh cached baseline is used without recomputing', async () => {
+    installStub({
+      totals: richTotals, daily: richDaily, hourly: richHourly,
+      cachedInsights: {
+        userId: 'u8',
+        baseline: { deepWorkRatio: 0.5, churnRatio: 0.2 },
+        baselineDays: 90,
+        activeDays: 60,
+        computedAt: new Date(),           // fresh
+      },
+    });
+    const r = await buildMetrics('u8', { days: 30, timezoneOffset: 0 });
+    assert.strictEqual(r.meta.deepWorkRatio.baseline, 0.5);
+    assert.strictEqual(lastBaselineWrite, null, 'must not rewrite a fresh cache');
+  });
+
+  await check('delta is the signed fractional change from the baseline', async () => {
+    installStub({
+      totals: richTotals, daily: richDaily, hourly: richHourly,
+      cachedInsights: {
+        userId: 'u9', baseline: { churnRatio: 0.2 }, baselineDays: 90,
+        computedAt: new Date(),
+      },
+    });
+    const r = await buildMetrics('u9', { days: 30, timezoneOffset: 0 });
+    // current churnRatio is 0.1 against a 0.2 baseline -> -50%
+    assert.strictEqual(r.meta.churnRatio.delta, -0.5);
+  });
+
+  await check('a stale cache is recomputed and written back', async () => {
+    installStub({
+      totals: richTotals, daily: richDaily, hourly: richHourly,
+      cachedInsights: {
+        userId: 'u10', baseline: { deepWorkRatio: 0.1 }, baselineDays: 90,
+        computedAt: new Date(Date.now() - 40 * 3600 * 1000), // 40h old
+      },
+    });
+    const r = await buildMetrics('u10', { days: 30, timezoneOffset: 0 });
+    assert.ok(lastBaselineWrite, 'expected a cache write');
+    assert.ok(lastBaselineWrite.computedAt instanceof Date);
+    assert.strictEqual(lastBaselineWrite.baselineDays, 90);
+    // Recomputed from the same fixtures, so it now matches the live value.
+    assert.strictEqual(r.meta.deepWorkRatio.baseline, r.deepWorkRatio);
+  });
+
+  await check('no cache at all is computed from scratch', async () => {
+    installStub({ totals: richTotals, daily: richDaily, hourly: richHourly, cachedInsights: null });
+    const r = await buildMetrics('u11', { days: 30, timezoneOffset: 0 });
+    assert.ok(lastBaselineWrite, 'expected the first computation to be cached');
+    assert.ok(typeof r.baselineDays === 'number');
+  });
+
+  await check('a metric with an insufficient baseline gets no comparison', async () => {
+    installStub({ totals: null, daily: [], hourly: [], cachedInsights: null });
+    const r = await buildMetrics('u12', { days: 30, timezoneOffset: 0 });
+    // Empty window -> every metric insufficient -> nothing worth baselining.
+    assert.deepStrictEqual(lastBaselineWrite.baseline, {});
+    assert.strictEqual(r.meta.deepWorkRatio.baseline, undefined);
+    assert.strictEqual(r.meta.deepWorkRatio.delta, undefined);
+  });
+
+  await check('a baseline read failure degrades to no comparison, not an error', async () => {
+    installStub({ totals: richTotals, daily: richDaily, hourly: richHourly });
+    UserInsights.findOne = () => { throw new Error('mongo down'); };
+    const r = await buildMetrics('u13', { days: 30, timezoneOffset: 0 });
+    assert.ok(r.deepWorkRatio > 0, 'metrics still computed');
+    assert.strictEqual(r.meta.deepWorkRatio.baseline, undefined);
   });
 
   restore();

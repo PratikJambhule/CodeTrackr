@@ -311,6 +311,15 @@ Legacy unauthenticated `POST /api/user-activity` / `GET /api/user-stats/:id` wer
 
 ---
 
+> **⚠️ Read `docs/AUDIT-2026-09-10.md` before trusting any Insights figure from live data.**
+> Verified read-only against the production DB on 2026‑09‑10: **0 of 7034 activity documents
+> have `bucketStart`** (so the backend branch has never been deployed), and rich analytics
+> sub-documents exist in only **140 documents, all between 2026‑07‑15 and 2026‑08‑27**. The
+> newest stored document is `{ duration: 120, language: "latex" }` — nothing else. Every
+> focus-derived metric therefore has no live input; the confidence gating added 2026‑09‑10 makes
+> that visible as "—" instead of a fabricated 0. Formula definitions live in
+> `docs/INSIGHTS_METRICS.md`.
+
 ## 10. Insights / "ML" — WHAT IT ACTUALLY IS
 
 **It is not machine learning.** No model, no training, no inference, no Python, no LLM, no
@@ -545,8 +554,31 @@ metrics, tracing); CI (typecheck + both test suites) + automated Marketplace pub
   `#9` `UserStats` leaderboard rollup (decided: live running-total), `#10` idempotency key,
   `#13` React Query, `#14` goal completion, all of Tier 3. Spec/plan under
   `docs/superpowers/{specs,plans}/2026-09-09-quick-wins-tier1-security.md`.
-- `H-7`, `H-8` (leaderboard scans) **open**; `H-13` (serverless cron) being addressed by `#15`;
+- **Production-readiness batch (2026‑09‑10) done** — full audit in `docs/AUDIT-2026-09-10.md`,
+  metric definitions in `docs/INSIGHTS_METRICS.md`.
+  - **Extension 2.4.0 — data loss fixed.** `buildPayload()` resets every tracker, and four paths
+    bailed out after that point (signal-less flush, missing API key, out-of-range duration,
+    failed upload), destroying the interval each time. `sendActivity` also swallowed its errors
+    and never rethrew, so the documented "buffer and retry" was dead code. Added
+    `mergeAnalytics()` carry-forward; `sendActivity` now returns success.
+  - **Extension 2.4.0 — idle no longer inflates metrics.** `FocusTracker`/`EditorTracker` ran
+    their own samplers through idle-pauses, so `focusedMs`/`readMs` banked entire idle gaps.
+    Both now gate on `setPaused()`. This was the root cause of `deepWorkRatio` reading ≈0.
+  - **Every metric formula corrected** (`metricsDerive.js`): `deepWorkRatio` now divides by
+    total block time (same clock, bounded [0,1]); `consistencyIndex` split into
+    `volumeStability` (robust MAD) + `activeDaysRatio` (real cadence); `truePeakWindow` is a
+    2-hour window scored on surviving minutes with a distinct-day floor; `estimationCalibration`
+    reports a median with range. New: `qualityStreak`, `interruptionsPerHour`.
+  - **Confidence gating** — every metric ships `meta[name].{confidence,sampleSize,unit}`;
+    `insufficient` renders as "—". Flat scalars unchanged, so the API stays backward-compatible.
+  - **Dead flow revived** — `PATCH /api/goals/:goalId/{complete,reopen}` + `Goal.completedAt` +
+    a Goals-page button. Nothing had ever set `status: 'completed'`.
+  - **New:** `services/sessionize.js` (gap-split sessions + rule-based archetypes),
+    `services/insightsBaseline.js` + `UserInsights` (90-day baseline, lazily cached, no cron).
+  - Backend **15 suites / 246 assertions**, extension **3 suites / 52**, frontend build green.
+- `H-7`, `H-8` (leaderboard scans) **open**; `H-13` (serverless cron) addressed by `#15`;
   most other `MEDIUM`/`LOW` items **open**.
+- ⚠️ **Nothing on this branch is deployed.** See the §10 banner.
 - Extension packaged as `2.3.0`; Marketplace publication is manual / unverified.
 - Frontend build is ✅ green (`tsc -b && vite build`) as of 2026-09-09; CI runs it on every push.
 - No work has touched a live database. **Migrations to run on deploy:**
