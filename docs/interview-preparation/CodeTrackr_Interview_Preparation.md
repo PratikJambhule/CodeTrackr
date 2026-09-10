@@ -111,7 +111,7 @@ way on purpose (explainable, reproducible, no training data needed). An LLM narr
 > aggregated endpoints. The React frontend renders daily and weekly charts with Chart.js;
 > **groups** you create and join (public or password-protected) with a per-member leaderboard
 > of hours and lines; a global leaderboard; goals on a calendar with a node-cron job that
-> fires deadline notifications; and an Insights page that derives five productivity metrics
+> fires deadline notifications; and an Insights page that derives confidence-gated productivity metrics
 > using plain statistics. Deployed with the frontend on Vercel, the backend on Render, and
 > MongoDB Atlas."
 
@@ -213,7 +213,7 @@ in depth, not to claim ownership of code you'd struggle to defend.)*
   competition is the point, not a side feature; (2) it records **command/build/test
   success and failure** per person, not just time; (3) it measures **focused** time and
   **flow blocks**, not just elapsed; (4) it tracks **churn** (write-then-delete) so a refactor
-  isn't invisible; (5) it separates "busiest hour" from "most productive hour" and compares
+  isn't invisible; (5) it separates "busiest hour" from the most productive **2-hour window**, scored on surviving minutes, and compares
   your goal **estimates** to hours actually logged.
 
 ### Hardest part / biggest technical challenge
@@ -697,7 +697,7 @@ many-to-many modelling and the compound unique index is the one hard concurrency
 
 `userId` (ObjectId), `title`, `description`, `targetHours` (min 1), `techStack` (String),
 `deadline`, `status` (`in-progress`/`completed`, default in-progress), `reminderSent`.
-**No route sets `status: 'completed'`** — only the seed script does. Progress is computed on
+`PATCH /:goalId/complete` + `/reopen` set the status (added 2026‑09‑10). **Before that no route ever did** — only the seed script — so estimation calibration could never populate. Progress is computed on
 demand, not stored.
 
 #### `teams`
@@ -1111,12 +1111,16 @@ GET /api/metrics?days=30&timezone=<offset>
        (D) buildGoalPairs: Goal.find({status:'completed'}) → Activity.aggregate by language
              → [{estimatedHours, actualHours}]
   → metricsDerive:
-       deepWorkRatio       = Σ(block ≥ 25min) / focusedMs                         ∈ [0,1]
-       flowBlockStats      = { medianMs, longestMs, deepBlockCount, blockCount }
-       consistencyIndex    = clamp(1 − stddev(dailyMinutes)/mean(dailyMinutes), 0, 1)
-       truePeakWindow      = argmax_hour( commits*10 + linesInserted/10 − churnLines/5 )
-       estimationCalibration = mean(actualHours / estimatedHours) over completed goals (≥2)
-       + churnRatio, comprehensionLoad, contextSwitchesPerHour, commits, totalHours
+       deepWorkRatio       = Σ(block ≥ 25min) / Σ(all blocks)                     ∈ [0,1]
+                             (÷ focusedMs mixed two clocks and could exceed 1 — fixed 2026-09-10)
+       flowBlockStats      = { medianMs, longestMs, deepBlockCount, blockCount, totalMs }
+       volumeStability     = clamp(1 − MAD/median, 0, 1)      alias: consistencyIndex
+       activeDaysRatio     = activeDays / windowDays          ← real cadence
+       qualityStreak       = consecutive days containing a ≥25min block
+       truePeakWindow      = argmax over 2h windows of Σ minutes×(1−churnRatio), ≥3 days
+       estimationCalibration = median(actual/estimated) + range, from 1 completed goal
+       + churnRatio, comprehensionLoad, contextSwitchesPerHour, interruptionsPerHour
+       + meta[metric].{confidence, sampleSize, unit, baseline?, delta?}
   → res.json({ success, metrics })
 ```
 
@@ -1124,11 +1128,13 @@ GET /api/metrics?days=30&timezone=<offset>
 
 | Metric | Formula (as coded) | Interpretation | Failure mode |
 |---|---|---|---|
-| `deepWorkRatio` | `Σ blocks ≥ 25 min ÷ totalFocusedMs`, rounded 2dp | fraction of focused time in long stretches | `0` if no focus data or `focusedMs ≤ 0` |
-| `flowBlocks` | median / longest / deep-count / count of `flowBlocksMs` | shape of sessions | zeros on empty |
-| `consistencyIndex` | `1 − (σ/μ)` of daily minutes, clamped `[0,1]` | steadiness of daily habit | `0` if no days or `μ ≤ 0` |
-| `truePeakWindow` | hour maximising `commits·10 + linesInserted/10 − churn/5` among hours with `minutes > 0` | most *productive* hour (vs busiest) | `null` if no hours with tracked time |
-| `estimationCalibration` | `mean(actual/estimated)` over completed goals with `estimated > 0` | `>1` = you underestimate | `null` if `< 2` usable pairs |
+| `deepWorkRatio` | `Σ blocks ≥ 25 min ÷ Σ all blocks`, rounded 2dp | fraction of *flow-block* time spent in long stretches | `0` if no blocks. Divided by `totalFocusedMs` until 2026‑09‑10 — a different clock, so it could exceed 1 |
+| `flowBlocks` | median / longest / deep-count / count / `totalMs` of `flowBlocksMs` | shape of sessions | zeros on empty |
+| `volumeStability` | `clamp(1 − MAD/median, 0, 1)` of daily minutes | steadiness of *how much* you code on the days you code | `0` if no days or `median ≤ 0`. Was `1 − σ/μ`; the mean/σ pair is dominated by one outlier day |
+| `activeDaysRatio` | `activeDays ÷ windowDays` | the actual *cadence* metric — the daily `$group` emits no zero-days, so `volumeStability` never saw them | `0` on an empty window |
+| `consistencyIndex` | alias of `volumeStability` (back-compat for older dashboard builds) | — | — |
+| `truePeakWindow` | **2-hour** window maximising `Σ minutes × (1 − churnRatio)` ("surviving minutes"), eligible only at ≥3 distinct days | most *productive* window (vs busiest) | `null` if no window clears the day floor |
+| `estimationCalibration` | `median(actual/estimated)` over completed goals with `estimated > 0`, plus `minFactor`/`maxFactor` | `>1` = you underestimate | `null` if no usable pair. Usable from **one** goal; was a mean requiring ≥2 |
 | `churnRatio` | `churnLines / linesInserted` | rework fraction | `0` if `linesInserted = 0` |
 | `comprehensionLoad` | `readMs / (readMs + writeMs)` | share of time reading | `0` if no attention data |
 | `contextSwitchesPerHour` | `fileSwitches / focusedHours` | fragmentation | `0` if `focusedHours = 0` |
@@ -1341,7 +1347,7 @@ Format: **Current → Vulnerability → Attack → Fix.**
 | MongoDB down mid-request | route `try/catch` → `next(err)` → central handler → `500 { error, id }` | generic body (fixed 2026-09-09); still no transient-error retry | add a retry wrapper for transient Mongo errors |
 | Ingest: malformed payload | normalisers coerce sub-docs to 0; missing `fileName/language/duration` → 400 | `duration:0` rejected; `1e12` accepted; junk `timestamp` → `now` | `express-validator` with bounds |
 | Ingest: invalid key | 401 `{ message: 'Invalid API key' }` | fine | + rate-limit to slow enumeration |
-| Extension offline | buffered minutes kept in memory, retried next tick; best-effort flush on deactivate | restart loses un-flushed time | persist the buffer to `context.globalState`; a small on-disk queue |
+| Extension offline | the unsent payload is **merged forward** into the next flush (`mergeAnalytics`, 2.4.0); best-effort flush on deactivate | restart still loses un-flushed time. **Before 2.4.0 the retry was dead code** — `sendActivity` never rethrew, so every failed upload was lost | persist the buffer to `context.globalState`; a small on-disk queue |
 | Frontend API failure | `console.error`, page stays in empty/loading or shows an error card | inconsistent; `Groups` uses `alert()` | a shared fetch hook with typed errors + toasts; React Query retry |
 | Metrics/ML failure | `500 {success:false}` → "Could not load your insights" + retry | fine | + a cached last-good result |
 | ~~Notification cron on serverless~~ ✅ fixed 2026-09-09 | was: never fires / cold-start re-run (H-13) | — | `require.main` guard + `POST /api/internal/run-*` behind `INTERNAL_CRON_SECRET` |
@@ -1873,8 +1879,10 @@ the engine / precompute rollups.
 
 - *Why stamp `timestamp` at interval start?* Stamping "now" pushed every session forward and
   skewed hour-of-day analytics (H-12).
-- *What if `sendActivity` throws?* `bufferedMinutes = totalBuffered` (kept), `startedMs = now`
-  — retried next tick. Memory only.
+- *What if `sendActivity` fails?* It **returns `false`** (it never throws — that was the bug: the caller's `catch` was unreachable and `bufferedMinutes = 0` always ran, losing the interval). The caller now calls `holdPayload(payload)` so the counters merge into the next flush. A `400` is treated as permanent and dropped, so a malformed payload can't poison every later flush. `startedMs = now`
+  — merged forward into the next flush via `holdPayload`/`mergeAnalytics` (2.4.0). Memory only.
+  *(Before 2.4.0 nothing was retried: `sendActivity` never rethrew, so the caller's `catch` was
+  dead code and every failed upload lost its interval.)*
 - *Race?* Single-threaded JS + one timer; `flushNow` and the tick can't truly overlap, but a
   slow `await` inside one flush while the timer fires again is possible — the second call sees
   `startedMs` already reset, so it's mostly benign.

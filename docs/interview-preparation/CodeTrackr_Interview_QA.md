@@ -592,8 +592,11 @@
 > bursts.
 
 **H5. What's "true peak window"?**
-> The hour that maximises `commits*10 + linesInserted/10 − churnLines/5` among hours with
-> tracked time. The point is that your *busiest* hour is often not your *most productive* one —
+> The **2-hour window** that maximises `Σ minutes × (1 − churnRatio)` — "surviving minutes",
+> i.e. time spent that didn't get thrown away again — among windows observed on at least 3
+> distinct days. *(Until 2026‑09‑10 it was a single hour scored `commits*10 + lines/10 −
+> churn/5`: unvalidated weights and no sample floor, so one commit in an hour you'd coded in
+> once could win outright.)* The point is that your *busiest* hour is often not your *most productive* one —
 > the seed script deliberately makes 2pm busy-but-churny and 9pm productive so you can see the
 > two diverge.
 

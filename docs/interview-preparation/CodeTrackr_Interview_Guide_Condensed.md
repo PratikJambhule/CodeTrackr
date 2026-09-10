@@ -38,7 +38,7 @@ There are three parts:
    summaries → one row), and does the maths when the website asks for it.
 3. **A React website** (the dashboard). You log in with Google. It shows charts of your
    coding, **groups with a per-member leaderboard** (the main feature), a global leaderboard,
-   goal tracking, and an "Insights" page with things like your most productive hour.
+   goal tracking, and an "Insights" page with things like your most productive two-hour window.
 
 **Two different logins:**
 - The **website** uses Google sign-in → the server gives you a JWT stored in a cookie.
@@ -74,7 +74,7 @@ every number can be explained. (More in section 9.)
 > Express API, checked by a per-user API key. The backend merges each summary into a
 > 10-minute record in MongoDB. The React frontend shows daily/weekly Chart.js graphs; **groups
 > you create with a per-member leaderboard**; a global leaderboard; goals on a calendar with
-> cron-driven reminders; and an insights page that works out five productivity metrics using
+> cron-driven reminders; and an insights page that works out confidence-gated productivity metrics using
 > plain statistics."
 
 ### 2 minutes
@@ -344,7 +344,7 @@ draws it.
 
 **No.** Say it plainly. It's plain statistics, calculated fresh every time you open the page.
 
-### The five metrics (simple definitions)
+### The metrics (simple definitions)
 
 | Metric | What it means | How it's worked out |
 |---|---|---|

@@ -361,6 +361,55 @@ with `x-internal-secret`; point the platform health check at `/health`; push so 
 
 ---
 
+## 11. Production-readiness audit + insights rebuild (2026-09-10)
+
+Full audit: `docs/AUDIT-2026-09-10.md`. Metric definitions: `docs/INSIGHTS_METRICS.md`.
+Method: the code is the source of truth — every claim was checked against the implementation,
+and several existing docs turned out to be wrong.
+
+**Extension 2.4.0 — two classes of silent corruption.**
+- `buildPayload()` resets every tracker, and four paths bailed out *after* that: signal-less
+  flush, missing API key, out-of-range duration, failed upload. Each destroyed the interval.
+  `sendActivity` also swallowed its own errors and never rethrew, so `flushIfNeeded`'s `catch`
+  was dead code — the "buffer and retry" behaviour every doc claimed **never existed**. Fixed
+  with a pure `mergeAnalytics()` carry-forward and a success-returning `sendActivity`.
+- `FocusTracker` (15 s ticker) and `EditorTracker` (5 s sampler) ran through idle-pauses, so
+  `focusedMs`/`readMs` banked entire idle gaps. This was the root cause of `deepWorkRatio`
+  reading ≈0. Both now gate on `setPaused()`.
+
+**Every metric formula corrected** — see `INSIGHTS_METRICS.md` for before/after and reasoning.
+`deepWorkRatio` now divides by total block time (same clock, bounded [0,1]); `consistencyIndex`
+split into `volumeStability` (MAD) + `activeDaysRatio`; `truePeakWindow` is a 2-hour window on
+surviving minutes with a distinct-day floor; `estimationCalibration` is a median with range.
+New: `qualityStreak`, `interruptionsPerHour`, and `meta[name].{confidence,sampleSize,unit}` on
+every metric — `insufficient` renders as "—" instead of a fabricated 0.
+
+**Dead flow revived.** Nothing had ever set `Goal.status = 'completed'`, so estimation
+calibration could never populate. Added `PATCH /api/goals/:goalId/{complete,reopen}`,
+`Goal.completedAt`, and the Goals-page button.
+
+**New:** `services/sessionize.js` (collapse by `bucketStart` *then* gap-split — one window can
+hold several docs; legacy `timestamp` fallback; rule-based archetypes, deliberately not
+k-means), `services/insightsBaseline.js` + `UserInsights` (90-day baseline, lazily refreshed on
+read, no cron).
+
+**End-to-end verification against the live DB (read-only) found the real blockers:**
+- **0 of 7034 documents carry `bucketStart`** → this branch has never been deployed.
+- Rich analytics exist in only **140 documents, all 2026‑07‑15 → 2026‑08‑27**. The newest
+  stored document is `{ duration: 120, language: "latex" }`. The live extension is not sending
+  analytics at all.
+- Performance measured, not assumed: `IXSCAN`, 32 examined / 32 returned, 1 ms;
+  `buildMetrics` 239 ms cold → 44 ms warm. No further optimisation justified.
+
+Backend 12 → **15 suites / 246 assertions**; extension 2 → **3 / 52**; frontend build green.
+Pushed to `PratikJambhule/CodeTrackr` as branch `feat/security-and-insights` (histories are
+unrelated — this working copy was re-baselined at `dd5723f` before the session began, so `main`
+was deliberately left untouched). The first CI run failed on the `app.js` import smoke: it
+needs the `GOOGLE_*` trio because `config/passport.js` throws at import, and CI has no `.env`.
+Fixed in `306704d`.
+
+---
+
 ## Appendix A — Why this is a file and not claude-mem
 
 claude-mem was requested for context saving and was attempted repeatedly. Every call failed:

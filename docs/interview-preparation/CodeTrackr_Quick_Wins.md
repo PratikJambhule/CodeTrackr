@@ -356,7 +356,11 @@ cache keys / staleness.
 
 ---
 
-## 14. Goal completion + persisted to-dos 🟡
+## 14. Goal completion + persisted to-dos 🟡 — ✅ COMPLETION DONE 2026-09-10 (to-dos still open)
+
+> **Shipped:** owner-scoped `PATCH /api/goals/:goalId/complete` + `/reopen`, `Goal.completedAt`,
+> and the Goals-page button — this is what made `estimationCalibration` reachable at all.
+> **Still open:** persisting the to-do list.
 
 **The flaw:** **no route ever sets a goal to `completed`** (only the demo seed does), so the
 "estimation accuracy" insight never has data. And the Goals page's to-do checkboxes live in

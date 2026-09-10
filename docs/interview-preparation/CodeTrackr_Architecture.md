@@ -119,7 +119,9 @@ own row; the extension (2.3.0) also **drops a flush entirely when it carries no 
 | `services/activityNormalizers.js` | `normalizeEditor/Focus/GitAnalytics(body)` — coerce to non-negative finite numbers, cap `flowBlocksMs` at 200. **Since 2026‑09‑08 a missing sub-doc/leaf stays absent** (not defaulted to `0`) so bucket docs are sparse. Tolerates payloads from older extension versions. |
 | `services/activityBucket.js` | **Pure, dependency-free.** `planActivityWrite(normalized, when, bucketMs)` decides the write shape: `{mode:'legacy'}` (bucketMs 0 → plain `Activity.create`), or `{mode:'bucket', filter, update, setOnInsert, bucketStart}` where `filter` is the `(userId, projectName, language, bucketStart)` key and `update` is `$inc`/`$max`/`$push $slice`/`$addToSet`. `bucketStartFor(when)` = `floor(t / 600000) * 600000`. `hasSignal(payload)` = "does this flush carry any editor/terminal/git/focus data". Fully unit-tested (`tests/activityBucket.test.js`, 21 assertions). |
 | `services/metricsService.js` | `buildMetrics(userId, {days, timezoneOffset})` — runs the MongoDB aggregations the Insights page needs; delegates maths to `metricsDerive`. |
-| `services/metricsDerive.js` | Pure functions: `deepWorkRatio`, `flowBlockStats`, `consistencyIndex`, `truePeakWindow`, `estimationCalibration`. No DB, no deps — fully unit-tested. |
+| `services/metricsDerive.js` | Pure functions: `deepWorkRatio`, `flowBlockStats`, `volumeStability` (+`consistencyIndex` alias), `activeDaysRatio`, `qualityStreak`, `truePeakWindow`, `estimationCalibration`, `confidenceFor`. No DB, no deps — 37 assertions. **Every formula was corrected 2026‑09‑10; see `docs/INSIGHTS_METRICS.md`.** |
+| `services/sessionize.js` | **Pure.** Collapses buckets by `bucketStart` (one window can hold several docs), gap-splits into sessions at 30 min, derives a feature vector, and applies a rule-based archetype classifier. 26 assertions. |
+| `services/insightsBaseline.js` | 90-day per-user baselines in `UserInsights`, refreshed at most daily **on read** — no cron. Degrades to "no comparison" on any failure. 19 assertions. |
 | `services/dailySummary.js` | **Pure** `buildDaySummary(userId, day, docs)` — folds one day's `activities` docs into a single `DailySummary` shape (`totalSeconds`, lines, `flushCount`, `bucketCount`, `languages[]`, `projects[]`, editor/terminal/git/focus rollups). Unit-tested (`tests/rollup.test.js`, 7 assertions). |
 | `services/dailyRollup.js` | `rollupDaily({apply, beforeDays, force})` — the DB-touching orchestrator: find `(userId, day)` pairs with raw activity, call `buildDaySummary`, `upsert` into `dailysummaries`. Dry-run by default. CLI wrapper: `scripts/rollup-daily.js`. |
 | `services/notificationScheduler.js` | `node-cron` `'0 * * * *'` + an immediate run on startup: `checkUpcomingDeadlines` (6–7 h out, in-progress, not yet reminded) and `checkOverdueGoals` (deadline passed). Also schedules `'30 3 * * *'` → `rollupDaily({apply:true})` (nightly DailySummary rollup). |
@@ -307,17 +309,25 @@ else is `find()` + JavaScript.
         │
         ▼
  services/metricsDerive.js  (pure, synchronous, no DB):
-     deepWorkRatio(flowBlocksMs, focusedMs)        = Σ(block ≥ 25min) / focusedMs
-     flowBlockStats(flowBlocksMs)                  = { medianMs, longestMs, deepBlockCount, blockCount }
-     consistencyIndex(dailyMinutes)                = clamp(1 − stddev/mean, 0, 1)
-     truePeakWindow(hourly)                        = argmax(commits*10 + linesInserted/10 − churnLines/5)
-     estimationCalibration(goalPairs)              = mean(actual/estimated), needs ≥ 2 pairs, else null
-     + churnRatio, comprehensionLoad, contextSwitchesPerHour, commits, totalHours
+     deepWorkRatio(flowBlocksMs)      = Σ(block ≥ 25min) / Σ(all blocks)      ∈ [0,1]
+       (was ÷ focusedMs — two different clocks, could exceed 1; fixed 2026-09-10)
+     flowBlockStats(flowBlocksMs)     = { medianMs, longestMs, deepBlockCount, blockCount, totalMs }
+     volumeStability(dailyMinutes)    = clamp(1 − MAD/median, 0, 1)   robust; alias consistencyIndex
+     activeDaysRatio(active, window)  = active ÷ window          ← the real cadence metric
+     qualityStreak(deepDays, today)   = consecutive days with a ≥25min block
+     truePeakWindow(hourly)           = argmax over 2-HOUR windows of Σ minutes×(1−churnRatio),
+                                        eligible only at ≥3 distinct days   (no magic weights)
+     estimationCalibration(goalPairs) = median(actual/estimated) + range, works from 1 goal
+     + churnRatio, comprehensionLoad, contextSwitchesPerHour, interruptionsPerHour, commits, totalHours
+     + confidenceFor(sample, thresholds) → 'insufficient' | 'low' | 'high'  for EVERY metric
         │
         ▼
- res.json({ success:true, metrics:{ windowDays, deepWorkRatio, flowBlocks, consistencyIndex,
-            truePeakWindow, estimationCalibration, churnRatio, comprehensionLoad,
-            contextSwitchesPerHour, commits, totalHours } })
+ res.json({ success:true, metrics:{ windowDays, deepWorkRatio, flowBlocks, volumeStability,
+            consistencyIndex (alias), activeDaysRatio, activeDays, qualityStreak, truePeakWindow,
+            estimationCalibration, churnRatio, comprehensionLoad, contextSwitchesPerHour,
+            interruptionsPerHour, commits, totalHours, focusedHours,
+            sessionCount, archetypeMix, recentSessions,          ← sessionize.js
+            meta: { <metric>: { confidence, sampleSize, unit, baseline?, delta? } } } })
         │
         ▼
  Insights.tsx: 5 primary cards + 4 secondary tiles.
@@ -464,7 +474,7 @@ dashboard, or an OAuth 2.0 device-authorization flow.
         │ targetHours │                                   │ userId (OID)  │
         │ techStack   │                                   │ type (enum)   │
         │ deadline    │                                   │ read          │
-        │ status enum │  (no route ever sets 'completed') └───────────────┘
+        │ status enum │  (PATCH /:id/complete, 2026-09-10) └───────────────┘
         │ reminderSent│
         └─────────────┘
 

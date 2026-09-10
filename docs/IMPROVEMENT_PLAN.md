@@ -44,7 +44,7 @@ including a new `routeGuards.test.js` that statically scans route source and fai
 sensitive route loses its auth middleware. Group passwords use Node's built-in `crypto.scrypt`
 rather than bcrypt — no native dependency, which keeps the Vercel build simple and lets the
 tests run without `npm install`. Legacy plaintext passwords still verify and are upgraded to a
-hash on the next successful join. A new `/insights` page surfaces the five Phase A metrics.
+hash on the next successful join. A new `/insights` page surfaces the Phase A metrics. *(Every formula was corrected 2026‑09‑10 — see `docs/INSIGHTS_METRICS.md`.)*
 
 **Quick-wins batch — Tier 1 + security: DONE 2026-09-09.** 11 items, one commit each, on
 `feat/security-and-insights`. Spec/plan under
@@ -68,6 +68,22 @@ scheduler to the two internal routes; point the health check at `/health`; push 
 imports/vars removed, `TextType.tsx` given a `TextTypeProps` interface (which also fixed the 4
 `string`→`never` errors in the pages that pass `textColors`), and the half-built `Goals.tsx`
 to-do scaffolding removed. `npm run build` is green; CI (#2) keeps it that way.
+
+**Production-readiness batch — DONE 2026-09-10.** Full audit in `docs/AUDIT-2026-09-10.md`;
+metric definitions in `docs/INSIGHTS_METRICS.md`. Fixed **H-14** (extension data loss),
+**H-15** (idle inflating every focus metric), **M-16** (four wrong metric formulas), **M-17**
+(goal completion — the state transition that made estimation calibration reachable at all).
+Added sessionization + rule-based archetypes (`services/sessionize.js`) and a lazily-cached
+90-day baseline (`services/insightsBaseline.js`, `UserInsights`, no cron). Extension **2.4.0**.
+Backend 12 → **15 suites / 246 assertions**; extension 2 → **3 / 52**.
+
+⚠️ **Two findings that block production regardless of code quality** (see `AUDIT` §7):
+1. **Nothing on this branch is deployed.** 0 of 7034 activity documents carry `bucketStart`,
+   which the 2026‑09‑08 ingest writes on every insert — so Render is still serving pre‑09‑08 code.
+2. **The live extension is not sending analytics.** Rich sub-documents exist in only 140
+   documents, all 2026‑07‑15 → 2026‑08‑27. The newest stored document is
+   `{ duration: 120, language: "latex" }` and nothing else. Every focus-derived metric has no
+   live input; confidence gating makes that visible as "—" rather than a fabricated 0.
 
 **A backfill is still outstanding for H-5:** rows written before this fix have `date` set to
 their ingest day. Recompute with `date = timestamp` before anything starts trusting `date`.
@@ -153,6 +169,18 @@ is added (this closes Quick-Wins #5). Live migration: `node backend/scripts/migr
 **Done 2026-09-09:** `initScheduler()` + `app.listen()` are now inside `if (require.main === module)` — `require('../app')` (the serverless entry) starts no server and no scheduler. A new `routes/internal.js` exposes `POST /api/internal/run-notifications` and `/run-rollup` behind `INTERNAL_CRON_SECRET` (constant-time compare; **404** — not 401 — when the secret is unset or wrong, so the route isn't discoverable). Added the `{goalId:1, type:1}` index on `Notification`. CI now imports `app.js` with junk env and asserts no side effects. **Operator:** set `INTERNAL_CRON_SECRET` and wire an external scheduler (GitHub Actions `schedule:` / cron-job.org) to hit the two routes hourly / daily with `x-internal-secret`.
 **Files:** `backend/app.js`, `backend/routes/internal.js` (new), `backend/models/Notification.js`, `.github/workflows/ci.yml`.
 
+### H-14. The extension silently destroyed un-uploaded flushes — ✅ FIXED 2026-09-10 (2.4.0)
+**Problem:** `buildPayload()` calls `consumeInterval()` on every tracker, which **resets** them. Four paths then bailed out *after* that point, discarding the counters permanently: a signal-less interval, a missing API key, an out-of-range duration, and a failed upload. Worse, `sendActivity` caught its own axios error and never rethrew, so the `catch` in `flushIfNeeded` was **unreachable** and `state.bufferedMinutes = 0` ran on every failure. The documented "buffered in memory, retried next tick" behaviour — repeated in `CODETRACKR_PROJECT_CONTEXT.md` and every interview doc — **did not exist**.
+**Impact:** every offline flush lost its interval. Separately, `payloadHasSignal` only inspects edits/commands/commits, so an interval spent *reading code and switching files* was discarded along with its `readMs`, `fileSwitches` and `focusedMs` — meaning `comprehensionLoad` **under**-reported reading.
+**Fix:** pure `mergeAnalytics()` + `takePayload`/`holdPayload` carry-forward buffer; `sendActivity` returns a success boolean (a `400` is treated as permanent so a bad payload can't poison later flushes).
+**Files:** `extension/src/extension.ts`. **Verified:** `extension/tests/flushSafety.test.js`.
+
+### H-15. Idle time inflated every focus-derived metric — ✅ FIXED 2026-09-10 (2.4.0)
+**Problem:** `FocusTracker`'s 15 s ticker and `EditorTracker`'s 5 s attention sampler run on their **own** intervals, independent of the main loop's idle-pause, and nothing consumed them while paused. Leaving VS Code focused and walking away for five hours added five hours to the next flush's `focusedMs` — the denominator of `deepWorkRatio`.
+**Impact:** the root cause of `deepWorkRatio` reading ≈0 in production. Also skewed `comprehensionLoad` (idle banked as `readMs`) and `contextSwitchesPerHour`.
+**Fix:** `setPaused()` on both trackers; they bank nothing while paused and unpausing does not back-fill the gap.
+**Files:** `extension/src/focusTracker.ts`, `extension/src/editorTracker.ts`, `extension/src/extension.ts`.
+
 ---
 
 ## MEDIUM — maintainability, API and DB efficiency
@@ -172,6 +200,8 @@ is added (this closes Quick-Wins #5). Live migration: `node backend/scripts/migr
 - **M-12. No client-side caching or request dedup.** Every navigation refetches with `cache:'no-cache'`. React Query (or a small SWR-style hook) would remove most of the traffic.
 - **M-14. ✅ FIXED 2026-09-09.** A duplicate group join (double-click / race) returned 500. The `groupmembers` unique compound index throws `11000`; the `/:groupId/join` handler now maps that to `409 Conflict` and no longer echoes `error.message`. Verified by `tests/quickWins.test.js`.
 - **M-15. ✅ FIXED 2026-09-09.** `Dashboard.tsx` rendered a hardcoded `repeatedFailuresDaily/Weekly` mock instead of the real `terminalSummary.repeatedFailedCommands` (which the backend already computed and returned). The panel is now wired to the real data with an empty state.
+- **M-16. ✅ FIXED 2026-09-10.** Four metric formulas measured something other than their name. (a) `deepWorkRatio = deepMs / focusedMs` divided activity-bounded flow blocks by wall-clock window-focus time — two different clocks, so it could exceed 1. Now `deepMs / totalBlockMs`, bounded [0,1] by construction. (b) `consistencyIndex = 1 − stddev/mean` was computed over **only days with activity** (the daily `$group` emits no zero-days), so it never measured cadence despite the name and the UI label "Consistency"; split into `volumeStability` (robust `1 − MAD/median`) and `activeDaysRatio` (real cadence). (c) `truePeakWindow` had **no sample floor**, so one commit in an hour coded once in 30 days scored 10 and won; the weights (`×10`, `/10`, `/5`) were unvalidated, and the roadmap specifies a **2-hour** window while the code used one. Now a 2-hour window scored on surviving minutes `minutes × (1 − churnRatio)` with a ≥3-distinct-day floor. (d) `estimationCalibration` used a mean and silently required ≥2 goals; now a median with range, usable from one. Plus `confidenceFor()` — every metric ships `meta[name].{confidence,sampleSize,unit}` and `insufficient` renders as "—". Full reasoning in `docs/INSIGHTS_METRICS.md`. **Verified:** `metrics.test.js` (37) + `metricsService.test.js` (35).
+- **M-17. ✅ FIXED 2026-09-10.** **No route ever set `Goal.status = 'completed'`** — only `scripts/seed-demo-insights.js` did — so `estimationCalibration` was permanently unreachable in production. Added owner-scoped `PATCH /api/goals/:goalId/complete` + `/reopen`, `Goal.completedAt`, and the Goals-page button. The activity join was also rebuilt: it matched `language === goal.techStack` (exact, case-sensitive, free text) with **no lower time bound**, so a goal tagged "React" matched nothing while one tagged "javascript" matched all history. Now case-insensitive language *or* project, bounded to the goal's lifetime; an unmatched goal is skipped rather than scored 0.
 
 ---
 

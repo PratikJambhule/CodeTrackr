@@ -199,7 +199,7 @@ ingest tokens, or OAuth device flow).
 | **users** | `googleId` (unique), `name`, `email` (unique), `profilePictureUrl`, `apiKey` (unique, sparse, **plaintext**), `lastLogin`, `isFirstLogin` | |
 | **groups** | `name`, `description`, `visibility: 'public'|'private'`, `password` (`select:false`, scrypt hash `scrypt$salt$hash`, legacy plaintext tolerated), `createdBy: ObjectId→User` | |
 | **groupmembers** | `groupId: ObjectId`, `userId: ObjectId`, `joinedAt` | Unique compound index `{groupId:1, userId:1}`. Join table. |
-| **goals** | `userId: ObjectId→User`, `title`, `description`, `targetHours` (min 1), `techStack: String`, `deadline`, `status: 'in-progress'|'completed'` (default in‑progress), `reminderSent` | **No route sets `status` to `completed`** — only the seed script / manual edits do. |
+| **goals** | `userId: ObjectId→User`, `title`, `description`, `targetHours` (min 1), `techStack: String`, `deadline`, `status: 'in-progress'|'completed'` (default in‑progress), `completedAt`, `reminderSent` | `PATCH /api/goals/:goalId/complete` + `/reopen` (owner-scoped, added 2026‑09‑10). **Before that no route ever set `completed`**, so `estimationCalibration` was permanently unreachable. |
 | **teams** | `name`, `description`, `createdBy: ObjectId`, `members: [ObjectId]` (embedded) | Backend routes exist; **frontend `Teams.tsx` is not routed in `App.tsx`** — orphaned. |
 | **notifications** | `userId: ObjectId`, `goalId: ObjectId`, `type: 'deadline_reminder'|'deadline_missed'|'goal_completed'`, `title`, `message`, `read` | Created by `notificationScheduler`. |
 
@@ -331,9 +331,13 @@ dependency-free functions) computes:
 |---|---|
 | `deepWorkRatio` | Σ(flow blocks ≥ 25 min) ÷ total focused ms. 0–1. |
 | `flowBlocks` | median / longest / count / deep-block count of `flowBlocksMs`. |
-| `consistencyIndex` | `1 − coefficient_of_variation` of daily minutes, clamped to [0,1]. |
-| `truePeakWindow` | hour maximising `commits*10 + linesInserted/10 − churnLines/5` (most *productive* hour, not busiest). |
-| `estimationCalibration` | mean(actual ÷ estimated hours) across **completed** goals (needs ≥ 2). |
+| `volumeStability` | `1 − MAD/median` of daily minutes, clamped [0,1] — robust. *(Was `1 − CV` over only active days, so it measured volume evenness, never cadence. Fixed 2026‑09‑10; `consistencyIndex` kept as an alias.)* |
+| `activeDaysRatio` | activeDays ÷ windowDays — the real cadence metric. |
+| `qualityStreak` | consecutive days containing a ≥25 min flow block. |
+| `truePeakWindow` | **2-hour** window maximising `Σ minutes × (1 − churnRatio)`, eligible at ≥3 distinct days (most *productive*, not busiest). *(Was a 1-hour argmax with unvalidated weights and no sample floor. Fixed 2026‑09‑10.)* |
+| `estimationCalibration` | median(actual ÷ estimated) + range across **completed** goals, usable from 1. *(Was a mean needing ≥2 — and no route completed a goal, so it never returned anything. Fixed 2026‑09‑10.)* |
+| `interruptionsPerHour` | blurEvents ÷ focused hours. |
+| **confidence** | every metric carries `meta[name].{confidence, sampleSize, unit}`; `insufficient` renders as "—". |
 | `churnRatio` | churnLines ÷ linesInserted. |
 | `comprehensionLoad` | readMs ÷ (readMs + writeMs). |
 | `contextSwitchesPerHour` | fileSwitches ÷ focused hours. |

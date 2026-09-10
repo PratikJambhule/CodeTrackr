@@ -41,7 +41,7 @@
 | DB | MongoDB Atlas | 8 collections (`+dailysummaries`); `activities` is high-volume, now bucketed |
 | Frontend | **React 19**, **Vite 7**, TS ~5.9, **Tailwind 3**, react-router-dom 7, chart.js 4 + react-chartjs-2, lucide-react | `@tanstack/react-query` **installed, unused**; 28-theme `ThemeContext` |
 | Auth | Google OAuth → JWT cookie (web); random 64-hex API key (extension) | `JWT_SECRET` required at boot — app throws if unset (was an unsafe `'your_jwt_secret'` fallback), fixed 2026-09-09 |
-| "ML" | pure JS stats — coefficient of variation, weighted score, medians | no model/training/inference/LLM/Python |
+| "ML" | pure JS stats — medians, MAD, surviving-minutes scoring, confidence gating | no model/training/inference/LLM/Python. Session archetypes are a **rule-based** classifier, deliberately not k-means |
 | Deploy | Vercel + Render + Atlas | GitHub Actions CI (2026-09-09); no Dockerfile, no CD, no observability |
 | Tests | plain `node:assert` — 12 backend suites (~142 assertions) + 2 extension suites; CI on push | **zero frontend tests; nothing run vs a real DB** |
 
@@ -68,7 +68,7 @@ VS Code event → tracker counters → timer tick (30s) →
        $setOnInsert: {...key, timestamp: bucketStart} }, { upsert:true, setDefaultsOnInsert:false }) → 201
   (ACTIVITY_BUCKET_MS=0 → plain Activity.create, exactly as before)
 ```
-On failure: buffered minutes kept **in memory only** (no disk queue), retried next tick.
+On failure: the payload is **merged forward** into the next flush (`mergeAnalytics`). *(Before 2.4.0 this was a lie: `sendActivity` swallowed its own errors and never rethrew, so the caller's `catch` was dead code and every failed upload silently lost the interval.)*
 `$inc.duration` = real measured seconds → **totals unchanged**. A same-window replay
 double-counts *inside one bucket*, not as a new row.
 
@@ -87,7 +87,7 @@ fetch(/api/analytics/:id?timezone=<offsetMin>, {credentials:'include'})  cookie:
 fetch(/api/metrics?days=&timezone=)  // NO :userId — IDOR-proof by design →
   isAuthenticated → buildMetrics(req.user._id, {days, tz}) →
     4× Activity.aggregate ($group: totals / by-day / by-hour / goal-pairs) →
-    metricsDerive (pure): deepWorkRatio, flowBlockStats, consistencyIndex,
+    metricsDerive (pure): deepWorkRatio, flowBlockStats, volumeStability, activeDaysRatio, qualityStreak,
                           truePeakWindow, estimationCalibration →
   res.json  // NOT cached, recomputed every load
 ```
@@ -121,7 +121,7 @@ fetch(/api/metrics?days=&timezone=)  // NO :userId — IDOR-proof by design →
 | **dailysummaries** | Nightly rollup (cron `30 3 * * *`, `dailyRollup.js`). One doc per `(userId, day)` — `totalSeconds`, lines, `flushCount`, `bucketCount`, `languages[]`, `projects[]`, editor/terminal/git/focus rollups. Unique `{userId:1,day:1}`. Read path doesn't use it yet — built for the leaderboard/analytics scale fix. |
 | **users** | `googleId` U, `email` U, `apiKey` U+sparse **plaintext**, `isFirstLogin`. |
 | **groups** / **groupmembers** | The original point of the app — a group = a contest week or a daily-practice pod. `groups.password` = scrypt `scrypt$salt$hash`, `select:false`, legacy plaintext tolerated + rehashed on join. `groupmembers` = **join table**, unique compound `{groupId,userId}` (the one hard concurrency guard). Leaderboard aggregates members' `activities` by **hours + lines** today; the per-person **error/build-failure** counters the extension collects are the obvious next column (`$group` + `$sum`). |
-| **goals** | `userId` ObjectId, `targetHours` (min 1), `techStack` String, `status` enum — **no route ever sets `completed`**. Progress computed on demand, not stored. |
+| **goals** | `userId` ObjectId, `targetHours` (min 1), `techStack` String, `status` enum, `completedAt`. `PATCH /:id/complete` + `/reopen` added 2026‑09‑10 — before that **nothing ever set `completed`**, so estimation calibration could never populate. Progress computed on demand. |
 | **teams** | `members: [ObjectId]` **embedded**. Backend routes exist; **frontend not routed** (orphaned). Different modelling choice from groups on purpose. |
 | **notifications** | scoped by `req.user._id` everywhere — "the one done right". |
 
@@ -137,10 +137,14 @@ fetch(/api/metrics?days=&timezone=)  // NO :userId — IDOR-proof by design →
 |---|---|
 | `deepWorkRatio` | Σ(flow blocks ≥ 25 min) ÷ total focused ms |
 | `flowBlocks` | median / longest / count / deep-count of `flowBlocksMs` |
-| `consistencyIndex` | `clamp(1 − stddev/mean of daily minutes, 0, 1)` — coefficient of variation |
-| `truePeakWindow` | argmax hour of `commits·10 + linesInserted/10 − churnLines/5` (productive ≠ busy) |
-| `estimationCalibration` | `mean(actual ÷ estimated hours)` over completed goals, needs ≥ 2 |
-| secondary | `churnRatio`, `comprehensionLoad` (read/(read+write)), `contextSwitchesPerHour` |
+| `volumeStability` | `clamp(1 − MAD/median of daily minutes, 0, 1)` — robust. *(Was `1 − stddev/mean` over **only active days**, so it measured volume evenness, never cadence, despite the label. Fixed 2026‑09‑10; `consistencyIndex` kept as an alias.)* |
+| `activeDaysRatio` | `activeDays ÷ windowDays` — the actual cadence metric |
+| `qualityStreak` | consecutive days with a ≥25 min block |
+| `truePeakWindow` | argmax over **2-hour** windows of `Σ minutes × (1 − churnRatio)` — "surviving minutes". Only hours seen on ≥3 distinct days are eligible. *(Was a 1-hour argmax of `commits·10 + lines/10 − churn/5`: unvalidated weights and no sample floor, so one commit in an hour coded once in 30 days won. Fixed 2026‑09‑10.)* |
+| `estimationCalibration` | `median(actual ÷ estimated)` + range, works from **1** completed goal. *(Was a mean needing ≥2 — and **no route ever completed a goal**, so it could never return anything. `PATCH /api/goals/:id/complete` added 2026‑09‑10.)* |
+| secondary | `churnRatio`, `comprehensionLoad` (read/(read+write)), `contextSwitchesPerHour`, `interruptionsPerHour` (blurEvents/focused hr) |
+| **confidence** | every metric ships `meta[name].{confidence, sampleSize, unit}`; `insufficient` renders as **—**, never a fabricated 0 |
+| **sessions** | `sessionize.js` gap-splits buckets into sessions and labels each with a rule-based archetype (deep-build / debug-grind / exploration / admin-config) |
 
 - Runs **synchronously per request, not cached, not scheduled.**
 - Focus metrics show **"—"** until extension 2.1.0 data (`flowBlocks.blockCount === 0`).
@@ -215,7 +219,7 @@ fetch(/api/metrics?days=&timezone=)  // NO :userId — IDOR-proof by design →
 14. **What's collected?** → time, file/lang/project, gross edits, churn, focus/flow, terminal commands, git commits, debug sessions.
 15. **Batched?** → no HTTP batching; but the backend *merges* flushes into one 10-min bucket doc (`$inc` upsert). `/track/batch` unused.
 16. **Idle?** → pause after 2 min, resume on edit.
-17. **Offline?** → buffer in memory, retry next tick; no disk queue; lost on restart.
+17. **Offline?** → the unsent payload is merged into the next flush (2.4.0); memory only, no disk queue, still lost on restart. Before 2.4.0 the retry path was **dead code** and every failed flush was lost.
 18. **Duplicate payload?** → still double-counted (now `$inc`'d twice *inside* one bucket row, not a new doc); no idempotency key.
 19. **Analytics aggregation — where?** → mostly **JS** (`find().reduce()`), M-1; streak + summary + metrics use `$group`.
 20. **Timezone?** → client sends `getTimezoneOffset()` minutes; `localDayInfo` buckets local days.
@@ -229,7 +233,7 @@ fetch(/api/metrics?days=&timezone=)  // NO :userId — IDOR-proof by design →
 27b. **Group compares what?** → hours + lines per member today. The extension already stores per-person failed commands / failed builds / repeated failures — "who hit the most errors" just isn't surfaced in the group view yet (extend the `$group` with `$sum` of those counters).
 28. **Is Insights ML?** → no, deterministic statistics; LLM narration designed, not built.
 29. **consistencyIndex?** → `1 − coefficient of variation` of daily minutes, clamped [0,1].
-30. **truePeakWindow?** → most productive hour (weighted commits/lines/churn), not busiest.
+30. **truePeakWindow?** → most productive **2-hour** window, scored on surviving minutes `minutes×(1−churn)`, with a ≥3-distinct-day floor. Not the busiest.
 31. **Insights cached?** → no; recomputed every load.
 32. **Insufficient data?** → focus cards show "—" until extension 2.1.0; estimation needs 2 goals.
 33. **Cheat the leaderboard?** → harder as of 2026-09-09: `/api/extension` is IP-rate-limited (120/min) and `duration` is capped at 3600/flush. Still no idempotency key or per-key quota, so a valid key + a slow loop still inflates hours (#10 deferred).
