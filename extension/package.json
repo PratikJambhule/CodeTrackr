@@ -7,7 +7,7 @@
     "type": "git",
     "url": "https://github.com/Soham-Official/CodeTrackr.git"
   },
-  "version": "2.3.0",
+  "version": "2.4.0",
   "icon": "images/icon.png",
   "license": "MIT",
   "author": {
@@ -129,7 +129,7 @@
     "build": "npm run typecheck && npm run esbuild-base -- --minify",
     "watch": "npm run esbuild-base -- --sourcemap --watch",
     "package": "vsce package",
-    "test": "node tests/trackers.test.js && node tests/activation.test.js",
+    "test": "node tests/trackers.test.js && node tests/activation.test.js && node tests/flushSafety.test.js",
     "pretest": "npm run build"
   },
   "devDependencies": {

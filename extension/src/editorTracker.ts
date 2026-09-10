@@ -52,6 +52,7 @@ export class EditorTracker {
   private recentInserts: InsertRecord[] = [];
   private lastEditMs = 0;
   private lastSampleMs = 0;
+  private paused = false;
 
   private static empty(): EditorAnalyticsSnapshot {
     return {
@@ -172,11 +173,28 @@ export class EditorTracker {
     this.files.add(fileName);
   }
 
+  /**
+   * Idle-pause gate. The attention sampler runs on its own interval, so an
+   * unattended-but-focused window used to bank the whole idle gap as `readMs`,
+   * skewing comprehensionLoad. While paused we advance the clock and bank
+   * nothing.
+   */
+  public setPaused(paused: boolean, nowMs: number = Date.now()): void {
+    if (paused === this.paused) return;
+    this.sampleAttention(nowMs); // bank real time up to the pause boundary
+    this.paused = paused;
+    this.lastSampleMs = nowMs;
+  }
+
+  public isPaused(): boolean {
+    return this.paused;
+  }
+
   /** Called on a fixed interval; splits elapsed time into read vs write. */
   public sampleAttention(nowMs: number): void {
     const elapsed = nowMs - this.lastSampleMs;
     this.lastSampleMs = nowMs;
-    if (elapsed <= 0) return;
+    if (elapsed <= 0 || this.paused) return;
 
     if (this.lastEditMs > nowMs - elapsed) {
       this.counters.writeMs += elapsed;

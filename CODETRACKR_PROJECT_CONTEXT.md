@@ -115,14 +115,16 @@ workspace; each is installed and deployed independently.
  │  app.js → CORS → express.json → cookieParser → passport.initialize → route routers                 │
  │  verifyApiKey  ─┐                         isAuthenticated ─┐                                        │
  │                 ▼                                          ▼                                        │
- │  routes/extension.js  → normalisers → Activity.create()    routes/analytics|leaderboard|metrics|... │
- │                                                            → Activity.find/.aggregate → JS reduce   │
- │  services/notificationScheduler.js  (node-cron, hourly)                                             │
+ │  routes/extension.js → validate → normalisers →            routes/analytics|leaderboard|metrics|... │
+ │    planActivityWrite → 10-min bucket $inc upsert           → Activity.find/.aggregate → JS reduce   │
+ │  central (err,req,res,next) handler → { error, id }                                                 │
+ │  services/notificationScheduler.js  (node-cron, hourly + nightly rollup) — only when                │
+ │    require.main === module; serverless drives it via POST /api/internal/run-*                       │
  └───────────────────────────────────────────────┬───────────────────────────────────────────────────┘
                                                  ▼
                                         MongoDB Atlas
-                              (activities, users, groups, groupmembers,
-                               goals, teams, notifications)
+                              (activities, dailysummaries, users, groups,
+                               groupmembers, goals, teams, notifications)
 ```
 
 - **Style:** client–server, RESTish, **modular monolith** (one Express process, feature routers).

@@ -24,6 +24,7 @@ export class FocusTracker {
   private ticker?: NodeJS.Timeout;
 
   private focused = true;
+  private paused = false;
   private lastStateChangeMs = Date.now();
   private focusedMs = 0;
   private blurredMs = 0;
@@ -62,6 +63,24 @@ export class FocusTracker {
     this.focused = focused;
   }
 
+  /**
+   * Idle-pause gate. `focusedMs` is wall-clock time with the window in the
+   * foreground, so leaving VS Code focused while away from the keyboard used to
+   * accrue hours of phantom "focused" time — which then became the denominator
+   * of deepWorkRatio. While paused we stop accruing entirely; the clock is
+   * fast-forwarded so unpausing never back-fills the idle gap.
+   */
+  public setPaused(paused: boolean, nowMs: number = Date.now()): void {
+    if (paused === this.paused) return;
+    this.accrue(nowMs); // bank real time up to the pause boundary
+    this.paused = paused;
+    this.lastStateChangeMs = nowMs;
+  }
+
+  public isPaused(): boolean {
+    return this.paused;
+  }
+
   /** Called whenever the user edits or navigates. */
   public noteActivity(nowMs: number): void {
     if (this.blockStartMs === undefined) {
@@ -85,7 +104,8 @@ export class FocusTracker {
 
   private accrue(nowMs: number): void {
     const elapsed = nowMs - this.lastStateChangeMs;
-    if (elapsed > 0) {
+    // While idle-paused, advance the clock but bank nothing: the user is away.
+    if (elapsed > 0 && !this.paused) {
       if (this.focused) this.focusedMs += elapsed;
       else this.blurredMs += elapsed;
     }

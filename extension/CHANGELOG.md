@@ -2,6 +2,43 @@
 
 All notable changes to the CodeTrackr VS Code extension will be documented in this file.
 
+## [2.4.0] - 2026-09-10
+
+### Fixed — data loss
+
+- **Un-uploaded flushes are no longer destroyed.** `buildPayload` resets every tracker, but
+  four paths bailed out *after* that point and dropped the counters permanently: a
+  signal-less interval, a missing API key, an out-of-range duration, and — most often — a
+  failed upload. Unsent payloads are now merged forward into the next flush
+  (`mergeAnalytics`).
+- **Failed uploads actually retry now.** `sendActivity` caught its own errors and never
+  rethrew, so the `catch` in `flushIfNeeded` was unreachable and `bufferedMinutes = 0` ran
+  regardless. Every offline flush silently lost its interval — despite the docs claiming the
+  buffer was retried. `sendActivity` now returns a success boolean and the caller holds the
+  payload on failure. A `400` is treated as permanent (dropped) so a bad payload can't poison
+  every later flush.
+- **Read-only work is no longer discarded.** `payloadHasSignal` only looks at edits, commands
+  and commits, so an interval spent reading code and switching files was thrown away along
+  with its `readMs`, `fileSwitches` and `focusedMs`. It is now carried forward.
+
+### Fixed — metric accuracy
+
+- **`focusedMs` and `readMs` no longer bank idle time.** `FocusTracker`'s 15 s ticker and
+  `EditorTracker`'s 5 s attention sampler run on their own intervals and kept accruing while
+  the main loop was idle-paused. Leaving VS Code focused and walking away for five hours
+  added five hours of "focused" time to the next flush — which is the denominator of
+  `deepWorkRatio`, so the metric collapsed toward zero. Both trackers now expose
+  `setPaused()` and bank nothing during a pause; resuming does not back-fill the gap.
+- Work shorter than `minFlushMinutes` immediately before an idle pause is carried forward
+  instead of being dropped with the buffer.
+
+### Added
+
+- `tests/flushSafety.test.js` — 15 assertions covering the carry-forward merge rules and the
+  idle-pause gate.
+
+---
+
 ## [2.3.0] - 2026-09-08
 
 ### Changed
