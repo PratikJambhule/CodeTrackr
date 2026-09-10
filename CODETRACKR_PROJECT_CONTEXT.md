@@ -48,9 +48,9 @@ CodeTrackr-main/
 │   ├── middleware/auth.js        isAuthenticated (JWT cookie) + verifyApiKey (x-api-key header) + AUTH_BYPASS
 │   ├── models/                   Activity, user, Goal, Group, GroupMember, Team, Notification
 │   ├── routes/                   analytics, auth, extension, goals, groups, leaderboard, metrics, notifications, team, user
-│   ├── services/                 authorization, passwordHash, activityNormalizers, metricsService, metricsDerive, notificationScheduler
+│   ├── services/                 authorization, passwordHash, textQuery, activityNormalizers, activityBucket, ingestValidation, metricsService, metricsDerive, sessionize, insightsBaseline, rulesEngine, dailySummary, dailyRollup, notificationScheduler
 │   ├── scripts/                  preview-insights.js, seed-demo-insights.js, cleanup-terminal-analytics.js
-│   ├── tests/                    streak, ingest, metrics, authorization, routeGuards, passwordHash  (plain node:assert)
+│   ├── tests/                    18 plain node:assert suites / 292 assertions — streak, ingest, metrics, authorization, routeGuards, passwordHash, activityBucket, activityModel, ingestWiring, rollup, quickWins, ingestValidation, metricsService, sessionize, insightsBaseline, textQuery, leaderboardScore, rulesEngine
 │   ├── tools/                    ~15 ad-hoc seed/cleanup scripts (dev only)
 │   ├── server.js.old             Legacy monolith (unused, kept for reference — had helmet + rate-limit)
 │   └── vercel.json               Serverless build config
@@ -579,9 +579,34 @@ metrics, tracing); CI (typecheck + both test suites) + automated Marketplace pub
     a Goals-page button. Nothing had ever set `status: 'completed'`.
   - **New:** `services/sessionize.js` (gap-split sessions + rule-based archetypes),
     `services/insightsBaseline.js` + `UserInsights` (90-day baseline, lazily cached, no cron).
-  - Backend **15 suites / 246 assertions**, extension **3 suites / 52**, frontend build green.
-- `H-7`, `H-8` (leaderboard scans) **open**; `H-13` (serverless cron) addressed by `#15`;
-  most other `MEDIUM`/`LOW` items **open**.
+- **Social-surface sweep + rules engine (2026‑09‑10) done** — the leaderboard, groups and
+  notifications routes had only been audited shallowly. Design notes in `docs/RULES_ENGINE.md`.
+  - **`H-16` regex injection / ReDoS.** `GET /api/groups/discover?search=` passed raw input to
+    `{ $regex }`, so any signed-in user could list every group with `.*` or stall the event loop
+    with `(a+)+$`. New `services/textQuery.js` (`escapeRegex`/`containsRegex`/`exactRegex`,
+    length-capped); the two hand-rolled escapes in `goals.js` and `metricsService.js` now share it.
+  - **`H-17` the leaderboard's `commits` was fabricated** — it summed `flushCount` (uploads every
+    ~2 min of coding) and labelled it commits, while real counts sat unused in
+    `gitAnalytics.commits`. Now reads the real field, falling back per-document to
+    `terminalAnalytics.gitActivity.commits` for pre-`gitStateTracker` documents; never summed.
+  - **`H-18` `Math.max(...)` spread** over one argument per user throws `RangeError` past ~100k —
+    it fails exactly when the product succeeds. Replaced with a fold.
+  - **`M-18`–`M-21`:** negative `impact` scores clamped; `CastError`/`ValidationError` mapped to
+    **400** centrally (a malformed `:id` used to be a 500); `routes/notifications.js` now uses the
+    central error handler and 404s on a delete that matched nothing; the group leaderboard
+    surfaces commits + command/build failure counts and rates — the "who's hitting the most
+    errors" comparison the project was built around, from data the extension always collected.
+  - **New:** `services/rulesEngine.js` — declarative threshold rules over the derived metrics,
+    gated on the same confidence sidecar, each finding carrying its own evidence. Wired into
+    `GET /api/metrics` as `insights`, rendered as a "What stands out" panel. Deliberately not a
+    model and not an LLM. `validateRules()` throws at module load if a rule requires a metric
+    that has no confidence gate — the vacuous-guard bug that once shipped in `insightsBaseline`.
+  - Backend **18 suites / 292 assertions**, extension **3 suites / 52**, frontend build green.
+  - Verified read-only against the most active real account: 30-day window → **0 findings, 10
+    checks skipped** (correct: 6 sparse active days); 365-day → 2 findings with real evidence.
+- `H-7`, `H-8` (leaderboard scans) **still open** — this batch fixed the leaderboard's
+  correctness, not its complexity; the fix is the deferred `UserStats` rollup. `H-13`
+  (serverless cron) addressed by `#15`; most other `MEDIUM`/`LOW` items **open**.
 - ⚠️ **Nothing on this branch is deployed.** See the §10 banner.
 - Extension packaged as `2.3.0`; Marketplace publication is manual / unverified.
 - Frontend build is ✅ green (`tsc -b && vite build`) as of 2026-09-09; CI runs it on every push.

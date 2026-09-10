@@ -32,6 +32,15 @@ interface LeaderboardEntry {
   email: string;
   codingHours: number;
   totalLinesAdded: number;
+  commits: number;
+  failedCommands: number;
+  totalCommands: number;
+  // null when nothing ran at all -- "never failed" and "never ran" must not
+  // render the same way.
+  commandFailureRate: number | null;
+  failedBuilds: number;
+  buildRuns: number;
+  buildFailureRate: number | null;
 }
 
 interface GroupDetails {
@@ -577,14 +586,29 @@ export default function Groups(_props: { user?: unknown }) {
                 <Trophy className="w-5 h-5" />
                 Leaderboard
               </h3>
-              <div className="rounded-lg overflow-hidden" style={{ backgroundColor: `${theme.colors.surface}80` }}>
-                <table className="w-full">
+              <div className="rounded-lg overflow-x-auto" style={{ backgroundColor: `${theme.colors.surface}80` }}>
+                <table className="w-full min-w-[640px]">
                   <thead style={{ backgroundColor: `${theme.colors.surface}cc` }}>
                     <tr>
                       <th className="px-4 py-3 text-left font-semibold" style={{ color: theme.colors.text }}>Rank</th>
                       <th className="px-4 py-3 text-left font-semibold" style={{ color: theme.colors.text }}>Name</th>
                       <th className="px-4 py-3 text-right font-semibold" style={{ color: theme.colors.text }}>Hours</th>
                       <th className="px-4 py-3 text-right font-semibold" style={{ color: theme.colors.text }}>Lines</th>
+                      <th className="px-4 py-3 text-right font-semibold" style={{ color: theme.colors.text }}>Commits</th>
+                      <th
+                        className="px-4 py-3 text-right font-semibold"
+                        style={{ color: theme.colors.text }}
+                        title="Failed terminal commands, and the share of all commands that failed"
+                      >
+                        Cmd fails
+                      </th>
+                      <th
+                        className="px-4 py-3 text-right font-semibold"
+                        style={{ color: theme.colors.text }}
+                        title="Failed builds, and the share of all build runs that failed"
+                      >
+                        Build fails
+                      </th>
                     </tr>
                   </thead>
                   <tbody>
@@ -614,6 +638,33 @@ export default function Groups(_props: { user?: unknown }) {
                           <GradientText animationSpeed={4}>
                             {entry.totalLinesAdded.toLocaleString()}
                           </GradientText>
+                        </td>
+                        <td className="px-4 py-3 text-right" style={{ color: theme.colors.textSecondary }}>
+                          {(entry.commits ?? 0).toLocaleString()}
+                        </td>
+                        <td className="px-4 py-3 text-right" style={{ color: theme.colors.textSecondary }}>
+                          {entry.commandFailureRate === null || entry.commandFailureRate === undefined ? (
+                            <span title="No commands recorded yet">—</span>
+                          ) : (
+                            <>
+                              {entry.failedCommands.toLocaleString()}
+                              <span className="text-xs opacity-70">
+                                {' '}({Math.round(entry.commandFailureRate * 100)}%)
+                              </span>
+                            </>
+                          )}
+                        </td>
+                        <td className="px-4 py-3 text-right" style={{ color: theme.colors.textSecondary }}>
+                          {entry.buildFailureRate === null || entry.buildFailureRate === undefined ? (
+                            <span title="No builds recorded yet">—</span>
+                          ) : (
+                            <>
+                              {entry.failedBuilds.toLocaleString()}
+                              <span className="text-xs opacity-70">
+                                {' '}({Math.round(entry.buildFailureRate * 100)}%)
+                              </span>
+                            </>
+                          )}
                         </td>
                       </tr>
                     ))}

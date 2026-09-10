@@ -108,9 +108,22 @@ app.use('/api/internal', internalRoutes);
 app.use((err, req, res, next) => {
   const id = Math.random().toString(36).slice(2, 10);
   console.error(`[err:${id}] ${req.method} ${req.originalUrl}`, err);
-  const status = err.status || err.statusCode || 500;
+
+  // A malformed :id in the path is a client error, not a server fault. Mongoose
+  // throws CastError from findById/findOne the moment it cannot coerce the
+  // value, so without this every `/api/<thing>/not-an-id` answered 500.
+  let status = err.status || err.statusCode || 500;
+  let publicMessage = err.publicMessage;
+  if (err && err.name === 'CastError') {
+    status = 400;
+    publicMessage = publicMessage || 'Malformed identifier';
+  } else if (err && err.name === 'ValidationError') {
+    status = 400;
+    publicMessage = publicMessage || 'Invalid request body';
+  }
+
   res.status(status).json({
-    error: status === 500 ? 'Internal server error' : (err.publicMessage || 'Request failed'),
+    error: status === 500 ? 'Internal server error' : (publicMessage || 'Request failed'),
     id,
   });
 });

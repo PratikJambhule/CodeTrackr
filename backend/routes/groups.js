@@ -6,6 +6,11 @@ const User = require('../models/user');
 const Activity = require('../models/Activity');
 const { isAuthenticated } = require('../middleware/auth');
 const { hashPassword, verifyPassword, isHashed } = require('../services/passwordHash');
+const { containsRegex } = require('../services/textQuery');
+
+// Discover is an unbounded browse of every group in the system. Cap it so the
+// response cannot grow with the size of the install.
+const DISCOVER_LIMIT = 100;
 
 // Create a new group
 router.post('/create', isAuthenticated, async (req, res, next) => {
@@ -45,8 +50,10 @@ router.post('/create', isAuthenticated, async (req, res, next) => {
             group: safeGroup
         });
     } catch (error) {
-        console.error('Error creating group:', error);
-        res.status(400).json({ message: 'Error creating group' });
+        // Was a blanket 400 "Error creating group", which reported a database
+        // outage as a client mistake. Schema failures still surface as 400 via
+        // the central handler's ValidationError mapping.
+        return next(error);
     }
 });
 
@@ -82,15 +89,19 @@ router.get('/discover', isAuthenticated, async (req, res, next) => {
 
         // Find groups user is not a member of
         let query = { _id: { $nin: joinedGroupIds } };
-        
-        if (search) {
-            query.name = { $regex: search, $options: 'i' };
+
+        // Escaped: `$regex: search` let the caller compile their own pattern,
+        // so `(a+)+$` backtracked catastrophically and stalled the event loop.
+        const nameRe = containsRegex(search);
+        if (nameRe) {
+            query.name = nameRe;
         }
 
         const groups = await Group.find(query)
             .select('-password')
             .populate('createdBy', 'name email')
-            .sort({ createdAt: -1 });
+            .sort({ createdAt: -1 })
+            .limit(DISCOVER_LIMIT);
 
         res.json({ success: true, groups });
     } catch (error) {
@@ -136,14 +147,30 @@ router.get('/:groupId/details', isAuthenticated, async (req, res, next) => {
         // Get member IDs for leaderboard
         const memberIds = members.map(m => m.userId._id.toString());
 
-        // Calculate leaderboard based on coding hours
+        // Calculate leaderboard based on coding hours.
+        //
+        // Also surfaces build/command failures. That is the point of the whole
+        // group feature -- "who's hitting the most errors" -- and the extension
+        // has always collected it in terminalAnalytics; nothing read it back.
         const activityData = await Activity.aggregate([
-            { $match: { userId: { $in: memberIds } } },
+            { $match: { userId: { $in: memberIds }, duration: { $gte: 0 } } },
             {
                 $group: {
                     _id: '$userId',
                     totalHours: { $sum: { $divide: ['$duration', 3600] } },
-                    totalLinesAdded: { $sum: '$linesAdded' }
+                    totalLinesAdded: { $sum: '$linesAdded' },
+                    failedCommands: { $sum: { $ifNull: ['$terminalAnalytics.failedCommands', 0] } },
+                    totalCommands: { $sum: { $ifNull: ['$terminalAnalytics.totalCommands', 0] } },
+                    failedBuilds: { $sum: { $ifNull: ['$terminalAnalytics.failedBuilds', 0] } },
+                    buildRuns: { $sum: { $ifNull: ['$terminalAnalytics.buildRuns', 0] } },
+                    commits: {
+                        $sum: {
+                            $ifNull: [
+                                '$gitAnalytics.commits',
+                                { $ifNull: ['$terminalAnalytics.gitActivity.commits', 0] },
+                            ],
+                        },
+                    }
                 }
             }
         ]);
@@ -152,26 +179,51 @@ router.get('/:groupId/details', isAuthenticated, async (req, res, next) => {
         const activityMap = {};
         activityData.forEach(entry => {
             activityMap[entry._id.toString()] = {
-                totalHours: entry.totalHours,
-                totalLinesAdded: entry.totalLinesAdded
+                totalHours: entry.totalHours || 0,
+                totalLinesAdded: entry.totalLinesAdded || 0,
+                failedCommands: entry.failedCommands || 0,
+                totalCommands: entry.totalCommands || 0,
+                failedBuilds: entry.failedBuilds || 0,
+                buildRuns: entry.buildRuns || 0,
+                commits: entry.commits || 0
             };
         });
 
-        // Build leaderboard with ALL members (including those with no activity)
-        const leaderboardWithUsers = await Promise.all(
-            members.map(async (member) => {
-                const userId = member.userId._id.toString();
-                const stats = activityMap[userId] || { totalHours: 0, totalLinesAdded: 0 };
-                
-                return {
-                    userId: userId,
-                    userName: member.userId.name,
-                    email: member.userId.email,
-                    codingHours: parseFloat(stats.totalHours.toFixed(2)),
-                    totalLinesAdded: stats.totalLinesAdded
-                };
-            })
-        );
+        // Build leaderboard with ALL members (including those with no activity).
+        // Nothing here awaits, so no Promise.all is needed.
+        const EMPTY_STATS = {
+            totalHours: 0, totalLinesAdded: 0, failedCommands: 0,
+            totalCommands: 0, failedBuilds: 0, buildRuns: 0, commits: 0
+        };
+
+        const leaderboardWithUsers = members.map((member) => {
+            const userId = member.userId._id.toString();
+            const stats = activityMap[userId] || EMPTY_STATS;
+
+            // Rates are null (not 0) when nothing ran -- "never failed a build"
+            // and "never ran a build" must not render identically.
+            const commandFailureRate = stats.totalCommands > 0
+                ? Math.round((stats.failedCommands / stats.totalCommands) * 100) / 100
+                : null;
+            const buildFailureRate = stats.buildRuns > 0
+                ? Math.round((stats.failedBuilds / stats.buildRuns) * 100) / 100
+                : null;
+
+            return {
+                userId: userId,
+                userName: member.userId.name,
+                email: member.userId.email,
+                codingHours: parseFloat(stats.totalHours.toFixed(2)),
+                totalLinesAdded: stats.totalLinesAdded,
+                commits: stats.commits,
+                failedCommands: stats.failedCommands,
+                totalCommands: stats.totalCommands,
+                commandFailureRate,
+                failedBuilds: stats.failedBuilds,
+                buildRuns: stats.buildRuns,
+                buildFailureRate
+            };
+        });
 
         // Sort by hours and add rank
         leaderboardWithUsers.sort((a, b) => b.codingHours - a.codingHours);
@@ -260,29 +312,23 @@ router.post('/:groupId/join', isAuthenticated, async (req, res, next) => {
 router.post('/:groupId/leave', isAuthenticated, async (req, res, next) => {
     try {
         const { groupId } = req.params;
-        console.log(`Leave group request: groupId=${groupId}, userId=${req.user._id}`);
 
-        const membership = await GroupMember.findOneAndDelete({ 
-            groupId, 
-            userId: req.user._id 
+        const membership = await GroupMember.findOneAndDelete({
+            groupId,
+            userId: req.user._id
         });
 
         if (!membership) {
-            console.log(`Membership not found for user ${req.user._id} in group ${groupId}`);
             return res.status(400).json({ message: 'You are not a member of this group' });
         }
 
-        console.log(`Membership deleted successfully`);
-
         // Check if group has any members left
         const remainingMembers = await GroupMember.countDocuments({ groupId });
-        console.log(`Remaining members in group: ${remainingMembers}`);
 
         // If no members left, delete the group
         if (remainingMembers === 0) {
             await Group.findByIdAndDelete(groupId);
-            console.log(`Group ${groupId} deleted as no members remain`);
-            return res.json({ 
+            return res.json({
                 success: true, 
                 message: 'Group left and deleted as there were no remaining members' 
             });

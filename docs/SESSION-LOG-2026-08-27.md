@@ -410,6 +410,72 @@ Fixed in `306704d`.
 
 ---
 
+## 12. Social-surface sweep + rules engine (2026-09-10)
+
+Design notes: `docs/RULES_ENGINE.md`. The leaderboard, groups and notifications routes had only
+been audited shallowly in §11 — this pass read them line by line. Everything below was found by
+reading the code, and every fix has a test.
+
+**One security finding.** `GET /api/groups/discover?search=` passed the raw query string into
+`{ $regex: search }`. Any authenticated user could compile their own pattern: `.*` returns every
+group in the system (private group names included — the password gates *joining*, not listing),
+and `(a+)+$` backtracks catastrophically against a long name, pinning the event loop for the
+whole process on a single request. Now escaped through a shared `services/textQuery.js` and
+bounded to 100 results. The two places that already escaped by hand were repointed at it, so
+there is one implementation to audit rather than three.
+
+**The most-visible number on the app was fabricated.** The leaderboard summed `flushCount` — the
+count of extension uploads, one per ~2 minutes of active coding — and returned it to the client
+as `commits`, with `speed` documented as "Based on commits frequency". Real commit counts had
+been collected in `gitAnalytics.commits` the entire time and were never read. Fixed to use the
+real field, falling back per document to `terminalAnalytics.gitActivity.commits` for documents
+predating `gitStateTracker`; the two are views of the same event and are never summed.
+
+**A crash that arrives with success.** `Math.max(...leaderboardData.map(...))` spreads one
+argument per user and throws `RangeError` past the engine's argument limit (~100k). The test
+asserts both that the replacement survives 200k rows and that the old approach really does throw
+at that size, so the reason for the helper cannot be lost.
+
+**Smaller correctness fixes.** `impact` scored `netCodeChanges / max` and clamped only the top,
+so a net-deletion window produced a negative score that dragged the averaged `overall` below
+zero — a refactor is not negative impact. A malformed `:id` answered 500 everywhere, because
+Mongoose throws `CastError` and the central handler had no mapping for it; mapped once,
+centrally, rather than adding a guard to each route. All five notification handlers answered
+`res.status(500)` in their own `catch`, bypassing the central handler added in the quick-wins
+batch, and `DELETE /:id` reported success whether or not anything matched.
+
+**The feature the project was built for.** The group leaderboard ranked on hours and lines only.
+The stated motive is friendly competition including *"who's hitting the most errors"*, and
+`terminalAnalytics.failedCommands` / `failedBuilds` have been collected since the beginning with
+nothing ever reading them back. Now returned with rates and rendered. A rate is `null` (shown
+`—`) when nothing ran, so "never failed a build" and "never ran a build" cannot be confused.
+
+**The rules engine.** `services/rulesEngine.js` turns the metrics into a short list of plain
+statements. Deliberately not a model and not an LLM: on ~140 documents of real analytics data,
+a probabilistic layer would manufacture exactly the false authority §11 existed to remove.
+Thirteen declarative rules, each gated on the same confidence sidecar the grid uses, each finding
+carrying the evidence that fired it.
+
+The design lesson from §11 is encoded rather than remembered: `requires` names are validated
+against `GATED_METRICS` **at module load**, because `confidence !== 'insufficient'` evaluates
+true for `undefined` — the vacuous guard that once baselined `interruptionsPerHour` against a
+zero. A rule requiring an ungated metric is now a startup crash, not a wrong number.
+
+**Verified against live data** (read-only, most active real account, 6172 documents):
+
+| window | active days | findings | skipped |
+|---|---|---|---|
+| 30 days | 6 | **0** | 10 |
+| 365 days | 52 | 2 | 9 |
+
+The zero is the design working — six sparse days is not enough to say anything. `blockCount` was
+0 in *both* windows, independently confirming §11's focus-analytics blocker.
+
+Backend 15 → **18 suites / 292 assertions**; extension **3 / 52** unchanged; frontend build green.
+`H-7`/`H-8` remain open: this batch fixed the leaderboard's correctness, not its complexity.
+
+---
+
 ## Appendix A — Why this is a file and not claude-mem
 
 claude-mem was requested for context saving and was attempted repeatedly. Every call failed:

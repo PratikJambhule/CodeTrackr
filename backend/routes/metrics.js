@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { isAuthenticated } = require('../middleware/auth');
 const { buildMetrics } = require('../services/metricsService');
+const { evaluate } = require('../services/rulesEngine');
 
 const MAX_WINDOW_DAYS = 365;
 
@@ -21,7 +22,18 @@ router.get('/', isAuthenticated, async (req, res) => {
         const timezoneOffset = Number.isFinite(requestedTz) ? requestedTz : 0;
 
         const metrics = await buildMetrics(req.user._id.toString(), { days, timezoneOffset });
-        res.json({ success: true, metrics });
+
+        // Rule-based reading of those numbers. Pure and in-process -- it adds no
+        // query. A failure here must not cost the caller their metrics, so the
+        // panel degrades to empty rather than failing the request.
+        let insights = { findings: [], skipped: [], totalFindings: 0 };
+        try {
+            insights = evaluate(metrics);
+        } catch (err) {
+            console.error('rulesEngine failed; serving metrics without findings', err);
+        }
+
+        res.json({ success: true, metrics, insights });
     } catch (error) {
         console.error('Error building metrics:', error);
         res.status(500).json({ success: false, message: 'Failed to build metrics' });

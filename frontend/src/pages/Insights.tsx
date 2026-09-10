@@ -91,9 +91,37 @@ const fmtHour = (h: number) => `${String(((h % 24) + 24) % 24).padStart(2, '0')}
 const needMoreData = (meta?: MetricMeta) =>
   meta ? `Needs more data — ${meta.sampleSize} of ${meta.unit} so far.` : 'Not enough data yet.';
 
+type Severity = 'warning' | 'info' | 'positive';
+
+/**
+ * One rule-engine finding. `evidence` holds the numbers that tripped the rule,
+ * so a claim can always be checked against the metric it came from.
+ */
+interface Finding {
+  id: string;
+  category: string;
+  severity: Severity;
+  title: string;
+  detail: string;
+  evidence: Record<string, unknown>;
+}
+
+interface InsightsPayload {
+  findings: Finding[];
+  skipped: { id: string; reason: string; metrics?: string[]; message?: string }[];
+  totalFindings: number;
+}
+
+const SEVERITY_ICON: Record<Severity, string> = {
+  warning: '▲',
+  info: '●',
+  positive: '✓',
+};
+
 export default function Insights() {
   const { theme } = useTheme();
   const [metrics, setMetrics] = useState<Metrics | null>(null);
+  const [insights, setInsights] = useState<InsightsPayload | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [days, setDays] = useState(30);
@@ -116,6 +144,8 @@ export default function Insights() {
       }
       const data = await res.json();
       setMetrics(data.metrics);
+      // Older backends do not send `insights`; the panel simply hides.
+      setInsights(data.insights ?? null);
     } catch {
       setError('Could not reach the server.');
     } finally {
@@ -297,6 +327,69 @@ export default function Insights() {
           {metrics.activeDays === 1 ? 'day' : 'days'} in the last {metrics.windowDays} days.
           Anything marked <strong>—</strong> does not have enough data behind it yet.
         </p>
+
+        {insights && insights.findings.length > 0 && (
+          <div className="mb-6 rounded-xl p-5" style={card}>
+            <h2 className="text-lg font-semibold mb-1" style={{ color: theme.colors.text }}>
+              What stands out
+            </h2>
+            <p className="text-xs mb-4" style={{ color: theme.colors.textSecondary }}>
+              Threshold rules read over the metrics below — not a prediction. Each one shows the
+              numbers it fired on.
+            </p>
+
+            <ul className="space-y-3">
+              {insights.findings.map((f) => {
+                // The palette has no semantic colours (28 themes, all
+                // primary/accent), so severity uses fixed hues on the rail only.
+                const rail =
+                  f.severity === 'warning' ? '#f59e0b'
+                    : f.severity === 'positive' ? '#10b981'
+                      : theme.colors.accent;
+                return (
+                  <li
+                    key={f.id}
+                    className="pl-3"
+                    style={{ borderLeft: `3px solid ${rail}` }}
+                  >
+                    <div className="flex items-start gap-2">
+                      <span aria-hidden="true" style={{ color: rail }} className="text-xs mt-1">
+                        {SEVERITY_ICON[f.severity]}
+                      </span>
+                      <div className="min-w-0">
+                        <p className="font-medium text-sm" style={{ color: theme.colors.text }}>
+                          {f.title}
+                        </p>
+                        <p className="text-sm mt-0.5" style={{ color: theme.colors.textSecondary }}>
+                          {f.detail}
+                        </p>
+                      </div>
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
+
+            {insights.totalFindings > insights.findings.length && (
+              <p className="text-xs mt-3" style={{ color: theme.colors.textSecondary }}>
+                {insights.totalFindings - insights.findings.length} more not shown.
+              </p>
+            )}
+          </div>
+        )}
+
+        {insights && insights.findings.length === 0 && insights.skipped.length > 0 && (
+          <div className="mb-6 rounded-xl p-5" style={card}>
+            <h2 className="text-lg font-semibold mb-1" style={{ color: theme.colors.text }}>
+              What stands out
+            </h2>
+            <p className="text-sm" style={{ color: theme.colors.textSecondary }}>
+              Nothing worth flagging in this window. {insights.skipped.length} check
+              {insights.skipped.length === 1 ? '' : 's'} could not run yet for lack of data — keep
+              coding with the extension installed and they will start to fill in.
+            </p>
+          </div>
+        )}
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <Stat

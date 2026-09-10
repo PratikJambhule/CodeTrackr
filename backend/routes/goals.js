@@ -3,6 +3,7 @@ const router = express.Router();
 const Goal = require('../models/Goal');
 const Activity = require('../models/Activity');
 const { isAuthenticated } = require('../middleware/auth');
+const { exactRegex } = require('../services/textQuery');
 
 // Create a new goal
 router.post('/create', isAuthenticated, async (req, res, next) => {
@@ -56,7 +57,8 @@ function goalActivityQuery(goal, userIdStr) {
     const to = new Date(goal.completedAt || goal.deadline || Date.now());
     if (!from || Number.isNaN(from.getTime()) || Number.isNaN(to.getTime())) return null;
 
-    const stackRe = new RegExp(`^${stack.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i');
+    const stackRe = exactRegex(stack);
+    if (!stackRe) return null;
     return {
         userId: userIdStr,
         timestamp: { $gte: from, $lte: to },

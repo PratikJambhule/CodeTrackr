@@ -28,6 +28,7 @@ const {
 } = require('./metricsDerive');
 const { sessionize, archetypeMix } = require('./sessionize');
 const { getBaseline, deltaFrom } = require('./insightsBaseline');
+const { exactRegex } = require('./textQuery');
 
 /**
  * Sessionization needs raw buckets (a daily summary has no within-day
@@ -331,7 +332,8 @@ async function buildGoalPairs(userId, userIdStr) {
         const to = new Date(goal.completedAt || goal.updatedAt || Date.now());
         if (!from || Number.isNaN(from.getTime()) || Number.isNaN(to.getTime())) continue;
 
-        const stackRe = new RegExp(`^${stack.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i');
+        const stackRe = exactRegex(stack);
+        if (!stackRe) continue;
         const [row] = await Activity.aggregate([
             {
                 $match: {

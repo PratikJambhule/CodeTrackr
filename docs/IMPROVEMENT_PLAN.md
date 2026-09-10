@@ -75,7 +75,22 @@ metric definitions in `docs/INSIGHTS_METRICS.md`. Fixed **H-14** (extension data
 (goal completion — the state transition that made estimation calibration reachable at all).
 Added sessionization + rule-based archetypes (`services/sessionize.js`) and a lazily-cached
 90-day baseline (`services/insightsBaseline.js`, `UserInsights`, no cron). Extension **2.4.0**.
-Backend 12 → **15 suites / 246 assertions**; extension 2 → **3 / 52**.
+
+**Social-surface sweep + rules engine — DONE 2026-09-10.** The leaderboard, groups and
+notifications routes had only been audited shallowly. Fixed **H-16** (regex injection / ReDoS in
+group discovery), **H-17** (the leaderboard reported flush counts as commits), **H-18**
+(`Math.max(...)` spread crash), **M-18** (negative impact scores), **M-19** (malformed `:id` →
+500), **M-20** (notifications bypassing the central error handler; delete reporting false
+success), **M-21** (group leaderboard now surfaces build/command failures — the feature the
+project's stated motive was built around). Added `services/rulesEngine.js`: declarative
+threshold rules over the derived metrics, gated on the same confidence sidecar, each finding
+carrying the evidence that fired it. Deliberately not a model and not an LLM — see
+`docs/RULES_ENGINE.md`. Backend 15 → **18 suites / 292 assertions**; extension **3 / 52**
+(unchanged this batch).
+
+⚠️ **H-7 remains open.** The leaderboard still aggregates the whole `activities` collection and
+loads every user with no cache. This batch fixed its *correctness*, not its complexity; the fix
+is the deferred `UserStats` running-total rollup.
 
 ⚠️ **Two findings that block production regardless of code quality** (see `AUDIT` §7):
 1. **Nothing on this branch is deployed.** 0 of 7034 activity documents carry `bucketStart`,
@@ -181,6 +196,23 @@ is added (this closes Quick-Wins #5). Live migration: `node backend/scripts/migr
 **Fix:** `setPaused()` on both trackers; they bank nothing while paused and unpausing does not back-fill the gap.
 **Files:** `extension/src/focusTracker.ts`, `extension/src/editorTracker.ts`, `extension/src/extension.ts`.
 
+### H-16. Regex injection / ReDoS in group discovery — ✅ FIXED 2026-09-10
+**Problem:** `GET /api/groups/discover?search=` passed the raw query string into `{ $regex: search }`. Any authenticated user could compile their own pattern: `.*` listed every group in the system, and `(a+)+$` backtracks catastrophically against a long name — one request pins the event loop for the whole process.
+**Impact:** information disclosure (private group names are returned by `/discover`; only the password gates *joining*) plus a single-request denial of service. Reachable by any signed-in account.
+**Fix:** new `services/textQuery.js` — `escapeRegex` / `containsRegex` / `exactRegex`, all term-length capped. `/discover` now matches literally and is bounded to 100 results. The two places that already escaped by hand (`routes/goals.js`, `services/metricsService.js`) were repointed at the shared helper so there is one implementation to audit.
+**Files:** `backend/services/textQuery.js` (new), `backend/routes/groups.js`, `backend/routes/goals.js`, `backend/services/metricsService.js`. **Verified:** `tests/textQuery.test.js` (13), including a timed assertion that the ReDoS pattern returns immediately once escaped.
+
+### H-17. The leaderboard reported flush counts as commits — ✅ FIXED 2026-09-10
+**Problem:** `activityCount: { $sum: { $ifNull: ['$flushCount', 1] } }` was returned to the client as `commits`, and `speed` was documented as "Based on commits frequency". A flush is an extension upload every ~2 minutes of active coding; it has nothing to do with committing. Real commit counts were being collected the whole time at `gitAnalytics.commits`.
+**Impact:** the single most-visible number on the app's most-visible page was fabricated. `commitScore` ("out of 5.0", `commits / 20`) was pure noise.
+**Fix:** sum `gitAnalytics.commits`, falling back per-document to `terminalAnalytics.gitActivity.commits` for documents written before `gitStateTracker` existed. The two are views of the same event and are never summed. `flushes` is still returned, under its own honest name.
+**Files:** `backend/routes/leaderboard.js`.
+
+### H-18. `Math.max(...)` spread crashes the leaderboard at scale — ✅ FIXED 2026-09-10
+**Problem:** `Math.max(...leaderboardData.map(u => u.codeChanges))` spreads one argument per user. Past the engine's argument limit (~100k) this throws `RangeError: Maximum call stack size exceeded`, taking the endpoint down for everybody — and it fails at exactly the moment the product succeeds.
+**Fix:** `maxOf(rows, pick)` folds instead of spreading, floors at 1 so it is always a safe divisor, and skips non-finite values.
+**Files:** `backend/routes/leaderboard.js`. **Verified:** `tests/leaderboardScore.test.js` (11), including a 200k-row case and an assertion that the old spread really does throw at that size.
+
 ---
 
 ## MEDIUM — maintainability, API and DB efficiency
@@ -204,6 +236,11 @@ is added (this closes Quick-Wins #5). Live migration: `node backend/scripts/migr
 - **M-17. ✅ FIXED 2026-09-10.** **No route ever set `Goal.status = 'completed'`** — only `scripts/seed-demo-insights.js` did — so `estimationCalibration` was permanently unreachable in production. Added owner-scoped `PATCH /api/goals/:goalId/complete` + `/reopen`, `Goal.completedAt`, and the Goals-page button. The activity join was also rebuilt: it matched `language === goal.techStack` (exact, case-sensitive, free text) with **no lower time bound**, so a goal tagged "React" matched nothing while one tagged "javascript" matched all history. Now case-insensitive language *or* project, bounded to the goal's lifetime; an unmatched goal is skipped rather than scored 0.
 
 ---
+
+- **M-18. ✅ FIXED 2026-09-10.** `impact` could go negative. It scored `netCodeChanges / maxChanges * 5` and clamped only the top with `Math.min(5, x)`; a window where you deleted more than you added produced a negative `impact`, which then dragged the averaged `overall` below zero. A refactor that removes code is not negative impact. `score()` now clamps both ends and rejects non-finite inputs; the leaderboard aggregate also excludes `duration < 0` so corrupt rows cannot subtract from a real total. **Verified:** `tests/leaderboardScore.test.js`.
+- **M-19. ✅ FIXED 2026-09-10.** A malformed `:id` answered **500**. Mongoose throws `CastError` the moment it cannot coerce a path parameter, and the central handler's `err.status || 500` had no mapping for it, so `/api/notifications/not-an-id` looked like a server fault. The handler now maps `CastError` → 400 and `ValidationError` → 400 for every route at once, rather than adding an id check to each.
+- **M-20. ✅ FIXED 2026-09-10.** All five `routes/notifications.js` handlers answered `res.status(500).json({ message })` in their own `catch`, bypassing the central handler added in M-10 — no correlation id, no CastError mapping. All now `return next(error)`. `DELETE /:id` also answered 200 whether or not anything matched, so deleting another user's notification id looked like it worked; it now 404s, matching the PATCH beside it. `groups /create` likewise reported database outages as `400 Error creating group`.
+- **M-21. ✅ FIXED 2026-09-10.** The group leaderboard ranked on hours and lines only. The project's stated motive is friendly competition including *"who's hitting the most errors"*, and `terminalAnalytics` has collected `failedCommands` / `failedBuilds` since the beginning — nothing ever read them back. `/:groupId/details` now returns commits and both failure counts with rates, and the Groups table renders them. Rates are `null` (rendered `—`) when nothing ran, so "never failed a build" and "never ran a build" cannot be confused.
 
 ## LOW — polish, DX
 

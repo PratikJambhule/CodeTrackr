@@ -3,23 +3,37 @@ const router = express.Router();
 const Notification = require('../models/Notification');
 const { isAuthenticated } = require('../middleware/auth');
 
-// Get all notifications for the logged-in user
-router.get('/', isAuthenticated, async (req, res) => {
+/**
+ * Every handler forwards failures with `next(error)` rather than answering 500
+ * itself. The central handler in app.js logs the full error with a correlation
+ * id, maps Mongoose CastError to 400, and returns a generic body — echoing
+ * `error.message` here leaked internal detail and turned a malformed :id into a
+ * 500.
+ */
+
+const MAX_PAGE_SIZE = 50;
+
+// Get notifications for the logged-in user (newest first).
+router.get('/', isAuthenticated, async (req, res, next) => {
   try {
+    const requested = Number.parseInt(req.query.limit, 10);
+    const limit = Number.isFinite(requested) && requested > 0
+      ? Math.min(requested, MAX_PAGE_SIZE)
+      : MAX_PAGE_SIZE;
+
     const notifications = await Notification.find({ userId: req.user._id })
       .populate('goalId', 'title description deadline')
       .sort({ createdAt: -1 })
-      .limit(50); // Limit to last 50 notifications
+      .limit(limit);
 
     res.json(notifications);
   } catch (error) {
-    console.error('Error fetching notifications:', error);
-    res.status(500).json({ message: 'Error fetching notifications' });
+    return next(error);
   }
 });
 
 // Get unread notification count
-router.get('/unread-count', isAuthenticated, async (req, res) => {
+router.get('/unread-count', isAuthenticated, async (req, res, next) => {
   try {
     const count = await Notification.countDocuments({
       userId: req.user._id,
@@ -28,13 +42,31 @@ router.get('/unread-count', isAuthenticated, async (req, res) => {
 
     res.json({ count });
   } catch (error) {
-    console.error('Error fetching unread count:', error);
-    res.status(500).json({ message: 'Error fetching unread count' });
+    return next(error);
   }
 });
 
-// Mark notification as read
-router.patch('/:id/read', isAuthenticated, async (req, res) => {
+// Mark all as read. Declared before '/:id/read' for clarity; the paths differ in
+// segment count so they cannot collide, but the ordering documents the intent.
+router.patch('/mark-all-read', isAuthenticated, async (req, res, next) => {
+  try {
+    const result = await Notification.updateMany(
+      { userId: req.user._id, read: false },
+      { read: true }
+    );
+
+    res.json({
+      message: 'All notifications marked as read',
+      updated: result.modifiedCount ?? 0
+    });
+  } catch (error) {
+    return next(error);
+  }
+});
+
+// Mark one notification as read. Scoped by userId so a guessed id cannot touch
+// another user's row.
+router.patch('/:id/read', isAuthenticated, async (req, res, next) => {
   try {
     const notification = await Notification.findOneAndUpdate(
       { _id: req.params.id, userId: req.user._id },
@@ -48,38 +80,27 @@ router.patch('/:id/read', isAuthenticated, async (req, res) => {
 
     res.json({ notification });
   } catch (error) {
-    console.error('Error marking notification as read:', error);
-    res.status(500).json({ message: 'Error updating notification' });
-  }
-});
-
-// Mark all notifications as read
-router.patch('/mark-all-read', isAuthenticated, async (req, res) => {
-  try {
-    await Notification.updateMany(
-      { userId: req.user._id, read: false },
-      { read: true }
-    );
-
-    res.json({ message: 'All notifications marked as read' });
-  } catch (error) {
-    console.error('Error marking all as read:', error);
-    res.status(500).json({ message: 'Error updating notifications' });
+    return next(error);
   }
 });
 
 // Delete a notification
-router.delete('/:id', isAuthenticated, async (req, res) => {
+router.delete('/:id', isAuthenticated, async (req, res, next) => {
   try {
-    await Notification.findOneAndDelete({
+    const deleted = await Notification.findOneAndDelete({
       _id: req.params.id,
       userId: req.user._id
     });
 
+    // Previously answered 200 whether or not anything matched, so deleting
+    // someone else's id looked like it worked.
+    if (!deleted) {
+      return res.status(404).json({ message: 'Notification not found' });
+    }
+
     res.json({ message: 'Notification deleted' });
   } catch (error) {
-    console.error('Error deleting notification:', error);
-    res.status(500).json({ message: 'Error deleting notification' });
+    return next(error);
   }
 });
 
