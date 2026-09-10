@@ -16,11 +16,19 @@ jobs:
         working-directory: backend
       - run: npm test
         working-directory: backend
+      # Proves `require('./app.js')` starts no server and no scheduler, which is
+      # what makes the serverless entry safe (H-13). Every variable that is
+      # validated at import time must be supplied: app.js throws without
+      # JWT_SECRET, and config/passport.js throws without the GOOGLE_* trio.
+      # These are throwaway placeholders — nothing authenticates against them.
       - name: app.js imports without side effects
         working-directory: backend
         env:
           JWT_SECRET: ci-placeholder
           MONGO_URI: mongodb://127.0.0.1:1/none
+          GOOGLE_CLIENT_ID: ci-placeholder
+          GOOGLE_CLIENT_SECRET: ci-placeholder
+          GOOGLE_CALLBACK_URL: http://localhost:5050/auth/google/callback
         run: node -e "const a=require('./app.js'); if(typeof a!=='function'){process.exit(1)} setTimeout(()=>process.exit(0),500)"
 
   frontend:
