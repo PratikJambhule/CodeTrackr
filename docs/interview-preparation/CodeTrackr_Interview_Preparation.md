@@ -599,7 +599,7 @@ harden it."
 ### 5.3 Attack scenarios [ACTUAL IMPLEMENTATION risk]
 
 1. **Key theft → leaderboard fraud.** With a stolen key, `curl` `POST /api/extension/track`
-   with `duration: 3600`, `language: "TypeScript"` in a loop → the victim's coding hours (and
+   with `duration: 3600`, `language: "TypeScript"` in a loop → the victim's coding hours (and    
    the global leaderboard) are corrupted. No rate limit, no anomaly check, no idempotency.
    *Bounded by:* the attacker still can't read the victim's dashboard (needs the JWT).
 2. **DB compromise → mass key leak.** Keys are plaintext, so a read of `users` yields working

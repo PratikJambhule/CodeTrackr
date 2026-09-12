@@ -1,0 +1,44 @@
+name: Scheduled jobs
+
+# The backend no longer runs node-cron in-process (H-13): app.listen and
+# initScheduler are behind `require.main === module`, so a hosted/serverless
+# deploy starts no scheduler. These two routes are the external trigger.
+#
+# Requires:
+#   - GitHub repo secret  INTERNAL_CRON_SECRET
+#   - Render env var      INTERNAL_CRON_SECRET   (the same value)
+# When the secret is unset or wrong the routes answer 404 by design.
+
+on:
+  schedule:
+    - cron: '0 * * * *'    # hourly  — goal deadline sweep
+    - cron: '30 3 * * *'   # daily   — DailySummary rollup (03:30 UTC)
+  workflow_dispatch:        # lets you run it by hand from the Actions tab
+
+env:
+  API: https://codetrackr-backend-uckp.onrender.com
+
+jobs:
+  notifications:
+    # hourly schedule, or a manual run
+    if: github.event_name == 'workflow_dispatch' || github.event.schedule == '0 * * * *'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Run deadline notifications
+        run: |
+          curl -sS -f -X POST "$API/api/internal/run-notifications" \
+            -H "x-internal-secret: ${{ secrets.INTERNAL_CRON_SECRET }}" \
+            --max-time 120 --retry 3 --retry-delay 20 --retry-connrefused \
+            -w '\nHTTP %{http_code} in %{time_total}s\n'
+
+  rollup:
+    # daily schedule, or a manual run
+    if: github.event_name == 'workflow_dispatch' || github.event.schedule == '30 3 * * *'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Run daily rollup
+        run: |
+          curl -sS -f -X POST "$API/api/internal/run-rollup" \
+            -H "x-internal-secret: ${{ secrets.INTERNAL_CRON_SECRET }}" \
+            --max-time 180 --retry 3 --retry-delay 20 --retry-connrefused \
+            -w '\nHTTP %{http_code} in %{time_total}s\n'
