@@ -146,6 +146,17 @@ const richHourly = [
     assert.strictEqual(rich.activeDays, 18);
     assert.ok(rich.activeDaysRatio > 0 && rich.activeDaysRatio <= 1);
   });
+  await check('activeDaysRatio measures cadence, not 1.0 for everybody', () => {
+    // Regression: observedDays was `Math.min(days, Math.max(activeDays, 1))`.
+    // activeDays can never exceed the window, so that min always picked
+    // activeDays and every user scored exactly 1.
+    const meta = rich.meta.activeDaysRatio;
+    assert.ok(meta.sampleSize > rich.activeDays,
+      `observed days (${meta.sampleSize}) should exceed the 18 active days`);
+    assert.ok(rich.activeDaysRatio < 1, `expected a real ratio, got ${rich.activeDaysRatio}`);
+    assert.strictEqual(rich.activeDaysRatio,
+      Math.round((rich.activeDays / meta.sampleSize) * 100) / 100);
+  });
   await check('qualityStreak counts only days containing a deep block', () => {
     assert.ok(Number.isInteger(rich.qualityStreak));
     assert.ok(rich.qualityStreak >= 0);

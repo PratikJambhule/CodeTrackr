@@ -251,7 +251,7 @@ everything into Node".
 | GET | `/api/analytics/weekly/:userId` | `isAuthenticated` + ownership | 7-day daily breakdown. |
 | GET | `/api/analytics/timeslot/:userId` | `isAuthenticated` + ownership | 2-hour drill-down, 10-minute slots. |
 | GET | `/api/analytics/summary/:userId` | `isAuthenticated` + ownership | `$group` daily + per-language totals. |
-| GET | `/api/leaderboard?days=` | `isAuthenticated` | Global. Aggregates the **entire** activities collection (optional `?days=` window, capped at 400) + **all** users, merges/sorts/scores in Node. No pagination, no cache (H-7 open). `commits` = real git commits (H-17). Returns every user's name + email. |
+| GET | `/api/leaderboard?days=` | `isAuthenticated` | Global. Aggregates the **entire** activities collection (optional `?days=` window, capped at 400) + **all** users, merges/sorts/scores in Node. No pagination, no cache (H-7 open). `commits` = real git commits (H-17). Returns name only — no email since 2026‑09‑12 (M-23). |
 | GET | `/api/metrics?days=&timezone=` | `isAuthenticated` | Derived Insights metrics, plus `insights` (rules-engine findings), session/archetype mix and 90-day baseline deltas. **Session identity only — no `:userId` param** (deliberate, closes the IDOR class). |
 | POST | `/api/groups/create` | `isAuthenticated` | Creator auto-added as member; private → scrypt-hash password. |
 | GET | `/api/groups/my-groups` \| `/discover` | `isAuthenticated` | Membership-scoped / inverse. `/discover?search=` is regex-escaped and capped at 100 results (H-16). |
@@ -451,11 +451,11 @@ ownership (H‑1); legacy open write/read endpoints deleted (H‑2); group passw
   Stealing it lets an attacker forge unlimited activity for that user (leaderboard fraud) —
   but not read the victim's dashboard (that needs the JWT).
 - `JWT_SECRET` was a hardcoded fallback — now required at boot (M‑9, ✅ fixed 2026-09-09).
-- `helmet` + rate limits on `/auth` and `/api/extension` added 2026-09-09 (M‑3 ✅). Group `/join` brute-force still unlimited.
+- `helmet` + rate limits on `/auth` and `/api/extension` added 2026-09-09 (M‑3 ✅); extended 2026‑09‑12 (M-24) to `POST /api/groups/:groupId/join` (10 per IP per 15 min) and `/api/analytics` (120/min).
 - Ingest is bounds-checked (M-4, partial) but has no per-key quota, so plausible fake activity is
   still easy to inject with a valid key.
 - ~~Error responses echo `error.message`~~ — fixed (M-10).
-- Leaderboard exposes **every user's email**.
+- ~~Leaderboard exposes every user's email~~ — ✅ fixed 2026‑09‑12 (M-23 / Quick-Wins #16).
 - Extension stores the key in `settings.json`, not SecretStorage.
 - Ingest is still not idempotent, but a re-sent flush now `$inc`s the same bucket rather than
   creating a second document — a same-window replay double-counts within one bucket, not a new row.
@@ -552,7 +552,7 @@ Quick-Wins #24).
 ## 17. Known limitations (short list — full treatment in interview docs)
 
 1. API key = plaintext, non-expiring, unscoped bearer credential.
-2. Leaderboard / group leaderboard: unbounded full-collection scan, no cache, no pagination; exposes emails.
+2. Leaderboard / group leaderboard: unbounded full-collection scan, no cache, no pagination (H-7/H-8). Emails are no longer returned (M-23, 2026‑09‑12).
 3. Analytics aggregate in JS, not MongoDB; daily endpoint pulls 7 days to show 1 (M‑1).
 4. `node-cron` on serverless — **fixed 2026-09-09 (H‑13)**: `require.main` guard + `POST /api/internal/run-{notifications,rollup}` behind `INTERNAL_CRON_SECRET`. Operator wires the external scheduler.
 5. Rate limits only on `/auth` + `/api/extension` (M‑3, 2026-09-09) — group `/join` and analytics routes still unlimited; ingest has a payload bounds-check (M‑4, 2026-09-09) but no per-key quota and `timestamp` is still client-supplied.

@@ -55,6 +55,26 @@ check('app.js rate-limits /auth and /api/extension', () => {
   assert.ok(/app\.use\(\s*['"]\/auth['"]\s*,\s*rateLimit\(/.test(appSrc), 'no limiter on /auth');
   assert.ok(/app\.use\(\s*['"]\/api\/extension['"]\s*,\s*rateLimit\(/.test(appSrc), 'no limiter on /api/extension');
 });
+check('app.js rate-limits /api/analytics', () => {
+  assert.ok(/app\.use\(\s*['"]\/api\/analytics['"]\s*,\s*rateLimit\(/.test(appSrc),
+    'no limiter on /api/analytics');
+});
+check('the group join route is rate-limited (brute-force surface)', () => {
+  const src = read('routes/groups.js');
+  assert.ok(/require\(['"]express-rate-limit['"]\)/.test(src),
+    'express-rate-limit not required in groups.js');
+  assert.ok(/router\.post\(\s*['"]\/:groupId\/join['"]\s*,\s*joinLimiter/.test(src),
+    'join route is not behind joinLimiter');
+});
+check('the leaderboard does not return user emails', () => {
+  const src = read('routes/leaderboard.js');
+  // Match the code, not the comments -- an explanatory comment mentioning
+  // 'email' is fine; a projection or a response field is not.
+  assert.ok(!/\.select\([^)]*email/.test(src),
+    'email is still in the User projection (Quick-Wins #16)');
+  assert.ok(!/^\s*email\s*:/m.test(src),
+    'email is still a field on the response row (Quick-Wins #16)');
+});
 check('rate-limit is skipped under NODE_ENV=test', () => {
   assert.ok(/NODE_ENV\s*===\s*['"]test['"]/.test(appSrc), 'no test-env skip on the limiter');
 });

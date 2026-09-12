@@ -154,9 +154,21 @@ backward-compatible.
 activeDaysRatio = clamp(activeDays / observedDays, 0, 1)
 ```
 
-`observedDays = min(windowDays, max(activeDays, 1))` — the window can only be as long as the
-data actually spans, so a brand-new user is not scored against 30 days they were never tracked
-for.
+`observedDays` = the number of days from your **first active day in the window** through today,
+capped at `windowDays`. A brand-new user is not scored against 30 days they were never tracked
+for, but somebody who coded on 18 of the last 30 days scores 0.6 — not 1.
+
+### What it was, and why that was wrong
+
+```
+observedDays = min(windowDays, max(activeDays, 1))      ← removed 2026-09-12
+```
+
+`activeDays` can never exceed the window, so that `min` always selected `activeDays` and the
+ratio evaluated to `activeDays / activeDays` = **1 for every user, in every window**. The metric
+created to measure cadence measured nothing, and the `cadence-low` rule (fires below 0.3) could
+never fire. Found on 2026-09-12 by reading real output: 27 active days of 30, and 42 of 90, both
+reported 1.0.
 
 ---
 

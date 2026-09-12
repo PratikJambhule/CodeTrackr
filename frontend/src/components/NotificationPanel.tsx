@@ -221,6 +221,12 @@ const NotificationPanel: React.FC = () => {
     };
   }, [isOpen]);
 
+  // The polling effect below runs once, so it must not close over `isOpen`
+  // directly -- that value would be frozen at its first-render value and the
+  // inner branch would never run (L-1). Keep the latest value in a ref.
+  const isOpenRef = useRef(isOpen);
+  useEffect(() => { isOpenRef.current = isOpen; }, [isOpen]);
+
   // Fetch notifications and unread count on mount and poll every 30 seconds
   useEffect(() => {
     // Check permission status on mount
@@ -233,7 +239,7 @@ const NotificationPanel: React.FC = () => {
 
     const interval = setInterval(() => {
       fetchUnreadCount();
-      if (isOpen) {
+      if (isOpenRef.current) {
         fetchNotifications();
       }
     }, 30000); // Poll every 30 seconds

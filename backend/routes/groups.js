@@ -7,10 +7,22 @@ const Activity = require('../models/Activity');
 const { isAuthenticated } = require('../middleware/auth');
 const { hashPassword, verifyPassword, isHashed } = require('../services/passwordHash');
 const { containsRegex } = require('../services/textQuery');
+const rateLimit = require('express-rate-limit');
 
 // Discover is an unbounded browse of every group in the system. Cap it so the
 // response cannot grow with the size of the install.
 const DISCOVER_LIMIT = 100;
+
+// A private group is gated by one shared password, so /join is a brute-force
+// surface: unlimited guesses, no lockout. Ten attempts per IP per 15 minutes is
+// far above honest use (you either know the password or you do not).
+const joinLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 10,
+    skip: () => process.env.NODE_ENV === 'test',
+    standardHeaders: true,
+    legacyHeaders: false,
+});
 
 // Create a new group
 router.post('/create', isAuthenticated, async (req, res, next) => {
@@ -251,7 +263,7 @@ router.get('/:groupId/details', isAuthenticated, async (req, res, next) => {
 });
 
 // Join a group
-router.post('/:groupId/join', isAuthenticated, async (req, res, next) => {
+router.post('/:groupId/join', joinLimiter, isAuthenticated, async (req, res, next) => {
     try {
         const { groupId } = req.params;
         const { password } = req.body;

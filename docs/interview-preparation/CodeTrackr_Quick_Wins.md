@@ -419,7 +419,7 @@ you spotted a per-iteration unindexed query.
 
 | # | Change | Effort | One-liner for the interview |
 |---|---|---|---|
-| 16 | **Leaderboard: return a handle, not `email`** | 🟢 | "It was leaking every user's email in a shared list — now it returns a display name." |
+| 16 | **Leaderboard: return a handle, not `email`** — ✅ DONE 2026-09-12 | 🟢 | "It was leaking every user's email in a shared list — now it returns a display name." |
 | 17 | **Leaderboard: `?period=` + pagination** | 🟢 | "Bounded the query with a 30-day default window and `skip`/`limit` in the pipeline." |
 | 18 | **Extension: store the API key in `context.secrets`** | 🟢 | "Moved the key from plaintext `settings.json` into VS Code SecretStorage, which uses the OS keychain." |
 | 19 | **`config.js` that validates all env vars at boot** | 🟢 | "One place that checks every required env var is set and throws a clear list of what's missing — 12-factor." |

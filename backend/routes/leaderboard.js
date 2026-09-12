@@ -63,7 +63,8 @@ router.get('/', isAuthenticated, async (req, res, next) => {
             match.timestamp = { $gte: new Date(Date.now() - windowDays * 24 * 60 * 60 * 1000) };
         }
 
-        const allUsers = await User.find({}).select('_id name email profilePictureUrl').lean();
+        // No email: this list goes to every signed-in user (Quick-Wins #16).
+        const allUsers = await User.find({}).select('_id name profilePictureUrl').lean();
 
         const activityData = await Activity.aggregate([
             { $match: match },
@@ -130,7 +131,6 @@ router.get('/', isAuthenticated, async (req, res, next) => {
         const leaderboardData = allUsers.map(user => ({
             userId: user._id,
             name: user.name,
-            email: user.email,
             profilePictureUrl: user.profilePictureUrl,
             ...(activityMap.get(String(user._id)) || EMPTY),
         }));

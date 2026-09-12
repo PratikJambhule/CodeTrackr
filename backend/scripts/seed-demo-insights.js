@@ -198,13 +198,24 @@ function buildActivity(userId, dayOffset, hour, blockMs) {
         { title: `${DEMO_PREFIX}Ship payments refactor`, targetHours: 10, techStack: 'typescript' },
         { title: `${DEMO_PREFIX}Rewrite dashboard charts`, targetHours: 6, techStack: 'javascript' },
         { title: `${DEMO_PREFIX}Automate deploy scripts`, targetHours: 4, techStack: 'python' }
-    ].map((g) => ({
-        ...g,
-        userId: user._id,
-        description: 'Demo goal created by scripts/seed-demo-insights.js',
-        deadline: new Date(Date.now() - randInt(2, 20) * 86400000),
-        status: 'completed'
-    }));
+    ].map((g) => {
+        // Backdate the whole lifetime so it spans the seeded activity.
+        // estimationCalibration bounds its activity join to
+        // [createdAt, completedAt]; with createdAt left to default to *now*,
+        // every goal matched zero hours and the metric stayed null.
+        const completedAt = new Date(Date.now() - randInt(2, 20) * 86400000);
+        const createdAt = new Date(completedAt.getTime() - randInt(20, 40) * 86400000);
+        return {
+            ...g,
+            userId: user._id,
+            description: 'Demo goal created by scripts/seed-demo-insights.js',
+            deadline: completedAt,
+            status: 'completed',
+            completedAt,
+            createdAt,
+            updatedAt: completedAt
+        };
+    });
 
     const totalHours = activities.reduce((s, a) => s + a.duration, 0) / 3600;
     const deepBlocks = activities.filter((a) => a.focusAnalytics.longestBlockMs >= 25 * MIN).length;
@@ -223,7 +234,8 @@ function buildActivity(userId, dayOffset, hour, blockMs) {
     }
 
     await Activity.insertMany(activities);
-    await Goal.insertMany(goals);
+    // timestamps:false so Mongoose keeps the backdated createdAt above.
+    await Goal.insertMany(goals, { timestamps: false });
     console.log(`\nInserted ${activities.length} activities and ${goals.length} goals.`);
     console.log('Remove later with:  node scripts/seed-demo-insights.js --email ' + EMAIL + ' --remove --apply');
 

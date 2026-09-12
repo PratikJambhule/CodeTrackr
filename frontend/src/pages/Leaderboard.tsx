@@ -8,7 +8,6 @@ interface LeaderboardEntry {
   rank: number;
   userId: string;
   name: string;
-  email: string;
   totalHours: number;
   totalLinesAdded: number;
   totalLinesRemoved: number;
@@ -215,7 +214,6 @@ export default function Leaderboard() {
                         </div>
                         <div>
                           <p className="font-medium" style={{ color: theme.colors.text }}>{leader.name}</p>
-                          <p className="text-xs" style={{ color: theme.colors.textSecondary }}>{leader.email.split('@')[0]}</p>
                         </div>
                       </div>
                     </td>

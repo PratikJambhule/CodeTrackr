@@ -156,11 +156,25 @@ async function buildMetrics(
     const focusedHours = (totals.focusedMs || 0) / 3600000;
     const blockStats = flowBlockStats(flowBlocksMs);
     const activeDays = daily.length;
-    // The window can only be as long as the data we actually have.
-    const observedDays = Math.min(days, Math.max(activeDays, 1));
 
     const todayKey = localDayKey(new Date(now), offsetMs);
     const yesterdayKey = localDayKey(new Date(now - 86400000), offsetMs);
+
+    // Days the user could plausibly have coded on: their FIRST active day in
+    // this window through today, capped at the window length.
+    //
+    // This was `Math.min(days, Math.max(activeDays, 1))`. A user can never have
+    // more active days than the window is long, so that `min` always chose
+    // `activeDays` and the ratio came out as activeDays/activeDays = 1 for
+    // everybody, always -- the cadence metric measured nothing and the
+    // `cadence-low` rule could never fire. Both day keys are 'YYYY-MM-DD' in the
+    // same local frame, so parsing each as UTC midnight gives an exact day count.
+    const dayKeys = daily.map((d) => d._id).filter(Boolean).sort();
+    const observedDays = dayKeys.length
+        ? Math.min(days, Math.max(1, Math.round(
+            (Date.parse(`${todayKey}T00:00:00Z`) - Date.parse(`${dayKeys[0]}T00:00:00Z`))
+            / 86400000) + 1))
+        : 0;
 
     const peak = truePeakWindow(hourly);
     const calibration = estimationCalibration(goalPairs);

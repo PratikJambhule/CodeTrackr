@@ -54,6 +54,11 @@ app.use('/api/extension', rateLimit({
   windowMs: 60 * 1000, max: 120, skip: rlSkip,
   standardHeaders: true, legacyHeaders: false,
 }));
+// Authenticated, but each call is unbounded aggregation work (M-1). Cap bursts.
+app.use('/api/analytics', rateLimit({
+  windowMs: 60 * 1000, max: 120, skip: rlSkip,
+  standardHeaders: true, legacyHeaders: false,
+}));
 
 // Health
 app.get("/", (req, res) => res.json({ status: "ok", service: "CodeTrackr API" }));
