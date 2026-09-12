@@ -348,17 +348,22 @@ draws it.
 
 | Metric | What it means | How it's worked out |
 |---|---|---|
-| **Deep work ratio** | how much focused time was in long stretches | minutes in blocks ≥ 25 min ÷ total focused minutes |
-| **Flow blocks** | the shape of your sessions | median, longest, and count of your work stretches |
-| **Consistency** | how steady you are day to day | `1 − (how spread out your daily minutes are)` — steady beats bursty |
-| **True peak hour** | your *most productive* hour, not your busiest | the hour with the best score of `commits + lines − churn` |
-| **Estimation accuracy** | do you underestimate goals? | average of (hours you actually did ÷ hours you guessed) |
+| **Deep work ratio** | how much of your real work time was in long stretches | minutes in blocks ≥ 25 min ÷ minutes in all blocks |
+| **Flow blocks** | the shape of your sessions | median, longest, count and total of your work stretches |
+| **Volume stability** *(was "consistency")* | how even your daily amount is, on days you code | `1 − (median absolute deviation ÷ median)` of daily minutes — one huge day can't wreck it |
+| **Coding cadence** | how many days you code at all | active days ÷ days in the window |
+| **Quality streak** | days in a row with real focus | consecutive days with at least one 25-minute block |
+| **True peak window** | your *most productive* 2 hours, not your busiest | the 2-hour window with the most "surviving minutes" (minutes × (1 − churn)), seen on at least 3 days |
+| **Estimation accuracy** | do you underestimate goals? | median of (hours actually spent ÷ hours estimated) over completed goals |
 
 ### Key points for the interview
 
-- **Runs on every page load. Not cached.** **BETTER:** cache it per (user, time window).
-- **Needs recent data.** If you're on an old extension version, the focus metrics show "—"
-  instead of "0%".
+- **Runs on every page load.** Only your 90-day baseline is cached (refreshed at most once a day).
+- **Every number has a confidence level.** With too little data it shows "—" instead of a fake
+  "0%" — three days of data never looks like six months.
+- **"What stands out" is a rules engine, not AI.** 13 plain threshold rules read the numbers and
+  say what's worth noticing (e.g. "you're rewriting more than usual"), each showing the numbers it
+  fired on. A rule is skipped when its data is too thin.
 - **Why statistics instead of ML?** No labelled outcomes to learn from, not enough users,
   and every number needs to be explainable. Statistics work from day one.
 - **The AI part is designed but not built.** There's a plan for an LLM that would *describe*
@@ -388,18 +393,19 @@ Rank = **total coding hours, all time, highest first**. Ties keep their existing
 
 Every time someone opens the page:
 1. Load **every user**.
-2. Run an aggregation over the **entire `activities` collection** — sum hours and lines per
-   user.
+2. Run an aggregation over the **entire `activities` collection** (or an optional `?days=`
+   window) — sum hours, lines and **real git commits** per user.
 3. Merge and sort **in Node**.
-4. Give each user scores (speed, quality, etc.) **relative to the current top user** — so
-   everyone's score shifts when the leader codes more.
+4. Give each user scores (speed, quality, etc.) **relative to the current top user**, clamped
+   to 0–5 — so everyone's score shifts when the leader codes more.
 
 ### The problems
 
-- **It reads the whole activity table on every request.** No time window, no cache, no
-  pagination. This is the **first thing that breaks** as data grows.
+- **It reads the whole activity table on every request.** No time window by default, no cache,
+  no pagination. This is the **first thing that breaks** as data grows.
 - It returns **every user's email**.
-- "Commits" on the board is actually **record count**, not real git commits (mislabelled).
+- *Fixed 2026-09-10:* "Commits" used to be the upload count, not real git commits; scores could
+  go negative; and a `Math.max(...)` over every user would crash past ~100k users.
 
 ### The fix (**BETTER**) — know this well
 
@@ -418,20 +424,21 @@ Every time someone opens the page:
   and get upgraded to a hash on the next correct login).
 - **Membership** is a `groupmembers` join table with a "one row per (group, user)" unique
   rule — a solid race protection.
-- **View details:** members-only (403 otherwise), then a **per-member leaderboard** of coding
-  hours + lines added (same slow full-scan pattern as the global one).
+- **View details:** members-only (403 otherwise), then a **per-member leaderboard**: hours,
+  lines, commits, failed commands and failed builds with failure rates (same slow full-scan
+  pattern as the global one).
 - **Leave:** the last member leaving deletes the group.
 
-**The gap vs the original idea:** I wanted the group view to also show **how many errors each
-person hit**. The extension *does* record every member's failed commands / failed builds /
-repeated failures — the data's there — but the group leaderboard currently ranks by hours +
-lines only. Adding the error/build-success columns is a read-path change (extend the same
-`$group` with `$sum` of the failure counters) and is the top thing on my list. Same for
-scoping the board to a contest week (`?from=&to=` + a `$match` on `timestamp`).
+**The original idea — now built (2026-09-10):** the group table shows **how many errors each
+person hit** — failed commands and failed builds, with failure rates. The extension had always
+collected it; it was a read-path change (extend the same `$group` with `$sum` of the failure
+counters). A rate shows "—" when someone never ran a build, so "never failed" and "never ran"
+don't look the same. **Still open:** scoping the board to a contest week (`?from=&to=` + a
+`$match` on `timestamp`).
 
 **Other group weak spots:** no admin/owner powers (`createdBy` stored but unused — no kick or
 rename); a double-join returns **409** (fixed 2026-09-09; the handler detects `11000`); "discover" lists private groups
-too (password-gated, not hidden); no rate limit on join, so passwords can be guessed.
+too (password-gated, not hidden; its search is escaped since 2026-09-10 — it was a ReDoS risk); no rate limit on join, so passwords can be guessed.
 
 ---
 

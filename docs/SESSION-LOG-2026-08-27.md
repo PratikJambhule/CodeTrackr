@@ -476,6 +476,58 @@ Backend 15 → **18 suites / 292 assertions**; extension **3 / 52** unchanged; f
 
 ---
 
+## 13. Deployment verification + doc reconciliation (2026-09-11)
+
+No application code changed. This entry records what the live systems are actually running.
+
+**The deployed site is `main`, and `main` is unrelated to this branch.** The production Vercel
+bundle (`index-UkW22d84.js`) contains no `/insights` route, no "What stands out" and no "Cmd
+fails" — string literals that survive minification and are all present in a local build of the
+branch. Vercel is connected to `PratikJambhule/CodeTrackr` and builds `main` (`4c1ae25`), which
+shares **no commit** with `feat/security-and-insights` (42 vs 65 commits). A trial merge in a
+throwaway worktree (`--allow-unrelated-histories`) produced **35 add/add conflicts**, including
+`app.js`, most route files, `App.tsx` and all three lockfiles — so the GitHub PR cannot be merged
+as-is. `main`'s only files absent from the branch are `extension/src/{syncService,logger,types}.ts`,
+the dead sync pipeline deleted as H-12.
+
+**The backend is old too — now confirmed from the endpoint.** Render answered this time (22 s
+cold start): `GET /` → 200, `GET /health` → **404**. `/health` has existed on the branch since
+2026-09-09 (`app.js:63`), so Render is serving pre-09-09 code. This corroborates the database
+evidence in §11 (0 documents carry `bucketStart`), which previously stood alone because the
+probe had timed out.
+
+**A Vercel preview deployment cannot demonstrate the app.** CORS allows only `FRONTEND_URL` plus
+`localhost:5173/5174`, and the OAuth callback redirects to `FRONTEND_URL`, so a preview origin is
+rejected on every API call. *Correction:* the previous session suggested opening the branch
+preview to see the new features; it renders the shell but cannot load data.
+
+**Deploy order that works:** Render backend → the branch, with `JWT_SECRET`, the `GOOGLE_*` trio,
+`MONGO_URI`, `FRONTEND_URL` and `INTERNAL_CRON_SECRET`; then the Vercel production branch → the
+same branch, redeploy. Backend first, because the new frontend calls routes the old backend
+lacks. The operator then runs `node backend/scripts/migrate-drop-date.js --apply`.
+
+**Extension 2.4.0 is not packaged.** Only `codetrackr-vscode-2.3.0.vsix` exists, so the H-14/H-15
+flush and idle fixes reach no user until 2.4.0 is packaged and published by hand.
+
+**Doc reconciliation.** Reading `CODETRACKR_PROJECT_CONTEXT.md` end to end against the code found
+prose drift the earlier formula-focused sweeps missed: §10 still gave `deepWorkRatio` as ÷ focused
+ms, §11 still called leaderboard `commits` flush count, §8 said goals had no complete route, §15
+said there was no CI, and §19 listed the quick-wins batch as in progress. All corrected.
+`backend/.env.example` gained commented `INTERNAL_CRON_SECRET` and `ACTIVITY_BUCKET_MS` entries
+(M-8).
+
+**Interview docs.** They had never been updated for `ecff806` and carried the same drift in 64
+places: leaderboard `commits` explained as `activityCount`, the removed `$toObjectId` coercion,
+the group view "doesn't surface" errors, the discover ReDoS listed as open, Insights described as
+"coefficient of variation, weighted scoring", pre-rebuild formulas in the condensed guide's table,
+old test counts, and Q19 arguing *against* building a rules engine. All corrected; both PDFs
+rebuilt (Preparation 72 pp, Condensed 23 pp).
+
+Verified green before and after the edits: backend 18 suites / 292, extension 3 / 52. Frontend
+build green (no frontend code touched).
+
+---
+
 ## Appendix A — Why this is a file and not claude-mem
 
 claude-mem was requested for context saving and was attempted repeatedly. Every call failed:

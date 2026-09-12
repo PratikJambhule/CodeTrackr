@@ -59,8 +59,8 @@ group. You create a **group** — for a contest week, or just to keep each other
 practice — and because everyone's editor is tracked automatically, the group page shows who
 actually put in the hours and the code. The extension also records each person's
 **command / build / test failures**, so "who's fighting the most errors this week" is data the
-app already collects (the group view currently ranks by hours + lines; surfacing the error
-comparison there is the obvious next step).
+app already collects — and since 2026-09-10 the group leaderboard shows it: commits, failed
+commands and failed builds per member, with failure rates.
 
 CodeTrackr is a **developer-productivity analytics platform** with three parts that share one
 backend:
@@ -338,7 +338,8 @@ For each: **what / where in CodeTrackr / why / alternative / why the choice hold
   instead of loading the whole table into Node. A time-series DB (Timescale, Influx) would
   fit the activity stream even better.
 - **Trade-off:** no transactions anywhere; `activities.userId` is a `String` while everything
-  else is `ObjectId`, forcing `$toObjectId` gymnastics and blocking `$lookup` (M-6); the
+  else is `ObjectId`, which blocks `$lookup` (M-6) — the leaderboard groups by the string and
+  matches users in Node; the
   leaderboard scan (H-7) is a direct consequence of "aggregate in the app, not the engine".
 - **Interview Qs:** the whole of §26 exchanges 1–6.
 
@@ -781,10 +782,11 @@ rollups), retention policies. That's the "right" store for `activities` at scale
 | GET | `/api/metrics?days=&timezone=` | derived insights | days (1–365), tz | `isAuthenticated` (**no `:userId`**) | 4× `Activity.aggregate` → `metricsDerive` | `{ success, metrics:{...11 fields...} }` |
 | POST | `/api/goals/create` | new goal | title, description, targetHours, techStack, deadline | `isAuthenticated` | `Goal.create` (userId from session) | `201 goal` |
 | GET | `/api/goals` | my goals | — | `isAuthenticated` | `Goal.find({userId})` | `[goal]` |
-| GET | `/api/goals/:goalId/progress` | goal progress | — | `isAuthenticated` + owner scope | `Goal.findOne({_id,userId})` + `Activity.find` → reduce | `{ goal, currentHours, progress }` |
+| GET | `/api/goals/:goalId/progress` | goal progress | — | `isAuthenticated` + owner scope | `Goal.findOne({_id,userId})` + `Activity.aggregate` (language **or** project matches `techStack`, within the goal's lifetime) | `{ goal, currentHours, progress }` |
+| PATCH | `/api/goals/:goalId/complete` \| `/reopen` | complete / reopen a goal | — | `isAuthenticated` + owner scope | sets `status` + `completedAt` (2026-09-10, M-17) | the goal |
 | POST | `/api/groups/create` | new group | groupName, groupDescription, visibility, password? | `isAuthenticated` | hash pw → `Group.save` → `GroupMember.save` (creator) | `201 {group}` (no password) |
 | GET | `/api/groups/my-groups` | member of | — | `isAuthenticated` | `GroupMember.find({userId}).populate(groupId)` | `{groups:[]}` |
-| GET | `/api/groups/discover?search=` | not a member of | search? | `isAuthenticated` | `Group.find({_id:{$nin:joined}})` + regex | `{groups:[]}` |
+| GET | `/api/groups/discover?search=` | not a member of | search? | `isAuthenticated` | `Group.find({_id:{$nin:joined}, name: containsRegex(search)}).limit(100)` — escaped (H-16) | `{groups:[]}` |
 | GET | `/api/groups/:groupId/details` | members + leaderboard | — | `isAuthenticated` + **membership** | `GroupMember.find().populate` + `Activity.aggregate({$in:memberIds})` | `{group, members[], leaderboard[]}` |
 | POST | `/api/groups/:groupId/join` | join | password? | `isAuthenticated` | verify pw (private) → `GroupMember.save` | `{success, group}` |
 | POST | `/api/groups/:groupId/leave` | leave | — | `isAuthenticated` | `GroupMember.findOneAndDelete`; delete group if empty | `{success, message}` |
@@ -964,32 +966,34 @@ sort → effectively insertion order from the merge). `rank = index + 1`.
 
 `routes/leaderboard.js`:
 1. `User.find({}).select('_id name email profilePictureUrl').lean()` — **all users**.
-2. `Activity.aggregate` over the **entire collection**:
-   - `$addFields userIdObj` — `$regexMatch` for a 24-hex string → `$toObjectId`, else keep
-     (works around `userId` being a `String`).
-   - `$group` by `userIdObj`: `$sum duration`, `$sum linesAdded/Removed`, `$addToSet
-     projectName`, `$sum 1` (count).
+2. `Activity.aggregate` over the **entire collection** (or an optional `?days=` window, ≤ 400):
+   - `$match { duration: { $gte: 0 } }` — corrupt negative rows can't subtract from a real total.
+   - `$group` by the String `userId`: `$sum duration`, `$sum linesAdded/Removed`, `$addToSet
+     projectName`, **real commits** (`$ifNull` of `gitAnalytics.commits`, falling back to
+     `terminalAnalytics.gitActivity.commits` — never both), and `flushes` (`$ifNull($flushCount, 1)`).
    - `$addFields`: `totalHours`, `projectCount = $size(projects)`, `codeChanges`,
      `netCodeChanges`.
 3. Build a `userId → stats` map in Node; `map` all users onto it (users with no activity get
    zeros).
 4. Sort by `totalHours` desc; assign `rank`.
-5. **Relative scoring:** `maxHours`, `maxChanges`, `maxCommits` (where "commits" =
-   activity-doc count). Each user's `speed/quality/engagement/impact` = `min(5, ratio*5)`;
-   `overall` = their average; `commitScore = min(5, commits/20*5)`.
+5. **Relative scoring:** `maxHours`, `maxChanges`, `maxCommits` via `maxOf()` (a fold, floored
+   at 1). Each user's `speed/quality/engagement/impact` = `score(value, max)` = `ratio*5` clamped to
+   **[0, 5]** — `impact` uses `max(0, netCodeChanges)`; `overall` = their average;
+   `commitScore = score(commits, 20)`.
 
 ### 10.3 Properties & problems
 
 - **Dynamic, never cached** — recomputed every request → always fresh, always expensive.
-- **No time window** — cost grows with total activity **forever**.
+- **No time window by default** — cost grows with total activity **forever** (optional `?days=` bounds it).
 - **No pagination, no `$limit`** — the entire ranked list is returned.
 - **Relative scores are unstable** — everyone's score shifts when the top user codes.
 - **`$addToSet` on every project name** across all activity — memory-heavy in the pipeline.
 - **Privacy:** every row includes `email`.
-- **"commits" is a lie** — it's `activityCount`, not `gitAnalytics.commits`.
 - **Group leaderboard** (`/groups/:id/details`) — same pattern, scoped to member IDs,
-  all-time, no pagination; the `Promise.all(members.map(async ...))` has no `await` inside so
-  the async is pointless.
+  all-time, no pagination (H-8).
+- **Fixed 2026-09-10:** "commits" was `activityCount` — flush count — not git commits (H-17);
+  `impact` could go negative and drag `overall` below zero (M-18); `Math.max(...spread)` threw
+  `RangeError` past ~100k users (H-18); the group route's `Promise.all` over a non-async map is gone.
 
 ### 10.4 Complexity
 
@@ -1020,11 +1024,10 @@ serverless limit this fails "long before the user count becomes interesting" (H-
 **friendly competition** — a contest week, or an ongoing daily-practice streak. You make a
 group, everyone joins, and because every member's editor is tracked automatically, the group
 page ranks who actually did the work. The intent was also "see how many errors each person
-hit" — the extension **does** record per-person `terminalErrorCount` / `failedCommands` /
-`failedBuilds` / `repeatedFailedCommands`, but the group leaderboard currently ranks only by
-**coding hours + lines added** (`codingHours`, `totalLinesAdded` per member). Surfacing the
-error/build-success comparison in the group view is the obvious next feature and an honest
-"what would you add" answer.
+hit" — the extension records per-person `failedCommands` / `failedBuilds` / `repeatedFailedCommands`,
+and since 2026-09-10 the group leaderboard shows it: each member's **hours, lines, commits,
+failed commands and failed builds**, with failure rates (`null` → "—" when nothing ran, so
+"never failed" and "never ran" don't look the same). It is still ranked by coding hours.
 
 ### 11.1 Model [ACTUAL IMPLEMENTATION]
 
@@ -1037,8 +1040,8 @@ error/build-success comparison in the group view is the obvious next feature and
 - **Create** (`POST /groups/create`): validate name/description/visibility; private → require
   a password, `hashPassword(password)` (scrypt); `Group.save`; auto-add creator as a
   `GroupMember`; response strips `password`.
-- **Discover** (`GET /groups/discover`): `Group.find({ _id: { $nin: joinedGroupIds } })`
-  optionally `name: { $regex: search, $options:'i' }`.
+- **Discover** (`GET /groups/discover`): `Group.find({ _id: { $nin: joinedGroupIds } })`, optionally
+  `name: containsRegex(search)` — escaped, trimmed, ≤ 128 chars (H-16) — and `.limit(100)`.
 - **Join** (`POST /groups/:id/join`): `Group.findById().select('+password')`; reject if
   already a member; private → `verifyPassword(password, group.password)` (401 on mismatch);
   **opportunistic migration** — if the stored value isn't a hash, rehash it now; `GroupMember.save`.
@@ -1072,13 +1075,13 @@ duplicate join return?" (409) · "How would you add group admins?" (a `role` col
 invites — which is better and why?" (invites: revocable, auditable, no shared secret) ·
 "How would you rate-limit join attempts?" (per-user + per-group counter, exponential backoff).
 
-**"You said the point was comparing errors — how would you add that to the group view?"**
-> "The data's already there — each member's activity carries `terminalErrorCount`,
-> `failedCommands`, `failedBuilds` and `repeatedFailedCommands`. The group-details endpoint
-> already `$group`s `Activity` by member for hours and lines; I'd extend that same pipeline
-> with `$sum` of the failure counters and a computed `buildSuccessRate`, add the columns to
-> the group leaderboard table, and optionally a 'most-improved success rate this week' badge.
-> It's a read-path change only — an afternoon."
+**"You said the point was comparing errors — how did you add that to the group view?"**
+> "The data was already there — each member's activity carries `failedCommands`, `totalCommands`,
+> `failedBuilds` and `buildRuns`. The group-details endpoint already `$group`ed `Activity` by member
+> for hours and lines, so I extended that same pipeline with `$sum` of those counters plus real
+> commits, computed per-member failure rates, and added Commits / Cmd fails / Build fails columns.
+> A rate is `null` when nothing ran, so the table shows '—' rather than a misleading 0%. Read-path
+> only, no schema change. Next would be a 'most-improved success rate this week' badge."
 
 **"A contest week — how do you scope the leaderboard to just that week?"**
 > "Right now the group leaderboard is all-time (`Activity.aggregate` over member IDs, no
@@ -1139,6 +1142,19 @@ GET /api/metrics?days=30&timezone=<offset>
 | `comprehensionLoad` | `readMs / (readMs + writeMs)` | share of time reading | `0` if no attention data |
 | `contextSwitchesPerHour` | `fileSwitches / focusedHours` | fragmentation | `0` if `focusedHours = 0` |
 
+### 12.3b The rules layer — "What stands out" [ACTUAL IMPLEMENTATION, 2026-09-10]
+
+`services/rulesEngine.js` reads the finished metrics object and returns `{ findings, skipped,
+totalFindings }`, sent as `insights` beside `metrics`. 13 declarative rules — churn spike against
+your own baseline, fragmented focus (> 30 file switches per focused hour), frequent interruptions,
+deep work strong / scarce, peak window, low cadence, erratic volume, a ≥ 3-day streak,
+reading-heavy, estimation under / accurate. Each declares `requires`; if any required metric is
+missing or `insufficient`, the rule is **skipped and reported**, never evaluated on a zero —
+checked at startup, because `confidence !== 'insufficient'` is true for a missing entry.
+Findings sort warning → info → positive, cap at 6, and carry the `evidence` that fired them.
+Verified on real data: a 30-day window with 6 sparse active days produced **0 findings, 10
+skipped** — the correct answer. Design notes: `docs/RULES_ENGINE.md`.
+
 ### 12.4 Sync/async, caching, regeneration
 
 - **Synchronous** — the request awaits four aggregations then returns.
@@ -1147,13 +1163,14 @@ GET /api/metrics?days=30&timezone=<offset>
 - **Failure:** caught → `500 {success:false}`; the page shows an error card + "Try again".
 - **Insufficient data:** `flowBlocks.blockCount === 0` → focus/flow/churn/read/switch cards
   render "—" plus a "needs extension 2.1.0" banner; `estimationCalibration` `null` → prompt to
-  complete 2 goals.
+  complete a goal.
 
 ### 12.5 "Is this really machine learning?" — the answer
 
 > "No, and I wouldn't claim it is. It's descriptive statistics computed deterministically:
-> coefficient of variation for the consistency score, a weighted linear score for the
-> productive-hour ranking, medians for flow blocks, a ratio for estimation calibration. There's
+> median absolute deviation for volume stability, 'surviving minutes' for the most productive
+> two-hour window, medians for flow blocks and estimation calibration, and a confidence gate on
+> every number — plus a small rules layer that states what stands out. There's
 > no model, no training data, no inference. I chose that deliberately — every number on the
 > page is explainable and reproducible, and it works from day one with no cold-start problem.
 > The design doc has an LLM layer on top that would *narrate* these metrics — 'your afternoons
@@ -1312,10 +1329,11 @@ Format: **Current → Vulnerability → Attack → Fix.**
 
 ### 14.10 MongoDB injection
 
-- **Current:** `Group.find({ name: { $regex: search, $options:'i' } })` — `search` is user
-  input used as a regex → **ReDoS** risk (a pathological pattern) and it's an unescaped regex,
-  not a literal.
-- **Fix:** escape the input or use `$text` / an anchored literal; cap length.
+- **Was:** `Group.find({ name: { $regex: search, $options:'i' } })` — `search` was user input
+  used as a regex → **ReDoS** (a pathological pattern pins the event loop) and `.*` listed every group.
+- **Fixed 2026-09-10 (H-16):** `services/textQuery.js` escapes every metacharacter, trims, and caps
+  the term at 128 chars; `/discover` also caps results at 100. A test asserts `(a+)+$` against a
+  4,000-character string returns in under 500 ms once escaped.
 - Elsewhere queries pass values as query *values* (not `$where`, not string-concatenated), so
   classic NoSQL operator injection is limited — but `express.json()` will happily parse
   `{"apiKey": {"$ne": null}}` as a body; `verifyApiKey` does `typeof apiKeyHeader === 'string'`
@@ -1426,13 +1444,13 @@ run via `node tests/x.test.js`. `package.json` `test` scripts chain them with `&
 **CI:** GitHub Actions (`.github/workflows/ci.yml`, added 2026‑09‑09) runs the backend +
 extension suites and the frontend build on every push / PR.
 
-**Backend (`backend/tests/`, 12 suites, ~142 assertions):**
+**Backend (`backend/tests/`, 18 suites, 292 assertions):**
 
 | Suite | Technique | Covers |
 |---|---|---|
 | `streak.test.js` | **extracts** `localDayInfo` + `computeStreak` from the *shipped* `analytics.js` via string slicing, runs them against a stubbed `Activity.aggregate` | streak correctness incl. one regression case per historical bug; timezone day-bucketing |
 | `ingest.test.js` | unit | `activityNormalizers` — defaults, number coercion, negative rejection, `flowBlocksMs` cap at 200 |
-| `metrics.test.js` | unit | all five `metricsDerive` functions incl. edge cases (empty, div-by-zero, even-length median, "productive vs busy" hour) |
+| `metrics.test.js` | unit | every `metricsDerive` function, rewritten 2026-09-10 (37): block-time deep-work denominator, MAD stability, cadence, 2-hour peak with a day floor, median calibration, confidence thresholds |
 | `authorization.test.js` | unit | `sameUser`, `assertOwnership` (403 vs 404 vs 401), `isBypassAllowed` (never in prod) |
 | `routeGuards.test.js` | **static source scan** — regex over route files | fails if any sensitive route loses `isAuthenticated` / ownership; the H-1 regression guard |
 | `passwordHash.test.js` | unit (async) | scrypt round-trip, wrong password, salting, legacy plaintext acceptance, null-safety |
@@ -1442,13 +1460,20 @@ extension suites and the frontend build on every push / PR.
 | `rollup.test.js` | unit (pure) | `buildDaySummary` — seconds/lines summed, `flushCount` missing ⇒ 1, per-language breakdown, project de-dup, focus `longestBlockMs` maxed (2026‑09‑08) |
 | `quickWins.test.js` | **static source scan** | `JWT_SECRET` boot-guard + no `'your_jwt_secret'`; `11000`→409 on group join; `GET /health` on `readyState`; `helmet` + rate-limit on `/auth`+`/api/extension` (test-skip); central `(err,req,res,next)` handler + zero response-body `.message` leaks; `require.main` bootstrap guard; `/api/internal` + `INTERNAL_CRON_SECRET`; `{goalId:1,type:1}` index (2026‑09‑09) |
 | `ingestValidation.test.js` | unit (pure) | `validateIngestPayload` — `duration ∈ (0,3600]`, `fileName`/`language`/`projectName` length caps, `timestamp ∈ [now-24h, now+60s]`; numeric-string coercion; null body (2026‑09‑09) |
+| `metricsService.test.js` | unit vs stubbed `Activity`, `Goal`, `UserInsights` | `buildMetrics` on fixtures: meta/confidence, goal pairs, baseline attach, sessions (2026-09-10) |
+| `sessionize.test.js` | unit (pure) | collapse by bucket, then 30-min gap split; legacy `timestamp` fallback; archetype rules and mix (2026-09-10) |
+| `insightsBaseline.test.js` | unit (pure + stubs) | staleness, 90-day window, ungated metrics skipped, failure fallbacks, `deltaFrom` (2026-09-10) |
+| `textQuery.test.js` | unit (pure) | metacharacter escaping, ReDoS pattern returns fast, length cap, anchored exact match (2026-09-10) |
+| `leaderboardScore.test.js` | unit (pure) | `score()` clamps [0, 5] and rejects non-finite input; `maxOf` survives 200k rows where `Math.max(...spread)` throws (2026-09-10) |
+| `rulesEngine.test.js` | unit (pure) | rule validation at load, confidence gating (a missing meta entry never passes), each rule's thresholds, ordering, cap, error containment (2026-09-10) |
 
-**Extension (`extension/tests/`, ~37 assertions):**
+**Extension (`extension/tests/`, 3 suites, 52 assertions):**
 
 | Suite | Technique | Covers |
 |---|---|---|
 | `trackers.test.js` | unit against the **built `dist/extension.js`** + a `vscodeStub` | EditorTracker (gross counts, replace-in-place regression, churn window, undo/redo, attention split, large-insert-no-text), FocusTracker (focus/blur accrual, block close/gap/open), GitStateTracker (commit on HEAD move, no double-count, uncommitted age, no-op without git) |
 | `activation.test.js` | loads the real bundle vs stub, activates it | every contributed command registered; no undeclared commands; **no network call without a key**; payload has the 4 analytics blocks + gross line fields; no absolute path leak; manifest sanity (apiBase not localhost, prepublish compiles) |
+| `flushSafety.test.js` | unit (pure) | `mergeAnalytics` carry-forward (sums, 200-cap arrays, maxima, rate recomputation) and the idle pause gate — `focusedMs` flat across a 5-hour idle, no back-fill (2026-09-10) |
 
 **Frontend:** **zero tests.**
 
@@ -1458,8 +1483,8 @@ extension suites and the frontend build on every push / PR.
 - No API contract tests (supertest).
 - No end-to-end (extension → API → DB → dashboard).
 - No frontend component/hook tests.
-- Nothing has run against a live database — all backend verification is unit-level, pipelines
-  are "syntax-checked and logically verified only" (session log).
+- Tests never touch a database — backend verification is unit-level and source-scan. The only
+  live-DB runs were read-only probes (`measure-insights.js`, `probe-activity-shape.js`).
 
 ### 17.3 Recommended strategy [RECOMMENDED IMPROVEMENT]
 
@@ -1807,7 +1832,7 @@ Let `N` = a user's activity docs in the query window; `A` = all activity docs ev
 | `/summary` | O(N) in Mongo (`$group`) | O(days + langs) | already a pipeline — the model to follow |
 | **Global leaderboard** | **O(A)** aggregate + **O(U)** merge + O(U log U) sort | **O(A_projects + U)** | → O(U) read + O(U log U) sort from a rollup; O(log U) with a Redis ZSET |
 | Group leaderboard | O(A_member) aggregate + O(M) | O(M) | same rollup idea, scoped |
-| `/api/metrics` | 4 × O(N) `$group` + O(B log B) sort in `flowBlockStats` + O(D) stddev + O(24) peak + O(G) pairs | O(B + D) | not cached — cache per (user, window) |
+| `/api/metrics` | 4 × O(N) `$group` + O(B log B) sort in `flowBlockStats` + O(D log D) median/MAD + O(24) peak + O(G) pairs + O(S) sessionize + O(R) rules | O(B + D + S) | only the 90-day baseline is cached — cache the rest per (user, window) |
 | `consistencyIndex` | O(D) | O(D) | |
 | `truePeakWindow` | O(24) | O(1) | |
 | `estimationCalibration` | O(G) | O(G) | |
@@ -1836,13 +1861,15 @@ the engine / precompute rollups.
 
 ### `routes/leaderboard.js` — the aggregate
 
-- *Why the `$regexMatch`/`$toObjectId`?* `activities.userId` is a `String`; some legacy rows
-  may not be 24-hex; the pipeline coerces valid ones so the `$group` key matches
-  `users._id`.
+- *Why group by the String `userId`?* `activities.userId` is a `String`; the pipeline groups on it
+  directly and the Node merge looks users up by `String(user._id)`. *(An older version coerced with
+  `$regexMatch`/`$toObjectId`; removed 2026-09-10.)*
 - *Time complexity?* O(A) — every activity doc. *Space?* `$addToSet` on every project name.
 - *Race?* No, but the result is different on every call (relative scoring).
-- *Edge case:* zero users → `maxHours = 1` guard; `Math.max(...[], 1)` guards empty arrays.
-- *"commits"?* It's `activityCount`, mislabelled.
+- *Edge case:* zero users or all-zero stats → `maxOf()` floors at 1. It's a fold, not
+  `Math.max(...spread)`, which throws `RangeError` past ~100k users (H-18).
+- *"commits"?* Real git commits since 2026-09-10 (`gitAnalytics.commits`, per-document fallback to
+  the terminal count); it used to be flush count (H-17).
 - *Fix?* Rollup collection; move `sort`+`limit` into the pipeline; window by `timestamp`.
 
 ### `routes/analytics.js` — `computeStreak`
@@ -2049,8 +2076,9 @@ the engine / precompute rollups.
 > near the data. The frontend just renders the numbers.
 
 **17. Is the Insights page machine learning?**
-> No. It's deterministic statistics — coefficient of variation, a weighted score for the
-> productive-hour ranking, medians, a ratio for estimation accuracy. I chose that so every
+> No. It's deterministic statistics — median absolute deviation, surviving-minutes scoring for
+> the productive two-hour window, medians, a median ratio for estimation accuracy, and a rules
+> layer on top. I chose that so every
 > number is explainable. An LLM narration layer is designed but not built, with a hard rule
 > that any number it states must come from the metrics object.
 
@@ -2060,8 +2088,11 @@ the engine / precompute rollups.
 > sense once I have goal-slippage or retention labels and a user base.
 
 **19. Why not use a simple rules engine for insights instead?**
-> That's basically what `metricsDerive` is — thresholded rules on computed metrics
-> (`consistencyIndex >= 0.6` → "steady"). The metrics *are* the rules layer.
+> I did — on top of the metrics, not instead of them. `services/rulesEngine.js` holds 13
+> declarative threshold rules, e.g. churn above 30% *and* at least 10 points over your own 90-day
+> norm → "you're rewriting more than usual". Each rule declares the metrics it needs and is skipped
+> unless they clear the confidence gate — validated at startup, because `confidence !==
+> 'insufficient'` is true for a missing entry. Every finding carries the numbers that fired it.
 
 **20. Why not use an LLM for the insights?**
 > I want to — for the narration. Not for the numbers, because it would hallucinate them. The
@@ -2070,8 +2101,8 @@ the engine / precompute rollups.
 
 **21. Why MongoDB aggregation over `$lookup` for the leaderboard join?**
 > I can't `$lookup` cleanly because `activities.userId` is a String and `users._id` is an
-> ObjectId — I coerce with `$toObjectId` in an `$addFields`. Migrating `userId` to ObjectId
-> is on the list; then the join is native.
+> ObjectId, so the pipeline groups by the string and I match users in Node by `String(_id)`.
+> Migrating `userId` to ObjectId is on the list (M-6); then the join is native.
 
 **22. Why did you move from one insert per flush to 10-minute buckets?**
 > The original per-flush model was ~1 row per 30–90s of coding — a two-hour session was ~100

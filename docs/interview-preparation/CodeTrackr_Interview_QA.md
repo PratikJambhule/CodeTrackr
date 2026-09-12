@@ -337,8 +337,8 @@
 > rollup, one per user per UTC day).
 
 **E2. Why is `userId` a String on `activities` but an ObjectId elsewhere?**
-> Historical — early ingest stored the hex string. It forces `$toObjectId` coercion in the
-> leaderboard pipeline and blocks `$lookup`. Migrating it to ObjectId with a dual-read compat
+> Historical — early ingest stored the hex string. It blocks `$lookup`, so the leaderboard groups
+> by the string and matches users in Node. Migrating it to ObjectId with a dual-read compat
 > window is on the list (M-6).
 
 **E3. Embedding vs referencing — where did you use each and why?**
@@ -570,9 +570,10 @@
 ## H. ML / Insights
 
 **H1. Is the Insights page machine learning?**
-> No. It's deterministic descriptive statistics — coefficient of variation for consistency, a
-> weighted linear score for the productive-hour ranking, medians for flow blocks, a ratio for
-> estimation accuracy. No model, no training, no inference, no Python, no LLM.
+> No. It's deterministic descriptive statistics — median absolute deviation for volume stability,
+> surviving minutes for the most productive two-hour window, medians for flow blocks and
+> estimation accuracy — plus a 13-rule threshold engine that states what stands out. No model, no
+> training, no inference, no Python, no LLM.
 
 **H2. Why statistics instead of ML?**
 > No labelled outcomes to learn from and not enough users. Stats work from the first data
@@ -650,6 +651,14 @@
 > 1–3 seconds, so it'd be generated async (on ingest rollup or a nightly job) and served from
 > cache, never blocking the page.
 
+**H16. Is there a rules engine on top of the metrics?**
+> Yes, since 2026-09-10 — `services/rulesEngine.js`, 13 declarative threshold rules that turn
+> the numbers into a short "What stands out" list (e.g. more than 30 file switches per focused
+> hour → "your attention is fragmenting"). Each rule declares which metrics it needs and is
+> skipped unless they clear the confidence gate; every finding carries its evidence, and skips
+> are reported. On a real 30-day window with 6 sparse days it fired nothing and skipped 10
+> checks — which is the right answer. Deliberately not a model and not an LLM.
+
 ---
 
 ## I. Leaderboard
@@ -692,9 +701,10 @@
 > stable unless *their* activity changes.
 
 **I9. "commits" on the leaderboard — what is it actually?**
-> It's `activityCount` — `$sum { $ifNull: ['$flushCount', 1] }`, i.e. the number of flushes
-> (since bucketing; was raw doc count). Still not `gitAnalytics.commits` — mislabelled. Should
-> sum the real git commits.
+> Real git commits since 2026-09-10: `$sum` of `gitAnalytics.commits`, falling back per document to
+> `terminalAnalytics.gitActivity.commits` for rows written before the Git-API tracker. Before that
+> fix it was `activityCount` — `$sum { $ifNull: ['$flushCount', 1] }`, the number of flushes —
+> labelled as commits (H-17). The flush count is still returned, under its own name.
 
 **I10. Privacy issue with the leaderboard?**
 > It returns every user's email. Should return a display name or handle only.
@@ -712,10 +722,10 @@
 > They're the reason the project exists. My friends and I run coding contests and daily-practice
 > streaks; a group is how you scope the competition — everyone joins, everyone's editor is
 > tracked automatically, and `GET /:groupId/details` returns the member list plus a per-member
-> leaderboard (`codingHours`, `totalLinesAdded`). The original idea also included comparing
-> *errors* — the extension does record each member's failed commands/builds/repeated failures
-> — but the group leaderboard doesn't surface that yet; it's the top item on my list and a
-> read-path change only (extend the same `$group` with `$sum` of the failure counters).
+> leaderboard: hours, lines, commits, and each member's failed commands and failed builds with
+> failure rates. Comparing *errors* was the original idea; the extension always collected it, and
+> since 2026-09-10 the group view shows it — a read-path change (the same `$group`, plus `$sum` of
+> the failure counters).
 
 **J1. How are groups created?**
 > `POST /api/groups/create` with name, description, visibility, and (for private) a password.
@@ -762,11 +772,11 @@
 > Either poll a `GET /:groupId/feed` endpoint that queries recent `activities` for member IDs,
 > or — for real-time — a WebSocket room per group that the ingest path publishes to.
 
-**J10. The original goal was comparing errors and contest-week activity — how would you finish that?**
-> Two small changes. **Errors:** the group-details endpoint already `$group`s member activity
-> for hours and lines; add `$sum` of `terminalAnalytics.failedCommands` / `failedBuilds` /
-> `debuggingSessions` and a computed `buildSuccessRate`, then render the columns. **Contest
-> weeks:** add `?from=&to=` to `/:groupId/details` and a `$match` on `timestamp`; store
+**J10. The original goal was comparing errors and contest-week activity — where does that stand?**
+> **Errors: done (2026-09-10).** The group-details `$group` now also sums `failedCommands`,
+> `totalCommands`, `failedBuilds`, `buildRuns` and real commits, and computes per-member failure
+> rates — `null` when nothing ran, so "never failed" and "never ran" aren't confused. **Contest
+> weeks: still open.** add `?from=&to=` to `/:groupId/details` and a `$match` on `timestamp`; store
 > `contestStart`/`contestEnd` on the group and default the window to that. The 10-minute
 > bucketing doesn't interfere — buckets are stamped `bucketStart`, so a time-range `$match`
 > still works. Both are read-path only, no schema change.
@@ -795,8 +805,9 @@
 > client-supplied duration alone.
 
 **K4. Is there SQL/NoSQL injection risk?**
-> The group `discover` search puts user input straight into `$regex` — that's a ReDoS risk and
-> an unescaped pattern. Elsewhere values are passed as query *values*, not operators or
+> The group `discover` search used to put user input straight into `$regex` — a ReDoS risk and
+> an unescaped pattern. Fixed 2026-09-10: `services/textQuery.js` escapes it and caps its length,
+> and results are capped at 100. Elsewhere values are passed as query *values*, not operators or
 > `$where`, so classic operator injection is limited, but any place a raw request-body object
 > reaches a query should be audited (e.g. that nobody passes `{ "$ne": null }` as a field
 > value).
@@ -1047,7 +1058,8 @@
 > **Q:** Why use ML for insights? **A:** I don't — it's statistics.
 > **Follow-up:** So why is there an "Insights" page implying intelligence?
 > **A:** The intelligence is in the metric *design* — separating productive from busy hours,
-> using coefficient of variation instead of raw totals, comparing estimates to actuals. That's
+> using a robust spread measure instead of raw totals, gating every number on sample size, and
+> comparing estimates to actuals. That's
 > a considered analytics product, not a dumb sum. I just don't dress it up as ML, and the
 > designed LLM layer would add narration, not new numbers.
 
@@ -1137,10 +1149,11 @@
 > array and bloat the collection. `ingest.test.js` asserts a 500-element input is capped to
 > ≤ 200.
 
-**O5. `leaderboard.js` `$addFields userIdObj` — explain the regex.**
-> `activities.userId` is a String. `{ $regexMatch: { input: '$userId', regex: /^[0-9a-fA-F]{24}$/ } }`
-> — if it looks like a 24-hex ObjectId, `$toObjectId` it so the `$group` key matches
-> `users._id`; otherwise keep the string (legacy/garbage rows group separately).
+**O5. `leaderboard.js` — why group by the String `userId` with no coercion?**
+> `activities.userId` is a String and every user's `_id` stringifies to the same hex, so the
+> pipeline `$group`s on the string and the Node merge looks users up by `String(user._id)`. An
+> older version coerced with `$regexMatch` + `$toObjectId`; removing it (2026-09-10) dropped a
+> pipeline stage, and nothing depended on ObjectId keys.
 
 **O6. `resolveOwnedUserId` — what does it return and why?**
 > The user id to query, or `null` if it already sent a 401/403 response. Callers do

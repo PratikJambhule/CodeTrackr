@@ -22,8 +22,8 @@ for daily practice, everyone installs the extension once, and their coding time 
 tracked automatically instead of self-reported — then the group page shows who actually put
 in the work. The extension also records each member's failed terminal commands, failed
 builds, and repeated failures, so "who hit the most errors this week" is data the system
-already collects; the group leaderboard just doesn't surface it yet (that's a read-path
-`$group` extension, not a schema change — see §8). The solo dashboard, deterministic
+already collects — and since 2026-09-10 the group leaderboard shows it, per member, with failure
+rates (a read-path `$group` extension, not a schema change — see §8). The solo dashboard, deterministic
 insights, and goals all grew outward from that group-competition core.
 
 CodeTrackr is a **client–server, REST, modular-monolith** web application with three clients
@@ -333,10 +333,11 @@ else is `find()` + JavaScript.
  Insights.tsx: 5 primary cards + 4 secondary tiles.
      hasFocusData = metrics.flowBlocks.blockCount > 0
        → if false, focus/flow/churn/read/switch cards render "—" + an "update to 2.1.0" banner
-     estimationCalibration null → "complete 2 goals with a tech stack" copy
+     estimationCalibration null → "complete a goal with a tech stack" (one is enough since 2026-09-10) copy
 ```
 
-**This is descriptive statistics, computed on demand, not cached, not ML.**
+**This is descriptive statistics plus a small threshold-rules layer, computed on demand (only the
+90-day baseline is cached), not ML.**
 An LLM narration layer is designed in `docs/TRACKING_ROADMAP.md` (§5) but **not built**; the
 plan there insists any generated number must be traceable to the structured metrics object
 (anti-hallucination), and Gemini was the chosen provider.
@@ -487,8 +488,8 @@ dashboard, or an OAuth 2.0 device-authorization flow.
 ```
 
 - **`activities.userId` is a `String`** (the hex of `users._id`), while every other collection
-  uses real `ObjectId` refs. This forces the `$regexMatch` + `$toObjectId` coercion in
-  `leaderboard.js` and blocks `$lookup` joins (M-6).
+  uses real `ObjectId` refs. That blocks `$lookup` joins (M-6); the leaderboard groups by the
+  string and matches users in Node.
 - **`activities` is bucketed** (since 2026‑09‑08): the write path `$inc`-upserts one document
   per `(userId, projectName, language, bucketStart)` 10-minute window instead of one per flush.
   `duration` accumulates **real measured seconds**, so every total/hour is byte-identical to

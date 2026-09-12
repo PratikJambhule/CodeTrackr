@@ -3,7 +3,7 @@
 > **Purpose of this file.** A future AI assistant (or a new engineer) should be able to read
 > this file and understand CodeTrackr *without re-deriving everything from the repository*.
 > It records the **actual implementation** as of the `feat/security-and-insights` branch
-> (analysis date: 2026‑09‑07), and clearly separates **what exists** from **what is
+> (first analysed 2026-09-07; last reconciled against the code 2026-09-11 at `ecff806`), and clearly separates **what exists** from **what is
 > recommended but not built**.
 >
 > When this file and the code disagree, the code wins — update this file.
@@ -22,8 +22,8 @@ the author's college friend group: create a **group** — for a contest week, or
 practice — and because everyone's editor is tracked automatically, the group page shows who
 actually put in the hours and code. The extension also records **command / build / test
 failures per person** (`terminalAnalytics`), so "who's hitting the most errors" is data the
-app already collects; surfacing that in the group view (it currently ranks by hours + lines
-added) is the natural next step, not yet built.
+app already collects, and since 2026-09-10 (M-21) the group leaderboard shows it: commits, failed
+commands and failed builds per member, with failure rates.
 
 **One-line pitch:** "A coding-activity tracker built around friendly competition: install the
 VS Code extension, join a group with your friends, and the app shows who coded the most, in
@@ -46,10 +46,10 @@ CodeTrackr-main/
 │   ├── api/index.js              Vercel serverless entry — wraps app.js with serverless-http
 │   ├── config/passport.js        Google OAuth 2.0 strategy (passport-google-oauth20)
 │   ├── middleware/auth.js        isAuthenticated (JWT cookie) + verifyApiKey (x-api-key header) + AUTH_BYPASS
-│   ├── models/                   Activity, user, Goal, Group, GroupMember, Team, Notification
-│   ├── routes/                   analytics, auth, extension, goals, groups, leaderboard, metrics, notifications, team, user
+│   ├── models/                   Activity, DailySummary, UserInsights, user, Goal, Group, GroupMember, Team, Notification
+│   ├── routes/                   analytics, auth, extension, goals, groups, internal, leaderboard, metrics, notifications, team, user
 │   ├── services/                 authorization, passwordHash, textQuery, activityNormalizers, activityBucket, ingestValidation, metricsService, metricsDerive, sessionize, insightsBaseline, rulesEngine, dailySummary, dailyRollup, notificationScheduler
-│   ├── scripts/                  preview-insights.js, seed-demo-insights.js, cleanup-terminal-analytics.js
+│   ├── scripts/                  migrate-drop-date + rollup-daily (deploy-time, --apply); probe-activity-shape + measure-insights (read-only probes); preview-insights, seed-demo-insights, cleanup-terminal-analytics
 │   ├── tests/                    18 plain node:assert suites / 292 assertions — streak, ingest, metrics, authorization, routeGuards, passwordHash, activityBucket, activityModel, ingestWiring, rollup, quickWins, ingestValidation, metricsService, sessionize, insightsBaseline, textQuery, leaderboardScore, rulesEngine
 │   ├── tools/                    ~15 ad-hoc seed/cleanup scripts (dev only)
 │   ├── server.js.old             Legacy monolith (unused, kept for reference — had helmet + rate-limit)
@@ -72,15 +72,18 @@ CodeTrackr-main/
 │   ├── src/gitTracker.ts         detectGitAction() helper
 │   ├── src/debugTracker.ts       Debug session counts (folded into terminalAnalytics)
 │   ├── extension.js              Legacy v1 (excluded from .vsix via .vscodeignore)
-│   ├── tests/                    trackers.test.js, activation.test.js (node:assert against dist bundle)
-│   └── codetrackr-vscode-2.2.0.vsix   Packaged build
+│   ├── tests/                    trackers, activation, flushSafety (node:assert against dist bundle) — 3 suites / 52 assertions
+│   └── codetrackr-vscode-2.3.0.vsix   Last packaged build (source is 2.4.0 — not yet packaged or published)
 └── docs/
     ├── ARCHITECTURE.md           Pre-existing architecture notes (verify against code)
-    ├── IMPROVEMENT_PLAN.md       original audit 13 High / 13 Medium / 7 Low; +M-14/M-15/L-8/L-9 added & fixed in the 2026-09-09 batch; most High + the security Mediums now ✅ FIXED
+    ├── IMPROVEMENT_PLAN.md       finding register H-1…H-18 / M-1…M-21 / L-1…L-9, each marked ✅ FIXED or open
+    ├── AUDIT-2026-09-10.md       production-readiness audit: data-flow trace, raw-value meanings, bugs B1–B12, live-DB checks
+    ├── INSIGHTS_METRICS.md       definition of record for every Insights formula (before/after + why)
+    ├── RULES_ENGINE.md           threshold-rules layer over the metrics ("What stands out")
     ├── SESSION-LOG-2026-08-27.md Chronological engineering log
     ├── TRACKING_ROADMAP.md       Signals + derived-metrics design spec
     ├── diagrams-src/             figure-1 architecture .. figure-5 class diagram (HTML)
-    └── interview-preparation/    ← generated 2026-09-07: Interview_Preparation.md, Interview_QA.md, Architecture.md, Interview_Cheat_Sheet.md, .pdf
+    └── interview-preparation/    ← Interview_Preparation (+pdf), Interview_Guide_Condensed (+pdf), Interview_QA, Architecture, Interview_Cheat_Sheet, Quick_Wins, DB_Write_Reduction, Resume_Entry.tex
 ```
 
 There are **three** `package.json` files plus a **root** `package.json` that is just a
@@ -100,7 +103,7 @@ workspace; each is installed and deployed independently.
 | Auth | Google OAuth 2.0 → JWT in httpOnly cookie (web); random API key in `x-api-key` header (extension) |
 | ML/Insights | **None.** Pure deterministic JavaScript statistics (`metricsDerive.js`). No Python, no trained model, no LLM. |
 | Deploy | Backend: Render (`codetrackr-backend-uckp.onrender.com`, per extension default) — also has a Vercel serverless config. Frontend: Vercel (`code-trackr-frontend.vercel.app`). DB: MongoDB Atlas. |
-| Testing | Plain `node:assert` scripts. **12 backend suites (~142 assertions)**, 2 extension suites (~37). No framework, no integration/e2e/DB tests, **zero frontend tests**. GitHub Actions CI runs backend + extension tests and the frontend build on every push (2026‑09‑09). |
+| Testing | Plain `node:assert` scripts. **18 backend suites (292 assertions)**, 3 extension suites (52). No framework, no integration/e2e/DB tests, **zero frontend tests**. GitHub Actions CI runs backend + extension tests and the frontend build on every push (2026‑09‑09). |
 
 ---
 
@@ -128,9 +131,11 @@ workspace; each is installed and deployed independently.
 ```
 
 - **Style:** client–server, RESTish, **modular monolith** (one Express process, feature routers).
-  Partial **MVC**: models (Mongoose) + routes-as-controllers; a thin **service** layer exists only
-  for `metrics`, `authorization`, `passwordHash`, `activityNormalizers`, `notificationScheduler`.
-  Most routes talk to Mongoose directly.
+  Partial **MVC**: models (Mongoose) + routes-as-controllers; a thin **service** layer covers ingest
+  (`activityBucket`, `activityNormalizers`, `ingestValidation`), insights (`metricsService`, `metricsDerive`,
+  `sessionize`, `insightsBaseline`, `rulesEngine`), rollup (`dailySummary`, `dailyRollup`) and helpers
+  (`authorization`, `passwordHash`, `textQuery`, `notificationScheduler`). The social and analytics
+  routes still talk to Mongoose directly.
 - **No message queue, no Redis, no WebSockets.** Extension→backend is fire-and-forget HTTP.
   Frontend→backend is request/response; NotificationPanel **polls** every 30 s.
 
@@ -196,6 +201,7 @@ ingest tokens, or OAuth device flow).
 |---|---|---|
 | **activities** | `userId: String` (hex of User._id, **not** an ObjectId ref), `fileName`, `fileType`, `projectName`, `language`, `duration: Number` **(SECONDS)**, `linesAdded`, `linesRemoved`, `timestamp`, `bucketStart`, `files:[String]`, `flushCount`, `terminalAnalytics{}`, `editorAnalytics{}`, `focusAnalytics{ flowBlocksMs:[Number] }`, `gitAnalytics{}` | **Since 2026‑09‑08:** one doc per **10‑minute `(userId, projectName, language)` window** — the ingest route `$inc`‑upserts the bucket (`services/activityBucket.js`); analytics sub‑docs are **sparse** (no `default:0`; only non‑zero leaves written). `ACTIVITY_BUCKET_MS=0` restores per‑flush inserts. Legacy per‑flush docs coexist. The dead `date` field was **removed**. Highest volume. `{ timestamps:true }`. |
 | **dailysummaries** | `userId`, `day` (YYYY‑MM‑DD UTC), `totalSeconds`, `totalLinesAdded/Removed`, `flushCount`, `bucketCount`, `languages:[{language,seconds}]`, `projects:[String]`, `editor/terminal/git` aggregates, `focus{}` | One per (user, UTC day). Written nightly by `scripts/rollup-daily.js` / the `initScheduler` cron from raw `activities`. Exists for the future all‑time‑read cutover (not yet consumed by any read). |
+| **userinsights** | one document per user holding the cached 90-day baseline | Refreshed at most once a day, on read, by `services/insightsBaseline.js` — no cron. |
 | **users** | `googleId` (unique), `name`, `email` (unique), `profilePictureUrl`, `apiKey` (unique, sparse, **plaintext**), `lastLogin`, `isFirstLogin` | |
 | **groups** | `name`, `description`, `visibility: 'public'|'private'`, `password` (`select:false`, scrypt hash `scrypt$salt$hash`, legacy plaintext tolerated), `createdBy: ObjectId→User` | |
 | **groupmembers** | `groupId: ObjectId`, `userId: ObjectId`, `joinedAt` | Unique compound index `{groupId:1, userId:1}`. Join table. |
@@ -245,16 +251,18 @@ everything into Node".
 | GET | `/api/analytics/weekly/:userId` | `isAuthenticated` + ownership | 7-day daily breakdown. |
 | GET | `/api/analytics/timeslot/:userId` | `isAuthenticated` + ownership | 2-hour drill-down, 10-minute slots. |
 | GET | `/api/analytics/summary/:userId` | `isAuthenticated` + ownership | `$group` daily + per-language totals. |
-| GET | `/api/leaderboard` | `isAuthenticated` | Global. Aggregates the **entire** activities collection + **all** users, merges/sorts/scores in Node. No window, no pagination, no cache. Returns every user's name + email. |
-| GET | `/api/metrics?days=&timezone=` | `isAuthenticated` | Derived Insights metrics. **Session identity only — no `:userId` param** (deliberate, closes the IDOR class). |
+| GET | `/api/leaderboard?days=` | `isAuthenticated` | Global. Aggregates the **entire** activities collection (optional `?days=` window, capped at 400) + **all** users, merges/sorts/scores in Node. No pagination, no cache (H-7 open). `commits` = real git commits (H-17). Returns every user's name + email. |
+| GET | `/api/metrics?days=&timezone=` | `isAuthenticated` | Derived Insights metrics, plus `insights` (rules-engine findings), session/archetype mix and 90-day baseline deltas. **Session identity only — no `:userId` param** (deliberate, closes the IDOR class). |
 | POST | `/api/groups/create` | `isAuthenticated` | Creator auto-added as member; private → scrypt-hash password. |
-| GET | `/api/groups/my-groups` \| `/discover` | `isAuthenticated` | Membership-scoped / inverse. |
-| GET | `/api/groups/:groupId/details` | `isAuthenticated` + **membership check** | Members list + group leaderboard (all-time, no pagination). |
+| GET | `/api/groups/my-groups` \| `/discover` | `isAuthenticated` | Membership-scoped / inverse. `/discover?search=` is regex-escaped and capped at 100 results (H-16). |
+| GET | `/api/groups/:groupId/details` | `isAuthenticated` + **membership check** | Members list + group leaderboard (all-time, no pagination): hours, lines, commits, failed commands and builds with rates (M-21). |
 | POST | `/api/groups/:groupId/join` \| `/leave` | `isAuthenticated` | Password check for private; last member leaving deletes the group. |
-| POST | `/api/goals/create` · GET `/api/goals` · GET `/api/goals/:goalId/progress` | `isAuthenticated` (+ owner scope on progress) | Progress = Σ activity seconds where `language === goal.techStack` and `timestamp <= deadline`, ÷ 3600 ÷ targetHours. **No update/complete/delete route.** |
+| POST | `/api/goals/create` · GET `/api/goals` · GET `/api/goals/:goalId/progress` · PATCH `/:goalId/complete` \| `/reopen` | `isAuthenticated` (+ owner scope on progress, complete, reopen) | Progress = Σ activity seconds whose `language` **or** `projectName` matches `techStack` (case-insensitive, exact), from `createdAt` to `completedAt` (else `deadline`, else now), ÷ 3600 ÷ targetHours. Complete/reopen added 2026-09-10 (M-17). No edit/delete route. |
 | GET/PATCH/DELETE | `/api/notifications/*` | `isAuthenticated` | All correctly scoped by `req.user._id`. |
 | POST | `/api/teams/create` · GET `/api/teams` · GET `/api/teams/:teamId` · POST `/api/teams/:teamId/members` | `isAuthenticated` (+ membership / admin checks) | Backend only; no UI route. |
 | GET | `/auth/google` · `/auth/google/callback` · `/auth/current-user` · POST `/auth/logout` | — | OAuth + JWT cookie. |
+| POST | `/api/internal/run-notifications` \| `/run-rollup` | header `x-internal-secret` = `INTERNAL_CRON_SECRET` | External-cron trigger for the scheduler; **404** when the secret is unset or wrong (H-13). |
+| GET | `/health` · `/` | — | `/health` = readiness, 503 unless Mongo is connected (L-8); `/` = liveness. |
 
 Legacy unauthenticated `POST /api/user-activity` / `GET /api/user-stats/:id` were **deleted**
 (H‑2); they still exist in `server.js.old` for reference only.
@@ -263,7 +271,7 @@ Legacy unauthenticated `POST /api/user-activity` / `GET /api/user-stats/:id` wer
 
 ## 9. VS Code extension — how it works
 
-*Current published-target version: **2.3.0** (packaged; Marketplace publish is manual).*
+*Source version: **2.4.0** (2026-09-10 — flush carry-forward + idle pause). Last packaged `.vsix`: **2.3.0**. 2.4.0 is **not** packaged or published yet; Marketplace publish is manual.*
 
 - **Activation:** `onStartupFinished`. `activate()` creates the five trackers, registers 7
   commands, then calls `start()`.
@@ -295,8 +303,10 @@ Legacy unauthenticated `POST /api/user-activity` / `GET /api/user-stats/:id` wer
     `onDidStart/EndTerminalShellExecution`; classifies command category, build/test/debug,
     git action; success/failure by exit code; repeated-failure detection.
   - `DebugTracker` — debug session count, folded into `terminalAnalytics.debuggingSessions`.
-- **Failure handling:** `axios` timeout 15 s. On error, buffered minutes are **retained in
-  memory** and carried to the next flush; **there is no disk queue** — a VS Code restart loses
+- **Failure handling (2.4.0):** `axios` timeout 15 s. `sendActivity` returns a success boolean;
+  an unsent or signal-less payload is **held in memory** (`holdPayload`) and merged into the next
+  one (`mergeAnalytics`) instead of being discarded (H-14); a `400` is treated as permanent. While
+  idle-paused, `FocusTracker`/`EditorTracker` bank nothing (H-15); **there is no disk queue** — a VS Code restart loses
   un-flushed time (a best-effort final flush runs on `deactivate()`). 401 → one-time
   actionable prompt ("Set API Key" / "Open Dashboard").
 - **Config keys:** `codetrackr.apiBase` (default `https://codetrackr-backend-uckp.onrender.com`),
@@ -319,6 +329,10 @@ Legacy unauthenticated `POST /api/user-activity` / `GET /api/user-stats/:id` wer
 > focus-derived metric therefore has no live input; the confidence gating added 2026‑09‑10 makes
 > that visible as "—" instead of a fabricated 0. Formula definitions live in
 > `docs/INSIGHTS_METRICS.md`.
+>
+> **Re-confirmed 2026-09-11 from the endpoints:** Render `GET /health` → **404** (the route exists on
+> the branch since 2026-09-09) and the production Vercel bundle has no `/insights` route. Neither
+> tier runs this branch — see §15.
 
 ## 10. Insights / "ML" — WHAT IT ACTUALLY IS
 
@@ -329,8 +343,8 @@ dependency-free functions) computes:
 
 | Metric | Definition (as coded) |
 |---|---|
-| `deepWorkRatio` | Σ(flow blocks ≥ 25 min) ÷ total focused ms. 0–1. |
-| `flowBlocks` | median / longest / count / deep-block count of `flowBlocksMs`. |
+| `deepWorkRatio` | Σ(flow blocks ≥ 25 min) ÷ Σ(all flow blocks) — same clock, bounded 0–1. *(Was ÷ total focused ms: two different clocks, could exceed 1. Fixed 2026-09-10.)* |
+| `flowBlocks` | median / longest / count / deep-block count / total of `flowBlocksMs`. |
 | `volumeStability` | `1 − MAD/median` of daily minutes, clamped [0,1] — robust. *(Was `1 − CV` over only active days, so it measured volume evenness, never cadence. Fixed 2026‑09‑10; `consistencyIndex` kept as an alias.)* |
 | `activeDaysRatio` | activeDays ÷ windowDays — the real cadence metric. |
 | `qualityStreak` | consecutive days containing a ≥25 min flow block. |
@@ -342,16 +356,23 @@ dependency-free functions) computes:
 | `comprehensionLoad` | readMs ÷ (readMs + writeMs). |
 | `contextSwitchesPerHour` | fileSwitches ÷ focused hours. |
 
-- **Runs:** synchronously, per request, **no caching**, recomputed every page load.
-- **Insufficient data:** focus/flow metrics show "—" until extension ≥ 2.1.0 data exists
-  (`flowBlocks.blockCount === 0`); `estimationCalibration` returns `null` below 2 completed goals.
+- **Runs:** synchronously, per request. Only the 90-day **baseline** is cached (`UserInsights`, refreshed
+  at most daily on read); the rest is recomputed every page load (`buildMetrics` measured 239 ms cold,
+  44 ms warm).
+- **Insufficient data:** every metric is confidence-gated (`docs/INSIGHTS_METRICS.md` §1) and renders
+  "—" below its minimum sample. `estimationCalibration` needs **one** completed goal whose stack
+  matches real activity (was two).
 - **Privacy:** these metrics are per-user only and never appear on the leaderboard.
 - **An LLM layer was *designed* (Gemini chosen) but never built** — see
   `docs/TRACKING_ROADMAP.md` Part 5. `AI_INSIGHTS_DESIGN.md` is referenced but absent.
-- **Honest interview line:** "The Insights page is deterministic descriptive statistics —
-  coefficient of variation, weighted scoring, medians — not ML. I scoped it that way
-  deliberately so every number is explainable and reproducible; an LLM 'narration' layer on
-  top is designed but not implemented."
+- **Rules engine (2026-09-10):** `services/rulesEngine.js` — 13 declarative threshold rules over these
+  metrics, gated on the same confidence sidecar, each finding carrying the numbers that fired it;
+  returned as `insights` and rendered as "What stands out". Sessions and rule-based archetypes come
+  from `services/sessionize.js`. See `docs/RULES_ENGINE.md`.
+- **Honest interview line:** "The Insights page is deterministic descriptive statistics — medians
+  and MAD, confidence-gated, with a small rules layer that says what stands out — not ML. I scoped
+  it that way deliberately so every number is explainable and reproducible; an LLM 'narration'
+  layer on top is designed but not implemented."
 
 ---
 
@@ -359,18 +380,21 @@ dependency-free functions) computes:
 
 `GET /api/leaderboard`:
 1. `User.find({})` — **all** users.
-2. `Activity.aggregate` over the **entire** collection: `$group` by userId (with
-   `$regexMatch`/`$toObjectId` to coerce the String `userId`), summing duration / lines,
-   `$addToSet` project names, counting docs.
+2. `Activity.aggregate` over the **entire** collection (or `?days=`, capped at 400), excluding
+   `duration < 0`: `$group` by the String `userId`, summing duration, lines and **real commits**
+   (`gitAnalytics.commits`, falling back per document to `terminalAnalytics.gitActivity.commits` —
+   never both), `$addToSet` project names, and counting `flushes` (`$ifNull($flushCount, 1)`).
 3. Merge in Node, sort by `totalHours` desc, assign `rank = index + 1` (ties → array order).
 4. Scores `speed/quality/engagement/impact/overall/commitScore` are computed **relative to the
-   current maximum** — so every user's score shifts whenever the top user codes more.
-   `commits` on the leaderboard is actually **`$sum $ifNull($flushCount, 1)`** (flush count,
-   not git commits — since 2026‑09‑08; was raw doc count).
+   current maximum** — so every user's score shifts whenever the top user codes more. Each score is
+   clamped to [0, 5] by `score()`, and the maxima come from a fold (`maxOf`), not a spread.
+   *(Until 2026-09-10: `commits` was flush count (H-17), `impact` could go negative (M-18), and
+   `Math.max(...spread)` threw `RangeError` past ~100k users (H-18).)*
 
 **Cost:** O(total activity documents + total users) per request, in application memory, no
-time window, no pagination, no cache. Fine for a class project; the first thing that breaks at
-scale. Group leaderboard (`/api/groups/:id/details`) is the same pattern scoped to member IDs.
+time window by default, no pagination, no cache. Fine for a class project; the first thing that breaks at
+scale (H-7, open — the fix is a `UserStats` running-total rollup). Group leaderboard
+(`/api/groups/:id/details`) is the same pattern scoped to member IDs (H-8, open).
 
 ---
 
@@ -386,10 +410,9 @@ scale. Group leaderboard (`/api/groups/:id/details`) is the same pattern scoped 
 - **Charts:** chart.js + react-chartjs-2 (Line/Pie/Bar) in Dashboard; Insights is plain cards.
 - **Known frontend issues:**
   - `Dashboard.tsx` "Repeated Failures" panel — ✅ **wired to the real `terminalSummary.repeatedFailedCommands` (2026-09-09)**; was hardcoded mock arrays.
-  - `Goals.tsx` to-do items are **client-state only** — never persisted; no goal
-    complete/delete/progress UI; the `/:goalId/progress` endpoint is never called.
+  - `Goals.tsx` has a **Mark complete / Reopen** button (2026-09-10, M-17). To-dos are not persisted
+    (Quick-Wins #14, open); there is no edit or delete UI. The `/:goalId/progress` endpoint is never called.
   - `npm run build` — ✅ **green as of 2026-09-09** (was 29 `tsc -b` errors, M-13). CI (`.github/workflows/ci.yml`) keeps it green.
-    (M‑13; mostly unused imports, 2 real `string not assignable to never`).
   - `NotificationPanel` polling `useEffect` closes over a stale `isOpen` (L‑1).
 - **Themes:** 28 palettes in `ThemeContext.tsx`, persisted to `localStorage.selectedTheme`,
   applied as CSS custom properties + inline styles.
@@ -398,8 +421,10 @@ scale. Group leaderboard (`/api/groups/:id/details`) is the same pattern scoped 
 
 ## 13. Error handling & reliability (actual)
 
-- Every route is a `try/catch` that returns `res.status(500).json({ message, error: error.message })`
-  — ✅ **fixed 2026-09-09 (M‑10)**: a central `(err,req,res,next)` handler logs the full error with a correlation id and returns `{error, id}`; routes `next(err)`.
+- ✅ **Central error handler (M-10, 2026-09-09):** routes call `next(err)`; one `(err,req,res,next)`
+  handler logs the full error with a correlation id and returns `{error, id}` — no `error.message`
+  leaks. Since 2026-09-10 it maps Mongoose `CastError`/`ValidationError` to **400** (M-19), and
+  `routes/notifications.js` uses it too (M-20).
 - Mongo connection: `mongoose.connect(...).catch(err => console.error(...))` — the process
   **keeps running without a DB**; requests then fail per-query.
 - Ingest validation (2026-09-09, M‑4): `services/ingestValidation.js` `validateIngestPayload`
@@ -408,7 +433,8 @@ scale. Group leaderboard (`/api/groups/:id/details`) is the same pattern scoped 
   client-supplied (bounded, not server-set); no per-key ingest quota.
 - Extension offline: retained in memory, no disk queue, lost on restart.
 - ML/metrics failure: caught → `500 { success:false }`; the Insights page shows "Could not
-  load your insights" + Try again.
+  load your insights" + Try again. A `rulesEngine` failure on its own degrades to an empty
+  `insights` panel rather than failing the request.
 - ~40 `console.log` on hot paths including per-request user IDs (L‑3).
 
 ---
@@ -426,13 +452,15 @@ ownership (H‑1); legacy open write/read endpoints deleted (H‑2); group passw
   but not read the victim's dashboard (that needs the JWT).
 - `JWT_SECRET` was a hardcoded fallback — now required at boot (M‑9, ✅ fixed 2026-09-09).
 - `helmet` + rate limits on `/auth` and `/api/extension` added 2026-09-09 (M‑3 ✅). Group `/join` brute-force still unlimited.
-- No request validation / schema enforcement (M‑4); fake activity is trivial to inject with a valid key.
-- Error responses echo `error.message` (M‑10).
+- Ingest is bounds-checked (M-4, partial) but has no per-key quota, so plausible fake activity is
+  still easy to inject with a valid key.
+- ~~Error responses echo `error.message`~~ — fixed (M-10).
 - Leaderboard exposes **every user's email**.
 - Extension stores the key in `settings.json`, not SecretStorage.
 - Ingest is still not idempotent, but a re-sent flush now `$inc`s the same bucket rather than
   creating a second document — a same-window replay double-counts within one bucket, not a new row.
-- Client can send arbitrary `timestamp` on ingest (used, only sanity-checked for parseability).
+- Client supplies `timestamp` on ingest — bounded to `[now-24h, now+60s]` (M-4) but not server-set.
+- ✅ Fixed 2026-09-10: regex injection / ReDoS in `GET /api/groups/discover?search=` (H-16).
 
 ---
 
@@ -441,7 +469,8 @@ ownership (H‑1); legacy open write/read endpoints deleted (H‑2); group passw
 **Backend env vars** (`backend/.env.example`): `MONGO_URI` (required), `JWT_SECRET` (required —
 is now required at boot — fixed 2026-09-09), `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` / `GOOGLE_CALLBACK_URL`
 (required — `config/passport.js` **throws at import** if missing), `FRONTEND_URL` (CORS +
-redirects), `PORT` (default 5050), `NODE_ENV`, `AUTH_BYPASS` (dev only).
+redirects), `PORT` (default 5050), `NODE_ENV`, `INTERNAL_CRON_SECRET` (enables `/api/internal/*`),
+`ACTIVITY_BUCKET_MS` (`0` = legacy per-flush inserts), `AUTH_BYPASS` (dev only).
 
 **Frontend env:** `VITE_API_URL` (falls back to `http://localhost:5050`). `frontend/vercel.json`
 is an SPA rewrite (`/(.*)` → `/index.html`).
@@ -455,7 +484,32 @@ The schedule is driven externally via `POST /api/internal/run-{notifications,rol
 
 **DB:** MongoDB Atlas (TLS, `family:4`, 15 s server-selection timeout).
 
-**CI/CD:** none in the repo. No GitHub Actions, no Dockerfile, no Procfile.
+**CI:** `.github/workflows/ci.yml` (2026-09-09) — backend `npm test` plus an `app.js` import smoke
+(needs `GOOGLE_*` placeholders), frontend `npm run build`, extension `npm test`, on every push and PR.
+**CD:** none in the repo — no Dockerfile or Procfile; Vercel and Render build from their own Git
+integrations.
+
+### Live deployment state (verified 2026-09-11)
+
+| Tier | Actually serving | Evidence |
+|---|---|---|
+| Frontend — Vercel production (`code-trackr-frontend.vercel.app`) | `main` (`4c1ae25`) | bundle `index-UkW22d84.js` has no `/insights` route |
+| Frontend — Vercel preview | `feat/security-and-insights` (auto-built on push) | Vercel "Active Branches" |
+| Backend — Render (`codetrackr-backend-uckp.onrender.com`) | pre-2026-09-09 code | `GET /health` → 404; 0 activity docs carry `bucketStart` |
+
+- **`main` shares no history with the branch** (42 vs 65 commits, no merge base). A trial merge with
+  `--allow-unrelated-histories` produced **35 add/add conflicts**, so the GitHub PR cannot be merged
+  as-is. `main`'s only files missing from the branch are `extension/src/{syncService,logger,types}.ts`
+  — the dead sync pipeline deleted as H-12.
+- **A Vercel preview cannot exercise the app.** CORS allows only `FRONTEND_URL` plus
+  `localhost:5173/5174`, and the OAuth callback redirects to `FRONTEND_URL`, so a preview origin is
+  rejected on every API call.
+- **Deploy order:** (1) Render backend → branch `feat/security-and-insights`, with the env vars above;
+  (2) Vercel production branch → the same branch (current Vercel UI: Settings → Environments →
+  Production), then redeploy; (3) `node backend/scripts/migrate-drop-date.js --apply`. Backend first:
+  the new frontend calls routes the old backend lacks (`PATCH /api/goals/:id/complete`, `insights`
+  on `/api/metrics`).
+- **Check it worked:** Render `GET /health` returns JSON, and the production nav shows **Insights**.
 
 ---
 
@@ -465,7 +519,7 @@ The schedule is driven externally via `POST /api/internal/run-{notifications,rol
 |---|---|---|---|
 | streak | `backend/tests/streak.test.js` | extracts helpers from shipped `analytics.js`, runs vs stubbed `Activity.aggregate` | `computeStreak`, `localDayInfo` (timezone) — 9+ assertions incl. regression cases |
 | ingest | `backend/tests/ingest.test.js` | unit | `activityNormalizers` — defaults, coercion, negative rejection, `flowBlocksMs` cap |
-| metrics | `backend/tests/metrics.test.js` | unit | all 5 `metricsDerive` pure functions |
+| metrics | `backend/tests/metrics.test.js` | unit | every `metricsDerive` function |
 | authorization | `backend/tests/authorization.test.js` | unit | `sameUser`, `assertOwnership`, `isBypassAllowed` |
 | routeGuards | `backend/tests/routeGuards.test.js` | **static source scan** | fails if a sensitive route loses its auth middleware (H‑1 regression guard) |
 | passwordHash | `backend/tests/passwordHash.test.js` | unit | scrypt round-trip, salting, legacy plaintext, null-safety |
@@ -483,7 +537,11 @@ boot-guard, no `'your_jwt_secret'` fallback, `11000`→409 on group join, `GET /
 `require.main` bootstrap guard, `/api/internal` + its secret, the `{goalId:1,type:1}` index)
 and `ingestValidation` (23 pure — `validateIngestPayload` bounds).
 
-**Total ≈ 142 backend assertions across 12 suites + 37 extension.** No test framework, **no
+Plus, since 2026-09-10: `metrics` rewritten (37), `metricsService` (35), `sessionize` (26),
+`insightsBaseline` (19), `textQuery` (13), `leaderboardScore` (11), `rulesEngine` (22); extension
+`flushSafety` (15).
+
+**Total: 292 backend assertions across 18 suites, plus 52 extension assertions across 3.** No test framework, **no
 integration/API/DB/e2e tests, no frontend tests.** Nothing has been run against a real
 database — the bucketing/rollup/wiring logic is proven at the pure-function / source-scan
 level only (a `supertest` + `mongodb-memory-server` integration test is the tracked next step,
@@ -503,11 +561,12 @@ Quick-Wins #24).
 8. `userId` is String on `activities`, ObjectId elsewhere → coercion gymnastics, blocks `$lookup` (M‑6).
 9. Extension has no offline queue; un-flushed time is lost on restart.
 10. Ingest not idempotent — a same-window replay double-counts inside one bucket.
-11. Insights recomputed every request, no cache.
+11. Insights recomputed every request; only the 90-day baseline is cached.
 12. GitHub Actions CI added 2026-09-09 (backend+extension tests, frontend build); still no CD, no observability, no integration tests.
 13. **DB write-reduction (2026‑09‑08):** time-of-day precision is now the 10-minute grid;
     all-time reads (`/leaderboard`, `/summary`, `/metrics >90d`) still scan raw `activities`
     — not yet repointed at `dailysummaries`; the 400-day TTL is a safety net only.
+14. **Nothing on this branch is live**, and extension 2.4.0 is unpackaged — see §15.
 
 *(Fixed 2026‑09‑08: the missing `{userId:1,timestamp:-1}` index; per-flush document
 explosion; the dead `date` field/index; idle < 2 min inflating totals.)*
@@ -549,14 +608,14 @@ metrics, tracing); CI (typecheck + both test suites) + automated Marketplace pub
   Spec `docs/superpowers/specs/2026-09-08-db-write-reduction-design.md`, plan
   `docs/superpowers/plans/2026-09-08-db-write-reduction.md`. `ACTIVITY_BUCKET_MS=0` = legacy.
   **Follow-up open:** repoint all-time reads at `dailysummaries` + tighten the TTL (with `UserStats`).
-- **Quick-wins batch (Tier 1 + security), 2026‑09‑09 — IN PROGRESS:** done so far —
+- **Quick-wins batch (Tier 1 + security), 2026-09-09 — DONE:**
   `#5` (index, folded from the DB batch), `#7` `JWT_SECRET` fail-fast (M‑9), `#6` 409 on
   duplicate group join (M‑14), `#11` `GET /health` (L‑8), `#8` real Repeated-Failures data
-  (M‑15), `#3` `helmet` + rate-limit (M‑3), `#1` frontend build green (M‑13), `#2` GitHub
-  Actions CI (L‑9), `#4` central error handler (M‑10). Remaining: `#12` ingest validation
-  (M‑4), `#15` serverless-safe bootstrap + external cron (H‑13). Deferred to a follow-up:
-  `#9` `UserStats` leaderboard rollup (decided: live running-total), `#10` idempotency key,
-  `#13` React Query, `#14` goal completion, all of Tier 3. Spec/plan under
+  (M-15), `#3` `helmet` + rate-limit (M-3), `#1` frontend build green (M-13), `#2` GitHub
+  Actions CI (L-9), `#4` central error handler (M-10), `#12` ingest validation (M-4), `#15`
+  serverless-safe bootstrap + external cron (H-13). Deferred: `#9` `UserStats` leaderboard rollup
+  (decided: live running-total), `#10` idempotency key, `#13` React Query, `#14` to-dos (goal
+  completion itself shipped 2026-09-10), all of Tier 3. Spec/plan under
   `docs/superpowers/{specs,plans}/2026-09-09-quick-wins-tier1-security.md`.
 - **Production-readiness batch (2026‑09‑10) done** — full audit in `docs/AUDIT-2026-09-10.md`,
   metric definitions in `docs/INSIGHTS_METRICS.md`.
@@ -607,10 +666,11 @@ metrics, tracing); CI (typecheck + both test suites) + automated Marketplace pub
 - `H-7`, `H-8` (leaderboard scans) **still open** — this batch fixed the leaderboard's
   correctness, not its complexity; the fix is the deferred `UserStats` rollup. `H-13`
   (serverless cron) addressed by `#15`; most other `MEDIUM`/`LOW` items **open**.
-- ⚠️ **Nothing on this branch is deployed.** See the §10 banner.
-- Extension packaged as `2.3.0`; Marketplace publication is manual / unverified.
+- ⚠️ **Nothing on this branch is deployed** — re-verified 2026-09-11 from the endpoints; see §15.
+- Extension source is `2.4.0`; the last packaged `.vsix` is `2.3.0`. **2.4.0 is not packaged or
+  published**, so the H-14/H-15 extension fixes reach no user yet.
 - Frontend build is ✅ green (`tsc -b && vite build`) as of 2026-09-09; CI runs it on every push.
-- No work has touched a live database. **Migrations to run on deploy:**
+- No **writes** to the live database — read-only probes only. **Migrations to run on deploy:**
   `node backend/scripts/migrate-drop-date.js --apply` then optionally
   `node backend/scripts/rollup-daily.js --apply`.
 
@@ -618,7 +678,11 @@ metrics, tracing); CI (typecheck + both test suites) + automated Marketplace pub
 
 ## 20. Pointers
 
-- Full interview prep: `docs/interview-preparation/CodeTrackr_Interview_Preparation.md` (+ `.pdf`)
+- **Read before touching insights:** `docs/AUDIT-2026-09-10.md`, `docs/INSIGHTS_METRICS.md`,
+  `docs/RULES_ENGINE.md`
+- Backlog with status: `docs/IMPROVEMENT_PLAN.md`, `docs/interview-preparation/CodeTrackr_Quick_Wins.md`
+- Full interview prep: `docs/interview-preparation/CodeTrackr_Interview_Preparation.md` (+ `.pdf`),
+  condensed: `CodeTrackr_Interview_Guide_Condensed.md` (+ `.pdf`)
 - Q&A bank: `docs/interview-preparation/CodeTrackr_Interview_QA.md`
 - Architecture deep-dive + diagrams: `docs/interview-preparation/CodeTrackr_Architecture.md`
 - Quick revision: `docs/interview-preparation/CodeTrackr_Interview_Cheat_Sheet.md`

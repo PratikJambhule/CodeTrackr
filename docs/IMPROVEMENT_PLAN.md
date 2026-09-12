@@ -94,7 +94,11 @@ is the deferred `UserStats` running-total rollup.
 
 ⚠️ **Two findings that block production regardless of code quality** (see `AUDIT` §7):
 1. **Nothing on this branch is deployed.** 0 of 7034 activity documents carry `bucketStart`,
-   which the 2026‑09‑08 ingest writes on every insert — so Render is still serving pre‑09‑08 code.
+   which the 2026‑09‑08 ingest writes on every insert — so Render is still serving pre-09-08 code.
+   **Re-confirmed 2026-09-11 from the endpoints:** Render answers `GET /health` with 404 (the
+   route has existed on the branch since 2026-09-09), and the production Vercel bundle has no
+   `/insights` route. Deploy order and the unrelated-history `main` are recorded in
+   `CODETRACKR_PROJECT_CONTEXT.md` §15.
 2. **The live extension is not sending analytics.** Rich sub-documents exist in only 140
    documents, all 2026‑07‑15 → 2026‑08‑27. The newest stored document is
    `{ duration: 120, language: "latex" }` and nothing else. Every focus-derived metric has no
@@ -224,7 +228,7 @@ is added (this closes Quick-Wins #5). Live migration: `node backend/scripts/migr
 - **M-5. Duplicate/dead code.** `extension/extension.js` (560 lines, legacy v1), `backend/server.js.old`, `backend/new.html`, `backend/newest.java`, 6 ad-hoc scripts in `backend/` and 15 in `backend/tools/`. Move the useful ones under `backend/scripts/`, delete the rest.
 - **M-6. `userId` is a String on Activity but an ObjectId everywhere else.** Forces the `$regexMatch`/`$toObjectId` gymnastics in `leaderboard.js` and blocks `$lookup`. Migrate to ObjectId with a compatibility window.
 - **M-7. Root `package.json` is a dependency dump** with no name, scripts, or workspace config, duplicating backend and frontend deps. Make it a real workspace root or delete it.
-- **M-8. No `.env.example` anywhere.** Required vars (`MONGO_URI`, `JWT_SECRET`, `GOOGLE_*`, `FRONTEND_URL`, `AUTH_BYPASS`) are discoverable only by reading source. `config/passport.js` throws at import time if Google vars are missing, so the whole API fails to boot rather than degrading.
+- **M-8. ✅ Mostly fixed.** `backend/.env.example` exists and lists every required variable; the optional `INTERNAL_CRON_SECRET` (H-13) and `ACTIVITY_BUCKET_MS` were added as commented entries 2026-09-11. **Still open:** `config/passport.js` throws at import time if the Google vars are missing, so the whole API fails to boot rather than degrading.
 - **M-9. ✅ FIXED 2026-09-09.** `JWT_SECRET` had a literal fallback `'your_jwt_secret'` in `routes/auth.js` (×2) and `middleware/auth.js`. The fallbacks are gone and `app.js` throws at boot if `JWT_SECRET` is unset — a fail-fast beats a silently forgeable token. Verified by `tests/quickWins.test.js`.
 - **M-10. ✅ FIXED 2026-09-09.** Added a central `(err, req, res, next)` handler in `app.js` (after the routers) that logs the full error server-side with a short correlation id and returns `{ error, id }` — generic body, no `err.message`. All ~19 route `catch` tails that echoed `error.message` (`analytics`, `extension`, `goals`, `groups`, `leaderboard`, `team`) now `return next(error)`; the deliberate non-500 codes (400/401/403/404/409) are untouched, and `groups /create`'s 400 keeps its status but drops the leak. `try/catch` wrappers kept for now (Express-5 auto-forward cleanup deferred). Verified by `tests/quickWins.test.js` (grep for zero response-body `.message` leaks) + an error-path smoke.
 - **M-11. Dashboard fires 3 requests on mount, one redundant** (`useEffect([])` + `useEffect([viewMode])` both call `fetchAnalytics`). `frontend/src/pages/Dashboard.tsx:37-49`.
