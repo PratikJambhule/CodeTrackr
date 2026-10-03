@@ -1,0 +1,32 @@
+% CodeTrackr resume entry, current version.
+% Updated 2026-10-03 after roadmap items 0-18 (docs/ROADMAP_2026-10.md). Every claim below is true of the
+% code on that date; numbers come from docs/BENCHMARKS.md (local benchmarks) and the test runs in docs/PROGRESS.md.
+% Update this file whenever something changes. Numbers only after they are measured.
+\resumeProjectHeading
+  {\textbf{CodeTrackr} $|$ \emph{TypeScript, Node.js, Express, MongoDB/Mongoose, React, OAuth 2.0, Docker, VS Code Extension API}}{Mar 2026}
+  \resumeItemListStart
+    \resumeItem{Co-built (team of 3) and published a \textbf{TypeScript VS Code extension}, owning its \textbf{5 event-driven trackers} and an \textbf{offline-safe persisted upload queue} with per-upload idempotency keys; users connect through a \textbf{device-code sign-in} that issues hashed, per-device, expiring keys kept in the OS keychain.}
+    \resumeItem{Owned the \textbf{Express + Mongoose} backend: atomic \texttt{\$inc} upserts into 10-minute buckets store \textbf{5$\times$ fewer documents and 13$\times$ less data} at no throughput cost, and an \textbf{anti-cheat credit layer} (focus corroboration, an atomic 600\,s-per-window cap) bounds leaderboard inflation to real time.}
+    \resumeItem{Replaced a full-collection leaderboard scan with \textbf{write-time running totals}, cutting median latency from \textbf{6.7\,s to 62\,ms at 1M activity rows}; moved dashboard aggregation into MongoDB pipelines, proven equal to the old code by an oracle test, and shipped contest-week group boards.}
+    \resumeItem{Built a \textbf{confidence-gated} insights engine (11 metrics, 13 threshold rules) and the quality bar around it: \textbf{346 unit assertions and 35 API integration tests} on an in-memory MongoDB, Docker image health check and deploy-on-green in \textbf{GitHub Actions}, JSON logs with request ids.}
+  \resumeItemListEnd
+
+% ---------------------------------------------------------------------------
+% Notes (not rendered)
+% - "Co-built (team of 3)": contributors Pratik Jambhule, Kartik Kharat, Soham Budhewar.
+%   Ownership claimed = extension + backend (user decision 2026-10-03). Be ready to explain both in depth.
+% - DEPLOYMENT STATUS: everything here is built and tested but NOT deployed as of 2026-10-03, and extension
+%   2.5.0 (queue, sign-in, keychain) is NOT published. Until docs/RELEASE.md is done, say "built", not "in
+%   production". "Published" in bullet 1 refers to the extension itself (2.4.0 is live).
+% - Benchmarks are LOCAL (same laptop, in-memory MongoDB): say "in a local benchmark" if asked. Both numbers
+%   are like-for-like comparisons on identical data. 5x/13x is at the 2-minute upload cadence (20x/51x vs the
+%   old 30-second cadence) -- quote the cadence if pressed.
+% - The old "~10x fewer writes" claim was never measured; do not use it.
+% - "Docker": backend/Dockerfile is built + health-checked in CI and was run locally via docker-compose.yml
+%   (mongo + backend + frontend, verified 2026-10-03). It is NOT how production runs (Render runs node directly).
+% - "80+ installs" removed until checked on the Marketplace page; prefer weekly active users from
+%   backend/scripts/usage-report.js once deployed.
+% - "Mar 2026": git history on this branch starts 2026-08; be ready to say the work began earlier.
+% - Test counts as of 2026-10-03: backend unit 23 suites / 346 assertions (a few are source scans),
+%   integration 35, extension 6 suites / 70. Update whenever tests are added.
+% - 4 bullets: for a one-page resume, merge bullets 2 and 3.

@@ -7,6 +7,7 @@
 const Activity = require('../models/Activity');
 const DailySummary = require('../models/DailySummary');
 const { buildDaySummary } = require('./dailySummary');
+const { matchActivityUser, USER_KEY } = require('./activityUser');
 
 async function rollupDaily({ apply = false, beforeDays = 2, force = false } = {}) {
     const cutoff = new Date();
@@ -19,7 +20,7 @@ async function rollupDaily({ apply = false, beforeDays = 2, force = false } = {}
         {
             $group: {
                 _id: {
-                    userId: '$userId',
+                    userId: USER_KEY,
                     day: { $dateToString: { format: '%Y-%m-%d', date: '$timestamp', timezone: 'UTC' } },
                 },
             },
@@ -35,7 +36,7 @@ async function rollupDaily({ apply = false, beforeDays = 2, force = false } = {}
         const start = new Date(`${day}T00:00:00.000Z`);
         const end = new Date(start.getTime() + 86400000);
         const docs = await Activity.find({
-            userId, timestamp: { $gte: start, $lt: end },
+            userId: matchActivityUser(userId), timestamp: { $gte: start, $lt: end },
         }).lean();
         const summary = buildDaySummary(userId, day, docs);
         if (apply) {

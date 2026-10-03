@@ -13,6 +13,30 @@
 > G Frontend · H ML/Insights · I Leaderboard · J Groups · K Security · L Scalability ·
 > M Debugging · N Trick/follow-up · O Code-level · P HR/behavioural.
 
+> ## October 2026 update — read this first (added 2026-10-03)
+>
+> This document was written before the October 2026 roadmap (`docs/ROADMAP_2026-10.md`). That work
+> is **built and tested but not deployed yet**, and extension **2.5.0 is not published** — say "I
+> built", not "it's live". **Wherever the text below disagrees with this box, this box wins.**
+> Up-to-date short versions: `CodeTrackr_Interview_Cheat_Sheet.md` (rewritten) and
+> `docs/INTERVIEW_PREP.md`. Measured numbers: `docs/BENCHMARKS.md`.
+>
+> | Topic | Old text says | Now |
+> |---|---|---|
+> | Extension API key | plaintext, non-expiring, unscoped; in `settings.json` | `ct_<id>_<secret>`, DB stores SHA-256 of the secret (id lookup + `timingSafeEqual`), shown once; **device-code sign-in** issues per-device keys that expire in 1 year and can be revoked one by one; extension keeps the key in **SecretStorage** |
+> | Leaderboard | O(all activity + all users) scan per request (H-7/H-8) | `userstats` running totals updated on every write; all-time board = 3 indexed reads. **1M rows: p50 6.72 s → 62 ms** (local benchmark). Group boards too; contest windows `?from=&to=` |
+> | Cheating | a valid key + loop inflates hours (H-21) | credited time = min(duration, focus + 120 s), ≤ 600 s per user per 10-minute window via an atomic counter, long uploads spread; per-key quota; raw claim kept |
+> | Duplicates / offline | no idempotency; memory-only buffer, lost on restart | `flushId` receipts (applied once); persisted outbox in `globalState`, FIFO, survives restart (M-30 fixed) |
+> | Analytics | `find()` then JS reduce (M-1) | daily/weekly from one `$facet` pipeline, proven equal to the old code by an oracle test |
+> | Write reduction | "~10× fewer writes" | **measured**: 4.9× fewer documents, 12.7× less data at the 2-minute cadence (19.6× / 51× vs the old 30 s); same throughput |
+> | Tests | 18 suites / 296; nothing against a real DB | unit **23 suites / 346**, **35 integration tests** (supertest + in-memory MongoDB, incl. CORS preflight), extension **6 / 70**; no frontend tests |
+> | `userId` type | String on activities (M-6) | ObjectId migration in progress (reads accept both; script converts) |
+> | Teams | orphaned page + live API | deleted |
+> | Groups | no admin powers | creator can rename / remove members; ownership passes on when the creator leaves |
+> | Ops | no Docker, no CD, console logs | Dockerfile + CI health check; **`docker compose up` runs MongoDB + API + website locally** (verified); deploy-on-green (off until a secret), JSON logs with request ids, optional Sentry |
+> | Bugs found while building | — | **H-23** CORS lacked PATCH → goal completion and mark-as-read never worked in a browser; M-31 goal window; M-32 weekly window; H-22 IST "today"; email leaks M-28/M-29 |
+> | Still open | — | H-19 login fix built (Vercel forwards `/api` + `/auth`; deploy + Google/Render callback setting pending); client-chosen timestamps, no web refresh token. H-20 fixed (limits per user/session) |
+
 ---
 
 ## A. Project overview
@@ -634,12 +658,13 @@
 > a validator would reject any figure not present in the metrics object.
 
 **H13. If you had to add real ML, how would you approach it?**
-> Feature-engineer per-session vectors (focused minutes, deep-block count, churn ratio,
-> commits, context switches, hour-of-day), z-score normalise per user because habits are
-> relative, then start unsupervised — k-means or a GMM over session vectors to find archetypes
-> like "deep focus", "exploratory", "firefighting". Supervised only once I have a real label
-> like goal slippage. Serve it from a batch job writing an `insights` collection, never inline
-> in the request. Evaluate with hold-out RMSE/AUC and watch for leakage.
+> I have a written plan: k-means over eight session-style features — five ratios such as churn and
+> read share, and three rates such as lines per minute. I deliberately leave out session length and
+> commit counts, because they measure how big a session was, not what kind it was, and k-means would
+> just split long sessions from short ones. Train offline in scikit-learn, store only the centres in
+> MongoDB, assign the nearest centre in JavaScript. Choose k with the elbow method and silhouette
+> score, and compare against my existing rules, because there are no labels. I haven't built it: I
+> measured the data and found four usable sessions.
 
 **H14. How would you prevent LLM hallucination in the narration layer?**
 > Constrain output to a JSON schema, prompt with *only* the structured metrics (no raw data),
@@ -658,6 +683,13 @@
 > skipped unless they clear the confidence gate; every finding carries its evidence, and skips
 > are reported. On a real 30-day window with 6 sparse days it fired nothing and skipped 10
 > checks — which is the right answer. Deliberately not a model and not an LLM.
+
+**H17. You have a plan — why haven't you built the model?**
+> Because I measured the data first. There were four usable sessions from one person and no
+> completed goals. k-means on four points gives four clusters of one and a perfect-looking
+> silhouette score that means nothing. The first real step is getting more people onto the
+> extension; the pipeline itself is about 20–25 hours of work once there are a couple of hundred
+> sessions.
 
 ---
 
@@ -707,7 +739,9 @@
 > labelled as commits (H-17). The flush count is still returned, under its own name.
 
 **I10. Privacy issue with the leaderboard?**
-> It returns every user's email. Should return a display name or handle only.
+> It used to return every user's email to every signed-in user — 35 accounts on the live install.
+> Fixed 2026-09-12: the field is gone from the projection and the response, and a test asserts it
+> stays gone. It returns the display name only.
 
 **I11. How does the group leaderboard differ?**
 > Same aggregation pattern scoped to the group's member IDs, all-time, no pagination. The
@@ -790,8 +824,9 @@
 > deleted; group passwords scrypt-hashed; `AUTH_BYPASS` refused in production; IDORs on
 > goals/teams closed. Still open: the API key is plaintext and non-expiring; no rate limiting
 > on group `/join` or analytics; `helmet` + rate-limit on `/auth`+`/api/extension` (2026-09-09); ingest is bounds-checked (2026-09-09); error
-> the leaderboard leaks emails; no idempotency on ingest; the
-> group search regex is a ReDoS vector. (`JWT_SECRET` fallback fixed 2026-09-09.)
+> no idempotency on ingest. (Fixed since: the `JWT_SECRET` fallback 2026-09-09; the group-search
+> ReDoS 2026-09-10; the leaderboard email leak and the `/join` + `/api/analytics` rate limits
+> 2026-09-12.)
 
 **K2. Biggest security risk?**
 > The API key model (plaintext, non-expiring, unscoped). Ingest is bounds-checked and IP-rate-limited as of 2026-09-09, but there's still no idempotency key or per-key quota, so a valid key plus a slow
@@ -1254,6 +1289,75 @@
 > static scan that fails if an auth-protected route loses its middleware.
 
 **P9. What are you weakest at in this project?**
-> Testing depth — nothing has run against a real database, and the frontend has zero tests.
-> And I let the frontend typecheck rot. Both are known and planned, but they're the honest
-> weak spots.
+> *(Updated 2026-10-03.)* Frontend testing — the backend now has 35 integration tests against a
+> real (in-memory) database, but the React app has none. And deployment: the October work is built
+> and tested but still waiting on the live migrations.
+
+---
+
+## Q. The October 2026 work (added 2026-10-03 — built and tested, not yet deployed)
+
+**Q1. You said the API key was your biggest weakness. What did you do about it?**
+> `[ACTUAL]` Keys are now `ct_<id>_<secret>`. The database keeps the id and a SHA-256 of the
+> secret; I look the row up by id and compare hashes with `timingSafeEqual`. The key is shown once.
+> Old keys still work — they're looked up by their own hash and converted on first use — so no
+> installed extension broke.
+
+**Q2. Why SHA-256 and not bcrypt?**
+> `[ACTUAL]` bcrypt is slow on purpose to stop guessing low-entropy passwords. My secret is 256
+> random bits — nobody can guess it — so a slow hash would only add latency to every upload.
+> GitHub and Stripe tokens work the same way.
+
+**Q3. How does a user connect the extension now?**
+> `[ACTUAL]` Device-code sign-in, like `gh auth login`. VS Code asks for a code, copies it and opens
+> the approval page; I approve while signed in; VS Code polls and receives its own key. Each device
+> gets a separate key that expires in a year and can be revoked from Profile. A code yields exactly
+> one key — I consume it with `findOneAndDelete`.
+
+**Q4. What's the risk of the device flow?**
+> Phishing: someone gets you to approve their code. The page says to approve only a code your own
+> editor shows, and the key it yields can only upload activity — it can't read your dashboard.
+
+**Q5. How fast is the leaderboard now?**
+> `[ACTUAL]` In a local benchmark with a million activity rows, median latency went from 6.7 s to
+> 62 ms and throughput from 1.3 to 156 requests a second. The trick is boring: a per-user totals
+> row, `$inc`ed on every write, so the board is three indexed reads.
+
+**Q6. How do you know the running totals are right?**
+> `[ACTUAL]` A rebuild function recomputes them from raw activity, and an integration test checks
+> the rebuild equals the live totals and that the scan and the totals give the same leaderboard.
+> That test caught a real bug: spread documents were being counted as extra uploads.
+
+**Q7. Can someone still cheat?**
+> `[ACTUAL]` It's bounded. Each upload is credited at most its window-focus time plus two minutes,
+> and each user gets at most 600 seconds per 10-minute window, enforced with an atomic counter so
+> parallel requests can't both fill it. The raw claim is stored too. A script that fakes focus and
+> paces itself still gets an hour per real hour — you can't make client telemetry unforgeable.
+
+**Q8. What happens offline now?**
+> `[ACTUAL]` (extension 2.5.0, not yet published) Every upload is saved to VS Code's `globalState`
+> before sending and drained oldest first. A retry keeps its `flushId`, and the server's receipt
+> table makes it count once.
+
+**Q9. Did bucketing really cut writes 10×?**
+> I'd guessed 10× before measuring. Measured: about 5× fewer documents and 13× less data at the
+> current 2-minute upload rate, ~20× fewer against the old 30-second rate, with the same
+> throughput. I quote the measured numbers.
+
+**Q10. Tell me about a bug your tests missed.**
+> `[ACTUAL]` Goal "Mark complete" never worked in a browser: the CORS allow-list had no PATCH, so
+> the preflight failed, while every API test passed because test clients don't send preflights.
+> I found it when a new button failed in the console. Now an integration test sends real
+> preflights. It also explains why production had zero completed goals.
+
+**Q11. How did you refactor analytics safely?**
+> `[ACTUAL]` I copied the old JavaScript aggregation into a test as an oracle and required the new
+> MongoDB pipeline to produce the same output on the same data. It matched except for rounding on
+> exact .xx5 values — and writing the test exposed a separate bug where weekly totals included a
+> day the chart didn't show.
+
+**Q12. How would you debug a production error now?**
+> `[ACTUAL]` Every request has an id, in the `X-Request-Id` header and in error bodies. Logs are
+> JSON lines tagged with that id, so the id a user reports finds the request and its stack trace.
+> Sentry switches on with one environment variable.
+

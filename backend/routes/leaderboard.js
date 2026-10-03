@@ -2,6 +2,8 @@ const express = require('express');
 const router = express.Router();
 const Activity = require('../models/Activity');
 const User = require('../models/user');
+const UserStats = require('../models/UserStats');
+const { USER_KEY } = require('../services/activityUser');
 const { isAuthenticated } = require('../middleware/auth');
 
 /**
@@ -13,10 +15,10 @@ const { isAuthenticated } = require('../middleware/auth');
  * the dashboard renders it as-is; this module only guarantees the numbers are
  * real and in range.
  *
- * Known limitation (IMPROVEMENT_PLAN H-7/H-8): this aggregates the whole
- * `activities` collection and loads every user, with no cache. It is bounded in
- * practice only by the collection's 400-day TTL. The fix is the deferred
- * `UserStats` running-total rollup, not a bigger pipeline here.
+ * All-time requests read the `userstats` running totals (H-7 fixed 2026-10-03):
+ * three indexed reads instead of aggregating every activity. A `?days=` window,
+ * or an install where the backfill has not run yet, still scans `activities`.
+ * The `X-Leaderboard-Source` header says which path answered.
  */
 
 const MAX_WINDOW_DAYS = 400; // matches the Activity TTL; beyond this there is no data
@@ -45,6 +47,142 @@ function maxOf(rows, pick) {
     return best;
 }
 
+const DEFAULT_LIMIT = 100;
+const MAX_LIMIT = 500;
+const EMPTY = {
+    totalHours: 0,
+    totalLinesAdded: 0,
+    totalLinesRemoved: 0,
+    codeChanges: 0,
+    netCodeChanges: 0,
+    projectCount: 0,
+    commits: 0,
+    flushes: 0,
+};
+
+/**
+ * All-time rows from the `userstats` running totals (roadmap item 6): the top
+ * `limit` users by time, plus the global maxima the relative scores divide by.
+ * Three indexed reads, independent of how much activity exists.
+ */
+async function rowsFromStats(limit) {
+    const [top, byCommits, byChanges] = await Promise.all([
+        UserStats.find({}).sort({ totalSeconds: -1 }).limit(limit)
+            .populate('userId', 'name profilePictureUrl').lean(),
+        UserStats.findOne({}).sort({ commits: -1 }).select('commits').lean(),
+        UserStats.findOne({}).sort({ codeChanges: -1 }).select('codeChanges').lean(),
+    ]);
+    const rows = top
+        .filter((s) => s.userId) // account deleted
+        .map((s) => ({
+            userId: s.userId._id,
+            name: s.userId.name,
+            profilePictureUrl: s.userId.profilePictureUrl,
+            totalHours: (s.totalSeconds || 0) / 3600,
+            totalLinesAdded: s.linesAdded || 0,
+            totalLinesRemoved: s.linesRemoved || 0,
+            codeChanges: s.codeChanges || 0,
+            netCodeChanges: (s.linesAdded || 0) - (s.linesRemoved || 0),
+            projectCount: (s.projects || []).length,
+            commits: s.commits || 0,
+            flushes: s.flushes || 0,
+        }));
+    return {
+        rows,
+        maxima: {
+            hours: Math.max(1, rows.length ? rows[0].totalHours : 0),
+            commits: Math.max(1, (byCommits && byCommits.commits) || 0),
+            changes: Math.max(1, (byChanges && byChanges.codeChanges) || 0),
+        },
+    };
+}
+
+/**
+ * Rows from a scan of `activities` in a time window (`?days=`), or all-time
+ * before the `userstats` backfill has run. This is the old O(all documents)
+ * path, kept because windowed totals cannot come from all-time counters.
+ */
+async function rowsFromScan(windowDays, limit) {
+    const match = {
+        // Guard against garbage the ingest bounds-check predates: a negative
+        // or non-numeric duration otherwise subtracts from a real total.
+        duration: { $gte: 0 },
+    };
+    if (windowDays) {
+        match.timestamp = { $gte: new Date(Date.now() - windowDays * 24 * 60 * 60 * 1000) };
+    }
+
+    // No email: this list goes to every signed-in user (Quick-Wins #16).
+    const allUsers = await User.find({}).select('_id name profilePictureUrl').lean();
+
+    const activityData = await Activity.aggregate([
+        { $match: match },
+        {
+            $group: {
+                _id: USER_KEY, // legacy String or ObjectId -> one row per user
+                totalDuration: { $sum: '$duration' },
+                totalLinesAdded: { $sum: '$linesAdded' },
+                totalLinesRemoved: { $sum: '$linesRemoved' },
+                projects: { $addToSet: '$projectName' },
+                // Real commits, from the Git extension API (gitStateTracker).
+                // Documents written before that tracker existed carry only the
+                // terminal-derived count, so fall back to it per document.
+                // These are two views of the same event, never summed.
+                totalCommits: {
+                    $sum: {
+                        $ifNull: [
+                            '$gitAnalytics.commits',
+                            { $ifNull: ['$terminalAnalytics.gitActivity.commits', 0] },
+                        ],
+                    },
+                },
+                // How many flushes merged into this row. Bucketed documents
+                // count their merges; legacy per-flush documents count as one.
+                flushes: { $sum: { $ifNull: ['$flushCount', 1] } },
+            },
+        },
+        {
+            $addFields: {
+                totalHours: { $divide: ['$totalDuration', 3600] },
+                projectCount: { $size: '$projects' },
+                codeChanges: { $add: ['$totalLinesAdded', '$totalLinesRemoved'] },
+                netCodeChanges: { $subtract: ['$totalLinesAdded', '$totalLinesRemoved'] },
+            },
+        },
+    ]);
+
+    const activityMap = new Map();
+    for (const data of activityData) {
+        if (data._id === null || data._id === undefined) continue;
+        activityMap.set(String(data._id), {
+            totalHours: data.totalHours || 0,
+            totalLinesAdded: data.totalLinesAdded || 0,
+            totalLinesRemoved: data.totalLinesRemoved || 0,
+            codeChanges: data.codeChanges || 0,
+            netCodeChanges: data.netCodeChanges || 0,
+            projectCount: data.projectCount || 0,
+            commits: data.totalCommits || 0,
+            flushes: data.flushes || 0,
+        });
+    }
+
+    const all = allUsers.map(user => ({
+        userId: user._id,
+        name: user.name,
+        profilePictureUrl: user.profilePictureUrl,
+        ...(activityMap.get(String(user._id)) || EMPTY),
+    }));
+    all.sort((a, b) => b.totalHours - a.totalHours);
+    return {
+        rows: all.slice(0, limit),
+        maxima: {
+            hours: maxOf(all, u => u.totalHours),
+            commits: maxOf(all, u => u.commits),
+            changes: maxOf(all, u => u.codeChanges),
+        },
+    };
+}
+
 router.get('/', isAuthenticated, async (req, res, next) => {
     try {
         // Optional window. Default stays all-time so the endpoint's meaning is
@@ -53,93 +191,16 @@ router.get('/', isAuthenticated, async (req, res, next) => {
         const windowDays = Number.isFinite(requestedDays) && requestedDays > 0
             ? Math.min(requestedDays, MAX_WINDOW_DAYS)
             : null;
+        const requestedLimit = Number.parseInt(req.query.limit, 10);
+        const limit = Number.isFinite(requestedLimit) && requestedLimit > 0
+            ? Math.min(requestedLimit, MAX_LIMIT)
+            : DEFAULT_LIMIT;
 
-        const match = {
-            // Guard against garbage the ingest bounds-check predates: a negative
-            // or non-numeric duration otherwise subtracts from a real total.
-            duration: { $gte: 0 },
-        };
-        if (windowDays) {
-            match.timestamp = { $gte: new Date(Date.now() - windowDays * 24 * 60 * 60 * 1000) };
-        }
-
-        // No email: this list goes to every signed-in user (Quick-Wins #16).
-        const allUsers = await User.find({}).select('_id name profilePictureUrl').lean();
-
-        const activityData = await Activity.aggregate([
-            { $match: match },
-            {
-                $group: {
-                    _id: '$userId',
-                    totalDuration: { $sum: '$duration' },
-                    totalLinesAdded: { $sum: '$linesAdded' },
-                    totalLinesRemoved: { $sum: '$linesRemoved' },
-                    projects: { $addToSet: '$projectName' },
-                    // Real commits, from the Git extension API (gitStateTracker).
-                    // Documents written before that tracker existed carry only the
-                    // terminal-derived count, so fall back to it per document.
-                    // These are two views of the same event, never summed.
-                    totalCommits: {
-                        $sum: {
-                            $ifNull: [
-                                '$gitAnalytics.commits',
-                                { $ifNull: ['$terminalAnalytics.gitActivity.commits', 0] },
-                            ],
-                        },
-                    },
-                    // How many flushes merged into this row. Bucketed documents
-                    // count their merges; legacy per-flush documents count as one.
-                    flushes: { $sum: { $ifNull: ['$flushCount', 1] } },
-                },
-            },
-            {
-                $addFields: {
-                    totalHours: { $divide: ['$totalDuration', 3600] },
-                    projectCount: { $size: '$projects' },
-                    codeChanges: { $add: ['$totalLinesAdded', '$totalLinesRemoved'] },
-                    netCodeChanges: { $subtract: ['$totalLinesAdded', '$totalLinesRemoved'] },
-                },
-            },
-        ]);
-
-        const activityMap = new Map();
-        for (const data of activityData) {
-            if (data._id === null || data._id === undefined) continue;
-            activityMap.set(String(data._id), {
-                totalHours: data.totalHours || 0,
-                totalLinesAdded: data.totalLinesAdded || 0,
-                totalLinesRemoved: data.totalLinesRemoved || 0,
-                codeChanges: data.codeChanges || 0,
-                netCodeChanges: data.netCodeChanges || 0,
-                projectCount: data.projectCount || 0,
-                commits: data.totalCommits || 0,
-                flushes: data.flushes || 0,
-            });
-        }
-
-        const EMPTY = {
-            totalHours: 0,
-            totalLinesAdded: 0,
-            totalLinesRemoved: 0,
-            codeChanges: 0,
-            netCodeChanges: 0,
-            projectCount: 0,
-            commits: 0,
-            flushes: 0,
-        };
-
-        const leaderboardData = allUsers.map(user => ({
-            userId: user._id,
-            name: user.name,
-            profilePictureUrl: user.profilePictureUrl,
-            ...(activityMap.get(String(user._id)) || EMPTY),
-        }));
-
-        leaderboardData.sort((a, b) => b.totalHours - a.totalHours);
-
-        const maxHours = maxOf(leaderboardData, u => u.totalHours);
-        const maxChanges = maxOf(leaderboardData, u => u.codeChanges);
-        const maxCommits = maxOf(leaderboardData, u => u.commits);
+        const useStats = !windowDays && (await UserStats.estimatedDocumentCount()) > 0;
+        const { rows: leaderboardData, maxima } = useStats
+            ? await rowsFromStats(limit)
+            : await rowsFromScan(windowDays, limit);
+        res.set('X-Leaderboard-Source', useStats ? 'userstats' : 'scan');
 
         leaderboardData.forEach((user, index) => {
             user.rank = index + 1;
@@ -154,13 +215,13 @@ router.get('/', isAuthenticated, async (req, res, next) => {
                 return;
             }
 
-            user.speed = score(user.commits, maxCommits);
-            user.quality = score(user.codeChanges, maxChanges);
-            user.engagement = score(user.totalHours, maxHours);
+            user.speed = score(user.commits, maxima.commits);
+            user.quality = score(user.codeChanges, maxima.changes);
+            user.engagement = score(user.totalHours, maxima.hours);
             // netCodeChanges goes negative for a net-deletion window. The old
             // `Math.min(5, x)` left that negative, which then dragged `overall`
             // below zero; a refactor that removes code is not negative impact.
-            user.impact = score(Math.max(0, user.netCodeChanges), maxChanges);
+            user.impact = score(Math.max(0, user.netCodeChanges), maxima.changes);
 
             user.overall = (
                 (parseFloat(user.speed) +

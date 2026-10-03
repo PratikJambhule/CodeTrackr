@@ -4,6 +4,30 @@
 can hold your own in an interview. Everything here is how the code actually works, not how
 the project was described.*
 
+> ## October 2026 update — read this first (added 2026-10-03)
+>
+> This document was written before the October 2026 roadmap (`docs/ROADMAP_2026-10.md`). That work
+> is **built and tested but not deployed yet**, and extension **2.5.0 is not published** — say "I
+> built", not "it's live". **Wherever the text below disagrees with this box, this box wins.**
+> Up-to-date short versions: `CodeTrackr_Interview_Cheat_Sheet.md` (rewritten) and
+> `docs/INTERVIEW_PREP.md`. Measured numbers: `docs/BENCHMARKS.md`.
+>
+> | Topic | Old text says | Now |
+> |---|---|---|
+> | Extension API key | plaintext, non-expiring, unscoped; in `settings.json` | `ct_<id>_<secret>`, DB stores SHA-256 of the secret (id lookup + `timingSafeEqual`), shown once; **device-code sign-in** issues per-device keys that expire in 1 year and can be revoked one by one; extension keeps the key in **SecretStorage** |
+> | Leaderboard | O(all activity + all users) scan per request (H-7/H-8) | `userstats` running totals updated on every write; all-time board = 3 indexed reads. **1M rows: p50 6.72 s → 62 ms** (local benchmark). Group boards too; contest windows `?from=&to=` |
+> | Cheating | a valid key + loop inflates hours (H-21) | credited time = min(duration, focus + 120 s), ≤ 600 s per user per 10-minute window via an atomic counter, long uploads spread; per-key quota; raw claim kept |
+> | Duplicates / offline | no idempotency; memory-only buffer, lost on restart | `flushId` receipts (applied once); persisted outbox in `globalState`, FIFO, survives restart (M-30 fixed) |
+> | Analytics | `find()` then JS reduce (M-1) | daily/weekly from one `$facet` pipeline, proven equal to the old code by an oracle test |
+> | Write reduction | "~10× fewer writes" | **measured**: 4.9× fewer documents, 12.7× less data at the 2-minute cadence (19.6× / 51× vs the old 30 s); same throughput |
+> | Tests | 18 suites / 296; nothing against a real DB | unit **23 suites / 346**, **35 integration tests** (supertest + in-memory MongoDB, incl. CORS preflight), extension **6 / 70**; no frontend tests |
+> | `userId` type | String on activities (M-6) | ObjectId migration in progress (reads accept both; script converts) |
+> | Teams | orphaned page + live API | deleted |
+> | Groups | no admin powers | creator can rename / remove members; ownership passes on when the creator leaves |
+> | Ops | no Docker, no CD, console logs | Dockerfile + CI health check; **`docker compose up` runs MongoDB + API + website locally** (verified); deploy-on-green (off until a secret), JSON logs with request ids, optional Sentry |
+> | Bugs found while building | — | **H-23** CORS lacked PATCH → goal completion and mark-as-read never worked in a browser; M-31 goal window; M-32 weekly window; H-22 IST "today"; email leaks M-28/M-29 |
+> | Still open | — | H-19 login fix built (Vercel forwards `/api` + `/auth`; deploy + Google/Render callback setting pending); client-chosen timestamps, no web refresh token. H-20 fixed (limits per user/session) |
+
 > **Changed 2026‑09‑08:** the extension still flushes counters every ~30s, but the backend now
 > **merges flushes into one record per 10-minute window** (`$inc` upsert) instead of one
 > record per flush. It also skips flushes with no real activity (extension 2.3.0). The "one
@@ -235,7 +259,7 @@ cookie). There's no rate limit and no sanity check on the numbers, so it's easy.
 | **dailysummaries** | one row per user per day, built by a nightly job from `activities` | infrastructure for future "all-time" reads — nothing uses it yet |
 | **users** | Google ID, email, name, the **plain-text** API key | |
 | **groups** + **groupmembers** | competition groups + who's in them | `groupmembers` is a proper join table with a "one row per (group, user)" rule |
-| **goals** | title, target hours, tech stack, deadline, status | **nothing in the code ever marks a goal "completed"** — only the demo seed script does |
+| **goals** | title, target hours, tech stack, deadline, status, `completedAt` | a goal is marked complete from the Goals page (`PATCH /api/goals/:id/complete`, added 2026-09-10); before that nothing could complete one |
 | **teams** | older idea; members stored inside the team record | backend exists but **the website never shows it** — dead code |
 | **notifications** | goal deadline reminders | created by the cron job |
 
@@ -296,7 +320,7 @@ draws it.
 
 | What | Endpoint | Login | Notes |
 |---|---|---|---|
-| Send activity | `POST /api/extension/track` | API key | one record per call |
+| Send activity | `POST /api/extension/track` | API key | adds into the 10-minute bucket (one record per window, not per call) |
 | Verify key | `GET /api/extension/verify` | API key | used during setup |
 | Daily / weekly charts | `GET /api/analytics/:userId` `/weekly/:userId` | JWT + ownership check | adds up in JavaScript |
 | Insights | `GET /api/metrics` | JWT | **no `:userId` in the URL** — uses your session only, so it can't leak someone else's data |
@@ -310,10 +334,11 @@ draws it.
 
 - Every route does its own `try/catch` and returns `error.message` to the client — that
   used to **leak internal details** — ✅ fixed 2026-09-09 with one central `(err,req,res,next)` handler (correlation id, generic body).
-- Rate limiting on `/auth` (50/15min) and `/api/extension` (120/min) via `express-rate-limit` (added 2026-09-09); other routes (e.g. group `/join`) are still unlimited.
+- Rate limiting on `/auth` (50/15min) and `/api/extension` (120/min) since 2026-09-09, extended 2026-09-12 to group `/join` (10 per IP per 15 min) and `/api/analytics` (120/min).
 - Security headers via `helmet()` (added 2026-09-09).
-- **No real input validation** — `duration: 999999999` is accepted; you can even send your
-  own `timestamp`.
+- Input validation since 2026-09-09: `duration` must be 1–3600 s, strings are length-capped, and
+  `timestamp` must be within the last 24 h. The client still chooses the timestamp, and nothing
+  caps how much time lands in one 10-minute window (H-21).
 - No pagination on the leaderboard.
 
 ---
@@ -335,7 +360,7 @@ draws it.
   unused imports). `vite build` alone works. It's a cleanup job, not a design flaw.
 - The dashboard's **"Repeated Failures" panel** now shows the real `repeatedFailedCommands`
   (fixed 2026-09-09; it used to render fake hard-coded data).
-- The **Goals page to-do list isn't saved** — it only lives in React state until you refresh.
+- The half-built **Goals to-do list was removed** (2026-09-09); goals themselves are saved.
 - The **Teams page isn't linked** anywhere.
 
 ---
@@ -356,6 +381,10 @@ draws it.
 | **True peak window** | your *most productive* 2 hours, not your busiest | the 2-hour window with the most "surviving minutes" (minutes × (1 − churn)), seen on at least 3 days |
 | **Estimation accuracy** | do you underestimate goals? | median of (hours actually spent ÷ hours estimated) over completed goals |
 
+**Count them as 11.** The seven above, plus four simple ratios: churn (lines rewritten ÷ lines
+typed), comprehension load (reading time ÷ reading + writing time), context switches per hour
+and interruptions per hour. Use "11" everywhere, resume included.
+
 ### Key points for the interview
 
 - **Runs on every page load.** Only your 90-day baseline is cached (refreshed at most once a day).
@@ -372,10 +401,19 @@ draws it.
 
 ### If asked "how would you add real ML?"
 
-Build feature vectors per session (focused minutes, churn ratio, commits, hour of day),
-normalise per user, then start with **unsupervised clustering** (k-means) to find session
-types like "deep focus" vs "firefighting". Only do supervised learning once you actually
-store outcomes like "goal missed". Serve it from a background job, never inside the request.
+There's a written plan (`docs/ML_INTEGRATION_PLAN.md`), designed but **not built**:
+
+- **What:** k-means clustering to learn session types instead of hand-written rules.
+- **Which numbers:** 8 that describe a session's *style* — how much code you rewrote, reading vs
+  typing, build and command failure rates, deep-focus share, typing speed, terminal use, and file
+  jumping. Session **length and commit count are left out** on purpose: they describe *size*, so
+  the model would just sort long sessions from short ones.
+- **How:** train on a laptop in Python, save only the group centres, and label live sessions in
+  JavaScript by nearest centre.
+- **How you know it works:** there's no answer key, so use the silhouette score and check how often
+  it agrees with the existing rules.
+- **Why it isn't built:** only 4 usable sessions exist. Say that plainly — it's a better answer
+  than a model nobody can inspect.
 
 ---
 
@@ -403,7 +441,7 @@ Every time someone opens the page:
 
 - **It reads the whole activity table on every request.** No time window by default, no cache,
   no pagination. This is the **first thing that breaks** as data grows.
-- It returns **every user's email**.
+- ~~It returns every user's email~~ — fixed 2026-09-12; it returns the display name only.
 - *Fixed 2026-09-10:* "Commits" used to be the upload count, not real git commits; scores could
   go negative; and a `Math.max(...)` over every user would crash past ~100k users.
 
@@ -438,7 +476,9 @@ don't look the same. **Still open:** scoping the board to a contest week (`?from
 
 **Other group weak spots:** no admin/owner powers (`createdBy` stored but unused — no kick or
 rename); a double-join returns **409** (fixed 2026-09-09; the handler detects `11000`); "discover" lists private groups
-too (password-gated, not hidden; its search is escaped since 2026-09-10 — it was a ReDoS risk); no rate limit on join, so passwords can be guessed.
+too (password-gated, not hidden — a deliberate choice; its search is escaped since 2026-09-10 — it was a ReDoS risk). Join
+is rate-limited to 10 tries per IP per 15 minutes (2026-09-12), but per IP, so a campus on one Wi-Fi shares it (H-20).
+Group pages still return emails (M-28, M-29).
 
 ---
 
@@ -477,13 +517,14 @@ too (password-gated, not hidden; its search is escaped since 2026-09-10 — it w
 | Issue | Why it matters |
 |---|---|
 | API key is plain text, never expires, no limits | leak = someone fakes your activity |
-| Rate limiting only on `/auth` + `/api/extension` (2026-09-09) | group `/join` password guessing still unlimited |
+| ~~Rate limiting only on `/auth` + `/api/extension`~~ ✅ extended 2026-09-12 | group `/join` now 10 tries per IP / 15 min; `/api/analytics` 120/min |
 | ~~No security headers~~ ✅ `helmet()` added 2026-09-09 | HSTS, `nosniff`, no `X-Powered-By` |
 | ~~No input validation on activity~~ ✅ 2026-09-09 | `duration` capped at 3600, length/timestamp bounds; still no idempotency key |
 | ~~Errors return `error.message`~~ ✅ fixed 2026-09-09 | central handler, generic body + id |
-| Leaderboard shows every email | privacy |
+| ~~Leaderboard shows every email~~ ✅ fixed 2026-09-12 | name only now |
+| Group pages show members' and creators' emails (M-28, M-29) | privacy; same class as the leaderboard leak |
 | No duplicate/replay protection | resend a request → counted again |
-| Group search puts user text straight into a regex | slow-regex (ReDoS) risk |
+| ~~Group search puts user text straight into a regex~~ ✅ fixed 2026-09-10 | input is escaped and length-capped |
 
 **"Can users cheat the leaderboard?" — yes, easily.** `curl` the track endpoint with
 `duration: 3600` in a loop using a valid key; one call = one fake hour. Fix: validate the
@@ -514,13 +555,13 @@ the fix is a per-user running-totals table updated on write, turning a full-tabl
 
 **What exists:** small test scripts using Node's built-in `assert` (no framework).
 
-- **Backend:** 10 files, ~104 checks — the streak logic, the number-cleaning functions, the
-  five insight formulas, the ownership helper, the password hashing, the route scanner that
+- **Backend:** 18 files, 296 assertions (re-run 2026-10-03) — the streak logic, the number-cleaning functions, the
+  insight formulas, the rules engine, the leaderboard scoring, the ownership helper, the password hashing, the route scanner that
   enforces auth, and (2026‑09‑08) the bucketing maths, the schema/index shape, the ingest
   wiring, and the daily-rollup builder.
-- **Extension:** 2 files — the trackers' behaviour, and an "activation" test that loads the
+- **Extension:** 3 files, 52 assertions — the trackers' behaviour, an "activation" test that loads the
   real built bundle and checks every command is registered and no network call happens
-  without a key.
+  without a key, and a flush-safety test for the carry-forward of unsent data.
 
 **What's missing:**
 - **No integration tests** — nothing starts the server and hits a real database.
@@ -681,39 +722,43 @@ document store?"**
 
 ## 16. Final reminders
 
-### The 10 weaknesses to own before they're pointed out
+### The weaknesses to own before they're pointed out (updated 2026-10-03)
 
-1. **API key** — plain text, never expires, no limits.
-2. **Leaderboard** — reads the whole table every request; no cache, no pagination; leaks emails.
-3. **Analytics maths runs in JavaScript**, not the database — downloads records to add up (bounded now that they're bucketed, still not ideal).
-4. ~~Cron breaks on serverless~~ ✅ fixed 2026-09-09 — `require.main` guard + an external
-   trigger (`POST /api/internal/run-*` behind a secret) drives both the hourly sweep and the
-   nightly rollup.
-5. **Rate limiting is only on `/auth` + `/api/extension`** (group `/join` and analytics are
-   still uncapped; no per-key ingest quota). `helmet` and ingest bounds-checking landed
-   2026-09-09.
-6. ~~Frontend build fails~~ ✅ fixed 2026-09-09 (was 29 TypeScript errors).
-7. **Fake data on the dashboard** ("Repeated Failures" panel); **unsaved to-dos**; **dead Teams page**.
-8. **The group leaderboard doesn't show the error comparison yet** — the original motive; the data's collected, the view isn't built.
-9. **No integration tests; nothing tested against a real database** — including the new bucketing/rollup code (pure-function tests only).
-10. **All-time reads still scan raw `activities`** — not repointed at the `dailysummaries` rollup; the 400-day auto-delete is just a safety net.
+**Still open — say these yourself:**
+1. **Cross-site login cookie (H-19)** — the site and the API are on different domains, so Safari,
+   Firefox and incognito probably block the login cookie. Fix: serve the API through the frontend's
+   domain (Vercel rewrites) or a custom domain.
+2. **Rate limits are per IP (H-20)** on sign-in, analytics and group join — a campus on one Wi-Fi
+   shares them. Fix: limit per user after authenticating.
+3. **Client-chosen timestamps** — bounded to the last 24 h, and credited time is capped, but a
+   script that fakes focus and paces itself still earns an hour per real hour.
+4. **No refresh token** for the web login (1-day JWT, no server-side revoke).
+5. **Windowed boards** (`?days=`, contest weeks) still sum raw activity in the window; all-time
+   boards use running totals.
+6. **No frontend tests.**
+7. **Not deployed yet** — the October work is built and tested; deployment and live migrations
+   are pending (`docs/RELEASE.md`).
 
-*(Fixed 2026‑09‑08: per-flush document explosion, the missing `timestamp` index, the dead
-`date` field, idle-<2-min inflating totals.)*
+**Fixed in October 2026 (be ready to explain how):** plaintext API keys → hashed + per-device
+sign-in; full-scan leaderboard → running totals (6.7 s → 62 ms at 1M rows); JS analytics →
+`$facet` pipeline; no integration tests → 35; memory-only offline buffer → persisted outbox;
+replay double-counting → idempotency key; leaderboard inflation → credited time with a window cap;
+dead Teams code → deleted; all-time-only group boards → contest windows; browsers blocking PATCH
+(H-23) → fixed.
 
 For each one: know *why it matters*, *what it would take to fix*, and *why it's acceptable for a
 student project right now*.
 
 ### Don't trip on these
 
-- Don't call Insights "AI" or "ML". It's statistics. Say so first.
-- Don't say the leaderboard is "optimised". It's a full scan. Know the rollup fix.
-- Don't say the API key is "just an identifier". It's a credential.
-- The frontend builds cleanly as of 2026-09-09 (CI enforces). It used to fail `tsc`.
-- Don't claim integration test coverage. There is none against a real database.
-- Don't claim the extension has an offline queue. It's memory-only.
-- The dashboard "Repeated Failures" panel now shows real data (fixed 2026-09-09).
-- There are 3 contributors — describe what *you* can explain in depth, don't over-claim.
+- Don't call Insights "AI" or "ML". It's statistics plus rules. Say so first.
+- Don't say anything from October 2026 is "in production" until it's deployed.
+- Don't say the leaderboard can't be gamed — it's bounded, not impossible.
+- Don't quote "~10× fewer writes" — measured is ~5× fewer documents (13× less data) at the
+  2-minute cadence; always add "local benchmark".
+- Don't claim frontend tests. Integration tests exist now (35, in-memory MongoDB).
+- The ML work-type classifier is designed, not built.
+- There are 3 contributors — you owned the extension and the backend.
 
 ### Five sentences that make you sound senior
 
@@ -731,3 +776,23 @@ student project right now*.
 5. "I audited my own code into an improvement plan — about 30 findings by severity — and
    closed the serious security ones with a test that fails if a protected route loses its
    auth check."
+
+---
+
+## 17. Which college subjects this project actually uses
+
+If someone asks "where did you use your core subjects?", answer with a file, not a course name.
+
+| Subject | Where | Say this |
+|---|---|---|
+| **DBMS** | `models/Activity.js` | "Compound index in equality-then-range order; I checked with `.explain()` that it became an index scan. A partial unique index stops a double write." |
+| **OS** | `app.js`, extension flush loop | "Node is one event loop, so races happen at the database, not in memory — I fixed them with atomic `$inc`. And a timer-based cron cannot work on a host that freezes the process." |
+| **Networks** | `app.js`, `routes/auth.js` | "CORS allowlist, `httpOnly` + `SameSite=None` cookies because the SPA is on another domain, per-IP rate limits, and `trust proxy` so the real client IP is used." |
+| **Theory of computation** | `services/textQuery.js` | "A regex is a backtracking automaton. User input went straight into one, so `(a+)+$` could freeze the whole server. Escaping makes it a literal match." |
+| **Algorithms** | `routes/leaderboard.js` | "The leaderboard is O(all activity + all users) per request. Also `Math.max(...array)` throws past ~100k arguments, so I fold instead." |
+| **Statistics** | `services/metricsDerive.js` | "Median and MAD instead of mean and standard deviation, because one huge day shouldn't dominate. Every number carries a confidence level." |
+| **Security** | `services/passwordHash.js` | "scrypt with a salt for group passwords, `timingSafeEqual` for the cron secret, and an honest description of what a stolen API key does." |
+| **Software engineering** | `backend/tests/` | "The maths is pure functions with no database, so 296 assertions run in a second. Some tests exist purely to encode a bug that already happened." |
+
+**And be honest about the gaps:** no machine learning, no threads or locks, no consensus or sharding,
+no compiler work. Saying that unprompted lands better than padding the list.

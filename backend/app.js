@@ -7,6 +7,22 @@ const passport = require('passport');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 require("dotenv").config();
+const { log } = require('./services/logger');
+const { requestId } = require('./middleware/requestId');
+const { sessionKey } = require('./services/rateLimitKeys');
+
+// Error reporting is optional (roadmap item 18): nothing is sent anywhere
+// unless SENTRY_DSN is set. Errors are always in the structured logs.
+let Sentry = null;
+if (process.env.SENTRY_DSN) {
+  try {
+    Sentry = require('@sentry/node');
+    Sentry.init({ dsn: process.env.SENTRY_DSN, environment: process.env.NODE_ENV || 'development', sendDefaultPii: false });
+  } catch (err) {
+    log.warn('SENTRY_DSN is set but @sentry/node could not start', { err });
+    Sentry = null;
+  }
+}
 
 if (!process.env.JWT_SECRET) {
   throw new Error('JWT_SECRET is required — set it in the environment before starting the API.');
@@ -19,6 +35,7 @@ app.set("trust proxy", 1);
 
 // Standard security headers (HSTS, nosniff, no X-Powered-By, frameguard).
 // CSP is off by default in helmet — the SPA is served from Vercel, not here.
+app.use(requestId);
 app.use(helmet());
 
 // CORS: allow requests from frontend (FRONTEND_URL) and local dev ports
@@ -37,7 +54,10 @@ app.use(cors({
     // Reject without error to avoid crashing
     return callback(null, false);
   },
-  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+  // PATCH was missing until 2026-10-03 (H-23): browsers blocked goal
+  // complete/reopen and notification mark-read at the preflight, while every
+  // server-side test passed because supertest sends no preflight.
+  methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
   credentials: true
 }));
 app.use(express.json());
@@ -46,18 +66,23 @@ app.use(passport.initialize());
 
 // Per-IP rate limits on the two abuse-prone surfaces. Skipped in tests.
 const rlSkip = () => process.env.NODE_ENV === 'test';
+// /auth only starts a Google redirect or receives Google's callback: not a
+// guessing surface, and behind the Vercel proxy (H-19) every visitor shares
+// Vercel's IPs. The cap is a flood brake, not per-person protection (H-20).
 app.use('/auth', rateLimit({
-  windowMs: 15 * 60 * 1000, max: 50, skip: rlSkip,
+  windowMs: 15 * 60 * 1000, max: 1000, skip: rlSkip,
   standardHeaders: true, legacyHeaders: false,
 }));
 app.use('/api/extension', rateLimit({
   windowMs: 60 * 1000, max: 120, skip: rlSkip,
   standardHeaders: true, legacyHeaders: false,
 }));
-// Authenticated, but each call is unbounded aggregation work (M-1). Cap bursts.
+// Cap bursts per login session, not per IP: a campus shares one IP and the
+// Vercel proxy hides visitors' IPs (H-20). cookieParser has already run.
 app.use('/api/analytics', rateLimit({
   windowMs: 60 * 1000, max: 120, skip: rlSkip,
   standardHeaders: true, legacyHeaders: false,
+  keyGenerator: sessionKey,
 }));
 
 // Health
@@ -70,20 +95,20 @@ app.get("/health", (req, res) => {
   res.status(up ? 200 : 503).json({ status: up ? "ok" : "degraded", db: up });
 });
 
-// DB
+// DB. TLS stays on for Atlas; MONGO_TLS=false is only for a local or in-memory
+// test server, which does not speak TLS.
 mongoose.connect(process.env.MONGO_URI, {
   serverSelectionTimeoutMS: 15000,
   family: 4,
-  tls: true,
+  tls: process.env.MONGO_TLS !== 'false',
 })
-.then(() => console.log("✅ MongoDB connected"))
-.catch((err) => console.error("❌ MongoDB connection error:", err.message));
+.then(() => log.info('mongodb connected'))
+.catch((err) => log.error('mongodb connection failed', { err: err.message }));
 
 require('./config/passport');
 
 // Routes
 const analyticsRoutes = require('./routes/analytics');
-const teamRoutes = require('./routes/team');
 const leaderboardRoutes = require('./routes/leaderboard');
 const goalRoutes = require('./routes/goals');
 const groupRoutes = require('./routes/groups');
@@ -93,10 +118,9 @@ const notificationRoutes = require('./routes/notifications');
 const metricsRoutes = require('./routes/metrics');
 const authRoutes = require('./routes/auth');
 const internalRoutes = require('./routes/internal');
+const deviceRoutes = require('./routes/device');
 
-console.log('📍 Mounting routes...');
 app.use('/api/analytics', analyticsRoutes);
-app.use('/api/teams', teamRoutes);
 app.use('/api/leaderboard', leaderboardRoutes);
 app.use('/api/goals', goalRoutes);
 app.use('/api/groups', groupRoutes);
@@ -106,13 +130,14 @@ app.use('/api/notifications', notificationRoutes);
 app.use('/api/metrics', metricsRoutes);
 app.use('/auth', authRoutes);
 app.use('/api/internal', internalRoutes);
+app.use('/api/device', deviceRoutes);
 
 // Central error handler — one place that logs the full error server-side with a
 // short correlation id and returns a generic body. Routes call `next(err)`
 // instead of echoing `err.message` (which leaked Mongoose/internal detail).
 app.use((err, req, res, next) => {
-  const id = Math.random().toString(36).slice(2, 10);
-  console.error(`[err:${id}] ${req.method} ${req.originalUrl}`, err);
+  // Same id as the X-Request-Id header and the access log line for this request.
+  const id = req.id || Math.random().toString(36).slice(2, 10);
 
   // A malformed :id in the path is a client error, not a server fault. Mongoose
   // throws CastError from findById/findOne the moment it cannot coerce the
@@ -125,6 +150,13 @@ app.use((err, req, res, next) => {
   } else if (err && err.name === 'ValidationError') {
     status = 400;
     publicMessage = publicMessage || 'Invalid request body';
+  }
+
+  if (status >= 500) {
+    log.error('unhandled error', { requestId: id, method: req.method, path: req.baseUrl + req.path, err });
+    if (Sentry) Sentry.withScope((scope) => { scope.setTag('requestId', id); Sentry.captureException(err); });
+  } else {
+    log.warn('request failed', { requestId: id, status, err: err && err.message });
   }
 
   res.status(status).json({
@@ -144,7 +176,7 @@ if (require.main === module) {
   const { initScheduler } = require('./services/notificationScheduler');
   initScheduler();
   app.listen(PORT, () => {
-    console.log(`Server is running on port ${PORT}`);
+    log.info('server listening', { port: Number(PORT) });
   });
 }
 

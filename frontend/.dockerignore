@@ -1,0 +1,5 @@
+# Installed inside the image; never copy the host's copies in.
+node_modules
+dist
+.env
+.env.*

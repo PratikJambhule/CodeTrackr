@@ -1,0 +1,54 @@
+{
+  "date": "2026-10-03",
+  "machine": "12 logical cores, win32",
+  "legacy": {
+    "mode": "legacy",
+    "throughput": {
+      "requests": 6121,
+      "rps": 408,
+      "p50ms": 23,
+      "p90ms": 28,
+      "p99ms": 39,
+      "non2xx": 0
+    },
+    "storage": {
+      "every2min": {
+        "uploads": 2400,
+        "documents": 2400,
+        "bytes": 3016800,
+        "indexBytes": 188416
+      },
+      "every30s": {
+        "uploads": 9600,
+        "documents": 9600,
+        "bytes": 12067200,
+        "indexBytes": 331776
+      }
+    }
+  },
+  "bucketed": {
+    "mode": "bucketed",
+    "throughput": {
+      "requests": 6875,
+      "rps": 458,
+      "p50ms": 20,
+      "p90ms": 25,
+      "p99ms": 40,
+      "non2xx": 0
+    },
+    "storage": {
+      "every2min": {
+        "uploads": 2400,
+        "documents": 492,
+        "bytes": 238363,
+        "indexBytes": 28672
+      },
+      "every30s": {
+        "uploads": 9600,
+        "documents": 490,
+        "bytes": 237650,
+        "indexBytes": 28672
+      }
+    }
+  }
+}

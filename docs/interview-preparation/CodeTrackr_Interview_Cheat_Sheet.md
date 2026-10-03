@@ -1,34 +1,40 @@
 # CodeTrackr — Interview Cheat Sheet (Last-Minute Revision)
 
-*Read this the hour before. Full detail: `CodeTrackr_Interview_Preparation.md`.*
+*Read this the hour before. Rewritten 2026-10-03 against the code after the October roadmap
+(`docs/ROADMAP_2026-10.md`). Full detail: `CodeTrackr_Interview_Preparation.md` (its §0 lists what
+changed). Short Q&A: `docs/INTERVIEW_PREP.md`. Numbers: `docs/BENCHMARKS.md`.*
 
-> **Why it exists (say this first):** I wanted **friendly competition inside my college friend
-> group** — spin up a group for a contest week or for daily practice, everyone installs the
-> extension once, their editor time/lines are tracked automatically, and the group page shows
-> who actually put in the work. The extension *already* records each person's failed
-> commands / failed builds / repeated failures, so "who hit the most errors this week" is data
-> the app collects — and since 2026-09-10 the group view shows it (a read-path `$group`
-> change). Everything else — solo analytics, insights, goals — grew out of that.
+> **Why it exists (say this first):** friendly competition inside my college friend group. Make a
+> group for a contest week or daily practice, everyone installs the extension once, and the group
+> page shows who actually put in the hours, commits — and who hit the most failed commands and
+> builds. Solo analytics, insights and goals grew out of that.
 
-> **Changed 2026‑09‑08:** ingest now `$inc`-upserts a **10-minute `(user, project, language)`
-> bucket** (not one doc per flush); extension **2.3.0** skips signal-less flushes,
-> `minFlushMinutes` default **2**; sparse analytics sub-docs; `date` field dropped;
-> `DailySummary` nightly rollup + 400d TTL. Totals unchanged. `ACTIVITY_BUCKET_MS=0` = legacy.
+> **Be precise about status.** Everything below is **built and tested**. The October work is
+> **not deployed yet** and extension **2.5.0 is not published** (2.4.0 is live). Say "I built",
+> not "it's in production", until `docs/RELEASE.md` is done.
+
+> **Team:** 3 contributors. I owned the **extension and the backend**.
 
 ---
 
 ## Architecture in 10 lines
 
-1. Developer-productivity tracker: **VS Code extension → Express/MongoDB backend → React dashboard.**
-2. **Client–server, RESTish, modular monolith**, partial MVC + thin service layer.
-3. Extension flushes every ~30–90s (auth by **API key**, `x-api-key`); backend `$inc`-upserts each flush into a **10-minute `(user, project, language)` bucket** row (since 2026‑09‑08) — real seconds are summed, so totals are identical, ~10× fewer rows/writes.
-4. Web auth is **Google OAuth → JWT in an httpOnly cookie** (`session:false`, no refresh token).
-5. Backend = one Express process, 10 feature routers, Mongoose, one MongoDB (Atlas).
-6. Analytics endpoints do `Activity.find()` **then aggregate in JavaScript** (tech debt, M-1).
-7. Leaderboard aggregates the **entire** `activities` collection + **all** users in Node — no cache/window/pagination (H-7).
-8. Insights = **deterministic statistics** (`metricsDerive.js`), **not ML**; LLM layer designed, not built.
-9. `node-cron` deadline job — was **broken on serverless** (H-13); fixed 2026-09-09 (`require.main` guard + `POST /api/internal/run-*` behind a secret).
-10. Deploy: frontend **Vercel**, backend **Render** (Vercel serverless config also present), DB **Atlas**. CI: GitHub Actions (2026-09-09) — tests + build on push.
+1. Developer-productivity tracker: **VS Code extension → Express/MongoDB API → React dashboard.**
+2. **Client–server, REST, modular monolith**, routes + a thin service layer.
+3. The extension uploads a summary after ~2 min of real activity; every upload goes through a
+   **persisted outbox** with its own idempotency key (`flushId`).
+4. Extension auth: a **`ct_<id>_<secret>` key**, stored as SHA-256, from **device-code sign-in**
+   (per-device, expiring, revocable) or the Profile page. Web auth: **Google OAuth → JWT in an
+   httpOnly cookie**, with an OAuth `state` check.
+5. Ingest **credits** time (focus-corroborated, ≤ 600 s per user per 10-minute window), then
+   `$inc`-upserts one **10-minute `(user, project, language)` bucket**.
+6. The same write `$inc`s a **`userstats`** row per user → the leaderboard is three indexed reads.
+7. Dashboard views are one **`$facet` pipeline** in MongoDB; Insights = **statistics + 13 rules,
+   not ML**.
+8. Scheduler: GitHub Actions calls secret-protected internal routes (hourly sweep, nightly rollup).
+9. Deploy: Vercel (frontend) + Render (API) + Atlas; CI runs unit + integration tests, the build and
+   a Docker health check; deploy-on-green is ready but off until a secret is set.
+10. Ops: JSON logs with a **request id** that also appears in error bodies; Sentry if `SENTRY_DSN`.
 
 ---
 
@@ -36,80 +42,65 @@
 
 | Layer | Stack | Note |
 |---|---|---|
-| Extension | TypeScript 5, esbuild bundle, `@vscode/vsce`, axios | `onStartupFinished`; 5 trackers; `consumeInterval()` = snapshot+reset |
-| Backend | Node 18, **Express 5**, **Mongoose 8**, jsonwebtoken, passport-google-oauth20, cookie-parser, cors, node-cron, serverless-http | `helmet` + `express-rate-limit` **wired 2026-09-09** (`/auth`, `/api/extension`); ingest bounds-checked by a pure validator (2026-09-09); `express-validator` unused |
-| DB | MongoDB Atlas | 8 collections (`+dailysummaries`); `activities` is high-volume, now bucketed |
-| Frontend | **React 19**, **Vite 7**, TS ~5.9, **Tailwind 3**, react-router-dom 7, chart.js 4 + react-chartjs-2, lucide-react | `@tanstack/react-query` **installed, unused**; 28-theme `ThemeContext` |
-| Auth | Google OAuth → JWT cookie (web); random 64-hex API key (extension) | `JWT_SECRET` required at boot — app throws if unset (was an unsafe `'your_jwt_secret'` fallback), fixed 2026-09-09 |
-| "ML" | pure JS stats — medians, MAD, surviving-minutes scoring, confidence gating | no model/training/inference/LLM/Python. Session archetypes are a **rule-based** classifier, deliberately not k-means |
-| Deploy | Vercel + Render + Atlas | GitHub Actions CI (2026-09-09); no Dockerfile, no CD, no observability |
-| Tests | plain `node:assert` — 18 backend suites (292 assertions) + 3 extension suites (52); CI on push | **zero frontend tests; nothing run vs a real DB** |
+| Extension | TypeScript, esbuild, axios, VS Code API | 5 trackers; outbox in `globalState`; key in **SecretStorage**; `CodeTrackr: Sign In` |
+| Backend | Node 20, **Express 5**, **Mongoose 8**, passport-google-oauth20, jsonwebtoken, helmet, express-rate-limit | services: `apiKeys`, `ingestCredit`, `userStats`, `analyticsViews`, `activityUser`, `logger` |
+| DB | MongoDB Atlas | 13 collections; `activities` is the big one, bucketed |
+| Frontend | **React 19**, Vite 7, TS, Tailwind, react-router 7, Chart.js, **React Query** | Dashboard, Leaderboard, Insights on `useQuery`; `/device` approval page |
+| "ML" | pure JS statistics + rules | no model, no LLM; ML work-type classifier is **designed, not built** |
+| Ops | GitHub Actions CI, `Dockerfile`, `docker-compose.yml`, `deploy.yml`, JSON logs, optional Sentry | `docker compose up` = Mongo + API + website locally; CD off until `RENDER_DEPLOY_HOOK_URL` |
+| Tests | `node:assert` + **supertest + mongodb-memory-server** | backend unit **23 suites / 346**, integration **35**, extension **6 / 70**; no frontend tests |
 
-**Why MongoDB:** append-only, self-contained, schema-evolving docs; per-user-window access; no hot-path joins; free tier.
-**Where SQL wins:** groups/teams/goals relational integrity + transactions; the leaderboard `GROUP BY`.
-**Why monolith:** one dev, one DB, shared model; extract *ingest* first when volume demands.
+**Why MongoDB:** self-contained, schema-evolving activity documents; per-user time-window
+queries; no hot-path joins. **Where SQL wins:** groups/goals integrity and the leaderboard
+`GROUP BY` — which is why the leaderboard now reads precomputed totals instead.
 
 ---
 
 ## Data flow — one page
 
-**Ingest** *(bucketed since 2026‑09‑08)*
+**Ingest**
 ```
-VS Code event → tracker counters → timer tick (30s) →
-  idle ≥ 2min? pause : totalBuffered ≥ 2min (minFlushMinutes)? →
-  buildPayload(timestamp = interval START, basename only, duration in SECONDS, 4 analytics blocks) →
-  payloadHasSignal? no → keep buffering (don't send)  |  yes ↓
-  axios.post /api/extension/track  header x-api-key →
-  verifyApiKey → User.findOne({apiKey}) → req.user →
-  validate (fileName && language && duration) → normalize*Analytics (missing → absent, not 0) →
-  planActivityWrite → bucketStart = floor(when, 10min) →
-  Activity.findOneAndUpdate({userId,project,language,bucketStart},
-     { $inc: {duration, lines, flushCount, ...non-zero leaves}, $max, $push $slice:-200, $addToSet files,
-       $setOnInsert: {...key, timestamp: bucketStart} }, { upsert:true, setDefaultsOnInsert:false }) → 201
-  (ACTIVITY_BUCKET_MS=0 → plain Activity.create, exactly as before)
+VS Code events → tracker counters → 30 s tick → ≥ 2 min active + real signal? →
+  payload { timestamp = interval START, flushId = UUID, 4 analytics blocks } →
+  outbox.enqueue (globalState) → drain oldest first:
+  POST /api/extension/track  x-api-key: ct_<id>_<secret>
+    keyQuota (60/min per key) → verifyApiKey (id lookup, SHA-256 + timingSafeEqual; users then devicetokens)
+    → validate (1–3600 s, lengths, timestamp ≤ 24 h old) → receipt {userId, flushId} (dup → 200, skipped)
+    → credit = min(duration, focus + 120 s), spread over the 10-min windows it covers,
+      each window claimed against an atomic counter capped at 600 s
+    → $inc upsert of the bucket (credited seconds; claimedDuration keeps the raw claim)
+    → $inc userstats
 ```
-On failure: the payload is **merged forward** into the next flush (`mergeAnalytics`). *(Before 2.4.0 this was a lie: `sendActivity` swallowed its own errors and never rethrew, so the caller's `catch` was dead code and every failed upload silently lost the interval.)*
-`$inc.duration` = real measured seconds → **totals unchanged**. A same-window replay
-double-counts *inside one bucket*, not as a new row.
+Outbox result: `ok` (sent or duplicate) / `drop` (400) / `retry` (offline, 5xx, no key). Survives
+restart; items older than 24 h are pruned (the server would refuse them).
 
 **Read (dashboard)**
 ```
-fetch(/api/analytics/:id?timezone=<offsetMin>, {credentials:'include'})  cookie: token=JWT →
-  isAuthenticated (jwt.verify → User.findById) →
-  resolveOwnedUserId → assertOwnership (403 if :userId ≠ session) →
-  Activity.find({userId, timestamp:{$gte:7d}})  // 7 days to render 1 (M-1) →
-  JS filter/reduce/Map + computeStreak ($group, 90d) →
-  res.json → Chart.js
+useQuery → GET /api/analytics/:id?timezone=… (cookie JWT) → ownership check (403) →
+  ONE $facet pipeline over today (or the last 7 local days): timeline, languages, terminal summary,
+  top repeated failures → laid out on a 24-hour / 7-day grid → Chart.js
 ```
 
-**Insights**
+**Leaderboard**
 ```
-fetch(/api/metrics?days=&timezone=)  // NO :userId — IDOR-proof by design →
-  isAuthenticated → buildMetrics(req.user._id, {days, tz}) →
-    4× Activity.aggregate ($group: totals / by-day / by-hour / goal-pairs) →
-    metricsDerive (pure): deepWorkRatio, flowBlockStats, volumeStability, activeDaysRatio, qualityStreak,
-                          truePeakWindow, estimationCalibration →
-  res.json  // NOT cached, recomputed every load
+userstats.find().sort({totalSeconds:-1}).limit(N) + two indexed maxima → scores 0–5
+(?days= window, or before the backfill: the old activity scan)
 ```
 
 ---
 
-## Extension flow — one page
+## Extension — one page
 
-- **Activation:** `onStartupFinished`. Creates 5 trackers, registers 7 commands, `start()`.
-- **Loop:** `setInterval(flushIntervalSeconds=30s)`. Idle ≥ 2min → flush tail + pause; resume on next edit.
-- **Flush:** when buffered active minutes ≥ `minFlushMinutes` (**2** since 2.3.0). Builds the payload, then `payloadHasSignal(payload)?` — no edits/terminal/git/focus → **don't send, keep buffering**. One `POST /track` per flush; backend merges it into the current 10-min bucket row (`$inc` upsert). **No HTTP batching** (`/track/batch` exists, unused).
-- **Trackers** (`consumeInterval()` = snapshot + reset):
-  - **EditorTracker** — gross chars/lines ±, **churn** (write then delete ≤ 10min), undo/redo, saves, file switches, read/write attention split (5s sampler), large-insert flags.
-  - **FocusTracker** — `focusedMs`/`blurredMs` via `onDidChangeWindowState`; **flow blocks** (close after 2min idle).
-  - **GitStateTracker** — `vscode.git` API; `commits++` when `HEAD.commit` changes; uncommitted count/age.
-  - **TerminalTracker** — `onDidStart/EndTerminalShellExecution`; category, build/test/debug, git action, success by exit code, repeated failures; commands **sanitised** (`token=***`) + truncated.
-  - **DebugTracker** — session count → `terminalAnalytics.debuggingSessions`.
-- **Privacy:** never sends file contents, diffs, commit messages, absolute paths (test-enforced).
-- **Key storage:** plaintext in global `settings.json` (should be SecretStorage).
-- **Timestamp:** stamped at **interval start**, not upload (fixes hour-of-day skew).
-- **Failure:** 401 → one-time prompt; network error → keep buffer in memory; `deactivate()` → best-effort final flush.
-- **Version saga:** `2.1.0` uploaded before `2.0.x` → Marketplace served stale code for months → `2.2.0` supersedes.
+- **Trackers:** Editor (gross edits, churn, saves, read vs write time), Focus (window focus, flow
+  blocks), Git (commits via the Git extension API), Terminal (commands, exit codes, builds,
+  repeated failures; sanitised), Debug (sessions).
+- **Privacy:** never sends file contents, diffs, commit messages or full paths.
+- **Sign in:** `CodeTrackr: Sign In` → copies `WXYZ-2345`, opens `/device?code=…`, polls until you
+  approve → stores the per-device key in SecretStorage. `Setup API Key` still works.
+- **Offline:** every upload is persisted before sending; FIFO; same `flushId` on retry.
+- **Version story:** 2.1.0 was uploaded before 2.0.x, so the Marketplace served stale code for
+  months; 2.4.0 fixed silent data loss; 2.5.0 (built, unpublished) adds the outbox, keychain and
+  sign-in.
 
 ---
 
@@ -117,157 +108,117 @@ fetch(/api/metrics?days=&timezone=)  // NO :userId — IDOR-proof by design →
 
 | Collection | Key facts |
 |---|---|
-| **activities** | `userId` is a **String** (hex of `users._id`), not an ObjectId ref. `duration` in **SECONDS**. **One doc per 10-min `(userId, projectName, language)` bucket** — many flushes `$inc` into it (`flushCount` counts them; `files[]` `$addToSet`; `bucketStart` set once). 4 sparse analytics sub-docs (missing leaf ⇒ **absent, not 0**). Dead `date` field **dropped** (migration script). Indexes: `{userId:1}`, `{userId:1,timestamp:-1}` (**added**), `{userId:1,projectName:1}`, `{userId:1,language:1}`, **partial-unique** `{userId:1,projectName:1,language:1,bucketStart:1}`, `{createdAt:1}` TTL 400d (safety net). `ACTIVITY_BUCKET_MS=0` → legacy one-doc-per-flush. |
-| **dailysummaries** | Nightly rollup (cron `30 3 * * *`, `dailyRollup.js`). One doc per `(userId, day)` — `totalSeconds`, lines, `flushCount`, `bucketCount`, `languages[]`, `projects[]`, editor/terminal/git/focus rollups. Unique `{userId:1,day:1}`. Read path doesn't use it yet — built for the leaderboard/analytics scale fix. |
-| **users** | `googleId` U, `email` U, `apiKey` U+sparse **plaintext**, `isFirstLogin`. |
-| **groups** / **groupmembers** | The original point of the app — a group = a contest week or a daily-practice pod. `groups.password` = scrypt `scrypt$salt$hash`, `select:false`, legacy plaintext tolerated + rehashed on join. `groupmembers` = **join table**, unique compound `{groupId,userId}` (the one hard concurrency guard). Leaderboard aggregates members' `activities`: **hours, lines, commits, failed commands, failed builds** with failure rates (M-21, 2026-09-10); still ranked by hours, all-time. |
-| **goals** | `userId` ObjectId, `targetHours` (min 1), `techStack` String, `status` enum, `completedAt`. `PATCH /:id/complete` + `/reopen` added 2026‑09‑10 — before that **nothing ever set `completed`**, so estimation calibration could never populate. Progress computed on demand. |
-| **teams** | `members: [ObjectId]` **embedded**. Backend routes exist; **frontend not routed** (orphaned). Different modelling choice from groups on purpose. |
-| **notifications** | scoped by `req.user._id` everywhere — "the one done right". |
+| `activities` | one doc per 10-min `(user, project, language)` bucket; `duration` = **credited** seconds, `claimedDuration` = raw claim; sparse sub-docs; `userId` String → ObjectId **mid-migration** (reads accept both); partial-unique bucket index; 400-day TTL |
+| `userstats` | one row of running totals per user; leaderboard + group boards |
+| `windowusages` / `ingestreceipts` | anti-cheat window counters / idempotency receipts, both 48 h TTL |
+| `users` | `apiKeyId` + `apiKeyHash` (select:false), never the plain key |
+| `devicetokens` / `deviceauths` | per-device keys (1-year expiry) / pending sign-ins (10-min TTL), hashes only |
+| `groups` / `groupmembers` | scrypt passwords; join table with unique `(groupId, userId)`; creator = admin |
+| `goals`, `notifications`, `dailysummaries`, `userinsights` | as before |
 
-**No transactions.** Ingest = single atomic `$inc` upsert into the bucket row (concurrent flushes just accumulate; duplicate-key on first insert → one retry). Double-join → unique index → **409** (handler detects `error.code === 11000`). `team.members.push` = lost-update risk (use `$addToSet`).
-
----
-
-## ML / Insights — one page
-
-**It is statistics, not ML.** No model, training, inference, Python, or LLM.
-
-| Metric | Formula |
-|---|---|
-| `deepWorkRatio` | Σ(flow blocks ≥ 25 min) ÷ Σ(all flow blocks) — same clock, 0–1. *(Was ÷ total focused ms: two clocks, could exceed 1. Fixed 2026-09-10.)* |
-| `flowBlocks` | median / longest / count / deep-count of `flowBlocksMs` |
-| `volumeStability` | `clamp(1 − MAD/median of daily minutes, 0, 1)` — robust. *(Was `1 − stddev/mean` over **only active days**, so it measured volume evenness, never cadence, despite the label. Fixed 2026‑09‑10; `consistencyIndex` kept as an alias.)* |
-| `activeDaysRatio` | `activeDays ÷ windowDays` — the actual cadence metric |
-| `qualityStreak` | consecutive days with a ≥25 min block |
-| `truePeakWindow` | argmax over **2-hour** windows of `Σ minutes × (1 − churnRatio)` — "surviving minutes". Only hours seen on ≥3 distinct days are eligible. *(Was a 1-hour argmax of `commits·10 + lines/10 − churn/5`: unvalidated weights and no sample floor, so one commit in an hour coded once in 30 days won. Fixed 2026‑09‑10.)* |
-| `estimationCalibration` | `median(actual ÷ estimated)` + range, works from **1** completed goal. *(Was a mean needing ≥2 — and **no route ever completed a goal**, so it could never return anything. `PATCH /api/goals/:id/complete` added 2026‑09‑10.)* |
-| secondary | `churnRatio`, `comprehensionLoad` (read/(read+write)), `contextSwitchesPerHour`, `interruptionsPerHour` (blurEvents/focused hr) |
-| **confidence** | every metric ships `meta[name].{confidence, sampleSize, unit}`; `insufficient` renders as **—**, never a fabricated 0 |
-| **sessions** | `sessionize.js` gap-splits buckets into sessions and labels each with a rule-based archetype (deep-build / debug-grind / exploration / admin-config) |
-| **rules** | `rulesEngine.js` — 13 threshold rules over these metrics, each confidence-gated and carrying its evidence → the **"What stands out"** panel. Not ML, not an LLM |
-
-- Runs **synchronously per request**; only the 90-day baseline is cached (`UserInsights`, refreshed ≤ 1×/day on read). Not scheduled.
-- Any metric below its minimum sample shows **"—"** (confidence gating) — never a fabricated 0.
-- LLM narration layer **designed** (`TRACKING_ROADMAP.md` §5, Gemini) with a "every number must be grounded" validator — **not built**.
-- To make it real ML: session-vector features → z-score per user → k-means archetypes; supervised only with real labels (goal slippage); serve from a batch job, not inline.
+**Concurrency:** bucket upsert is atomic; the window cap uses `$inc` and reads its own
+post-increment value, so two parallel uploads can't both fill a window; device codes are consumed
+with `findOneAndDelete` (exactly one key per code).
 
 ---
 
 ## Security — one page
 
-**FIXED (branch `feat/security-and-insights`):**
-- H-1 analytics/leaderboard now require auth + ownership (`assertOwnership`, 403 on mismatch).
-- H-2 legacy open `POST /api/user-activity` + `GET /api/user-stats/:id` deleted.
-- H-9 group passwords scrypt-hashed (legacy plaintext rehashed on join).
-- H-10 `AUTH_BYPASS` refused when `NODE_ENV==='production'`.
-- H-11 IDORs on goals (`findOne({_id,userId})`) and teams (membership check) closed.
-- `/api/metrics` takes **no `:userId`** → IDOR-proof by construction.
-- `routeGuards.test.js` statically scans routes, fails if auth middleware disappears.
+**Fixed in October 2026:** hashed keys (shown once), per-device keys with expiry and revoke,
+OAuth `state` (L-11), cancelled sign-in no longer 404s (M-26), no emails in group routes
+(M-28/M-29), **CORS now allows PATCH (H-23)**, user document no longer logged with key fields (L-12),
+per-key ingest quota, idempotency, window cap (H-21), batch cap.
 
-**FIXED 2026-09-09 (quick-wins batch):**
-- `helmet()` global; `express-rate-limit` on `/auth` (50/15min) + `/api/extension` (120/min).
-- `JWT_SECRET` required at boot — no more `'your_jwt_secret'` fallback.
-- Double-join → **409** (handler detects `11000`).
-- `GET /health` readiness (503 when Mongo down).
-- "Repeated Failures" dashboard panel now shows real data.
+**Fixed earlier:** auth + ownership on analytics (H-1), legacy open endpoints deleted (H-2), scrypt
+group passwords (H-9), `AUTH_BYPASS` refused in prod (H-10), IDORs (H-11), regex DoS (H-16),
+leaderboard email leak (M-23), helmet + rate limits, `JWT_SECRET` required, central error handler.
 
-**STILL OPEN / BY DESIGN:**
-- **API key: plaintext at rest + in transit, no expiry, no scope, full ingest authority.** Leak → forge unlimited activity (leaderboard fraud), but NOT read the dashboard (needs JWT).
-- No rate limiting on group `/join` (password brute-force) or the analytics routes — only `/auth` + `/api/extension`.
-- Client still sets `timestamp` on ingest (bounds-checked as of 2026-09-09, but client-chosen).
-- *(FIXED 2026-09-09)* central `(err,req,res,next)` handler — correlation id, generic body, routes `next(err)`.
-- Leaderboard returns **every user's email**.
-- No idempotency / replay protection on ingest.
-- Group `discover` enumerates private groups (name+desc+creator); no group-owner authz.
-- *(FIXED 2026-09-10, H-16)* group search put raw input into `$regex` → ReDoS; now escaped, length-capped, results capped at 100.
-- No refresh token; `sameSite:'none'` + no CSRF token.
-- Key in `settings.json`, not SecretStorage.
-
-**Redesign the key:** `ct_<keyId>_<secret>`, store `sha256(secret)`, lookup by indexed `keyId`, constant-time compare; multiple named keys per device; rotation with 24h grace; or short-lived signed ingest token / OAuth device flow.
+**Still open — say these yourself:**
+- **H-19 (fixed in code, not deployed):** the login cookie was third-party (`vercel.app` vs
+  `onrender.com`). Now Vercel forwards `/api` + `/auth` to Render so the browser sees one site.
+  Needs the Google redirect URI + Render callback setting changed, then a Safari test.
+- **H-20 (fixed):** limits are per user / per session, not per IP (a campus shares one IP, and the
+  Vercel proxy hides IPs anyway).
+- Ingest timestamps are still client-chosen (bounded to 24 h); a scripted client can still earn
+  one hour per real hour.
+- No refresh token / server-side session revocation for the web JWT (1-day expiry).
 
 ---
 
-## Scalability — one page
+## Numbers to know
 
-| Users | State | Action |
+| Claim | Number | Source |
 |---|---|---|
-| **10k** | Ingest trivial (bucketing already cut row/write rate ~10×). Leaderboard still slow once `activities` is large (**H-7, breaks first**). Analytics wasteful (M-1). | `{userId:1,timestamp:-1}` **now exists**; window + `$limit` the leaderboard pipeline; point analytics/leaderboard at `dailysummaries`. |
-| **100k** | Leaderboard unusable reading raw `activities`. No caching → repeated recompute. `node-cron` overdue sweep expensive. | Nightly `dailysummaries` rollup **exists** — switch reads to it (leaderboard/analytics become O(user·days)); add a `UserStats` running total for O(users). Move analytics to `$group`. |
-| **1M** | Monolith + one Mongo is wrong shape. | Queue → workers → **sharded `activities`** (hash `userId`) + rollups; Redis (leaderboard ZSET, insights cache, rate limits); analytics from rollups; archive raw docs to a warehouse; observability. |
-| **10M leaderboard** | — | Redis **sorted set**: `ZADD` on rollup update, `ZREVRANGE` page, `ZREVRANK` "your rank" — O(log n). |
+| Leaderboard at 1M rows | p50 **6.72 s → 62 ms**, p99 7.17 s → 111 ms, 1.3 → 156 req/s | `bench/leaderboard.bench.js` (local) |
+| Bucketing | **4.9× fewer docs, 12.7× less data** at the 2-min cadence (19.6× / 51× vs old 30 s); same throughput | `bench/ingest.bench.js` (local) |
+| Tests | unit 23 / 346, integration 35, extension 6 / 70 | 2026-10-03 runs |
+| Insights | 11 metrics, 13 rules | `metricsDerive.js`, `rulesEngine.js` |
 
-**Complexity headlines:** leaderboard = **O(all activity + all users)** per request; analytics = **O(N) app memory + DB egress**. Both fix via aggregate-in-engine / precompute rollups.
+Never quote the old "~10× fewer writes": it was a guess. Always say "local benchmark".
 
 ---
 
-## Top 40 questions — quick answers
+## Top questions — quick answers
 
-1. **Tell me about it** → built it for **friendly competition in my college friend group** — a group for a contest week / daily practice, the extension auto-tracks everyone's editor, the group page shows who put in the hours, lines and commits — and who hit the most failed commands and builds. Around that: solo analytics, deterministic insights, goals. Stack = VS Code extension + Express/Mongo + React dashboard.
-1b. **Why did you build it?** → my friends and I kept saying "how much did you actually code this week" — I wanted that to be a number, not a claim, and a bit competitive. Groups came first; everything else grew from it.
-2. **Architecture?** → client–server, RESTish, modular monolith, partial MVC.
-3. **Why monolith?** → one dev, one DB, shared model; extract ingest first later.
-4. **Why MongoDB?** → append-only, schema-evolving docs, per-user-window access.
-5. **Why not Postgres?** → activity suits documents; but relational parts + leaderboard would be better in SQL — honest answer.
-6. **Data flow?** → event → counters → 30s flush (skip if no signal) → verifyApiKey → `planActivityWrite` → `$inc` upsert into the 10-min bucket row; read → isAuthenticated → ownership → find → JS aggregate.
-7. **The unique key — is it auth?** → yes, a plaintext unscoped non-expiring **bearer credential**, not an identifier.
-8. **Key stolen?** → forge activity / leaderboard fraud; can't read dashboard (needs JWT).
-9. **Fix the key?** → hash at rest, keyId prefix, per-device, rotation grace, or OAuth device flow.
-10. **Why not OAuth for the extension?** → device flow is right; API key was the MVP speed trade-off.
-11. **Web auth?** → Google OAuth → JWT `{id,name,email}` 1-day → httpOnly cookie; no refresh, no revocation.
-12. **JWT vs session?** → stateless, survives cold start; cost = no revocation.
-13. **Extension activation?** → `onStartupFinished`; passive tracking.
-14. **What's collected?** → time, file/lang/project, gross edits, churn, focus/flow, terminal commands, git commits, debug sessions.
-15. **Batched?** → no HTTP batching; but the backend *merges* flushes into one 10-min bucket doc (`$inc` upsert). `/track/batch` unused.
-16. **Idle?** → pause after 2 min, resume on edit.
-17. **Offline?** → the unsent payload is merged into the next flush (2.4.0); memory only, no disk queue, still lost on restart. Before 2.4.0 the retry path was **dead code** and every failed flush was lost.
-18. **Duplicate payload?** → still double-counted (now `$inc`'d twice *inside* one bucket row, not a new doc); no idempotency key.
-19. **Analytics aggregation — where?** → mostly **JS** (`find().reduce()`), M-1; streak + summary + metrics use `$group`.
-20. **Timezone?** → client sends `getTimezoneOffset()` minutes; `localDayInfo` buckets local days.
-21. **Streak logic?** → consecutive days with `Σduration>0`, anchored today-or-yesterday, 90-day window.
-22. **Leaderboard rank?** → total hours all-time desc; relative 5-point scores vs current max (unstable).
-23. **Leaderboard at 100k?** → dies reading raw `activities`; point it at the nightly `dailysummaries` rollup (already built), then a `UserStats` running total / Redis ZSET.
-24. **"commits" on leaderboard?** → real git commits (`gitAnalytics.commits`) since 2026-09-10; before that it was flush count, mislabelled (H-17).
-25. **Groups membership?** → `groupmembers` join table, unique compound index. Groups are the reason the app exists — contest weeks / practice pods for a friend group.
-26. **Double-join?** → unique index → **409** (handler detects `11000`).
-27. **Group admin?** → none; `createdBy` stored, never used for authz.
-27b. **Group compares what?** → hours, lines, commits, failed commands and failed builds per member, with failure rates ("—" when nothing ran) — the "who hit the most errors" comparison the app was built for (M-21, 2026-09-10).
-28. **Is Insights ML?** → no — deterministic statistics plus a 13-rule threshold engine ("What stands out"); LLM narration designed, not built.
-29. **consistencyIndex?** → now an alias of `volumeStability` = `1 − MAD/median` of daily minutes; cadence is `activeDaysRatio`. *(Was `1 − CV` over active days only — measured evenness, not cadence.)*
-30. **truePeakWindow?** → most productive **2-hour** window, scored on surviving minutes `minutes×(1−churn)`, with a ≥3-distinct-day floor. Not the busiest.
-31. **Insights cached?** → no; recomputed every load.
-32. **Insufficient data?** → focus cards show "—" until extension 2.1.0; estimation needs 2 goals.
-33. **Cheat the leaderboard?** → harder as of 2026-09-09: `/api/extension` is IP-rate-limited (120/min) and `duration` is capped at 3600/flush. Still no idempotency key or per-key quota, so a valid key + a slow loop still inflates hours (#10 deferred).
-34. **Prevent cheating?** → validate duration, rate-limit per key, idempotency key, corroborate with edit/focus/git signals.
-35. **Tests?** → `node:assert` scripts; **18 backend suites (292 assertions) + 3 extension (52)**; GitHub Actions CI on push; **no frontend tests, nothing vs a real DB**.
-36. **`routeGuards.test.js`?** → static scan; fails if a sensitive route loses its auth middleware.
-37. **Error handling?** → per-route `try/catch` → `next(err)` → **central handler** → `500 {error, id}` (correlation id, no leak; since 2026-09-09). Deliberate 4xx stay per-route; Mongoose `CastError`/`ValidationError` → **400** (2026-09-10).
-38. **Deploy?** → Vercel (FE) + Render (BE) + Atlas; GitHub Actions CI (2026-09-09); the `node-cron`-on-serverless problem is fixed (H-13, 2026-09-09) — `require.main` guard + external `/api/internal/run-*` trigger.
-39. **Frontend build?** → ✅ green (was 29 `tsc -b` errors, fixed 2026-09-09; M-13). CI enforces it.
-40. **Biggest weakness?** → the API key model (plaintext, non-expiring, unscoped); the O(n) leaderboard; and testing depth (nothing runs vs a real DB). *(Ingest validation + `helmet` + rate-limit + central error handler landed 2026-09-09.)*
+1. **Tell me about it** → friendly competition for a friend group: auto-tracked hours, commits and
+   failures per member, contest-week boards; extension + Express/Mongo API + React dashboard.
+2. **Architecture?** → client–server REST, modular monolith, thin service layer.
+3. **Why MongoDB?** → document-shaped activity, per-user windows, no joins on the hot path.
+4. **How does the extension authenticate?** → `ct_<id>_<secret>`; DB stores SHA-256 of the secret;
+   lookup by id, `timingSafeEqual`; shown once; per-device keys via device-code sign-in.
+5. **Why SHA-256 and not bcrypt?** → bcrypt protects guessable passwords; a 256-bit random secret
+   can't be guessed, so a slow hash only adds latency to every upload.
+6. **Device-code flow?** → like `gh auth login`: code in the editor, approve on the site, poll;
+   one key per approval (atomic consume); risk = phishing a code, impact = upload-only key.
+7. **Offline?** → persisted outbox, FIFO, same id on retry; nothing lost on restart.
+8. **Duplicate upload?** → `flushId` receipt with a unique index → applied once.
+9. **Cheat the leaderboard?** → credited time: focus + 120 s, ≤ 600 s per window (atomic counter),
+   long uploads spread; raw claim kept. A paced script still gets 1 h per real hour.
+10. **Leaderboard at scale?** → was O(all activity); now `userstats` running totals: 6.7 s → 62 ms
+    at 1M rows; rebuild script proven equal to live totals by a test.
+11. **Analytics in JS?** → moved to a `$facet` pipeline; proven equal to the old code by running
+    both on the same data (oracle test).
+12. **Did bucketing help?** → measured ~5× fewer docs, 13× less data at today's cadence.
+13. **Type migration?** → `userId` String → ObjectId as expand/contract: dual reads, a merge for
+    same-window bucket pairs, contract later.
+14. **Bug your tests missed?** → **H-23**: no PATCH in CORS → goal completion never worked in a
+    browser; API tests send no preflight. Found by using the feature; now a test sends preflights.
+15. **Testing?** → unit (pure functions + source scans), integration (real app + in-memory Mongo
+    over HTTP), extension tests against the built bundle; all in CI. No frontend tests yet.
+15b. **Docker?** → production image (`backend/Dockerfile`, non-root, health check) built and
+    checked in CI; `docker compose up` runs MongoDB + API + website locally with persistent data.
+    Production on Render still runs Node directly.
+16. **Debug production?** → request id in the header and error body → grep the JSON logs; Sentry
+    if enabled; `/health` checks the DB.
+17. **Is Insights ML?** → no: confidence-gated statistics + 13 rules. ML work-type classifier is
+    designed, blocked on labelled data.
+18. **Biggest remaining weakness?** → cross-site cookie (H-19) and IP-keyed limits (H-20) before a
+    campus launch; client-chosen timestamps.
+19. **What would you do next?** → deploy + migrations, then fix H-19/H-20, per-day stats for
+    windowed boards, frontend tests.
 
 ---
 
 ## Things NOT to claim / traps
 
-- Don't call Insights "AI" or "ML" — it's statistics. Say so first.
-- Don't say the leaderboard is "optimised" — it's an O(n) scan; know the rollup fix.
-- The write path buckets now (10-min `$inc` upsert) — say that, not "append-only per-flush". Totals are unchanged; time-of-day precision is a 10-min grid.
-- Don't say "the API key is just an identifier" — it's a credential.
-- Frontend build is green as of 2026-09-09 (CI enforces). *(Historically `tsc -b` had 29 errors.)*
-- Don't claim integration test coverage — there is none against a real DB.
-- Don't claim the extension has an offline queue — it's memory-only.
-- The Dashboard "Repeated Failures" panel now shows **real** `repeatedFailedCommands` (fixed 2026-09-09).
-- Goals to-dos aren't persisted; Teams UI is orphaned.
-- Don't over-claim solo authorship — 3 contributors; describe what you can defend.
+- Don't say "in production" for anything from October 2026 until it's deployed.
+- Don't call Insights AI/ML. Don't say the ML classifier exists.
+- Don't quote "~10×"; quote the measured 5×/13× with the cadence, and say "local benchmark".
+- Don't claim the leaderboard can't be gamed — it's bounded, not impossible.
+- Don't claim frontend tests.
+- Don't claim solo authorship — 3 contributors; you owned extension + backend.
 
 ---
 
 ## Sentences that make you sound senior
 
-1. "The product is really about friendly competition in a friend group — a group is a contest week or a practice pod, the extension does the tracking so nobody self-reports, and the group leaderboard is the payoff; the next feature is surfacing the per-person error/build-failure comparison the extension already collects."
-2. "I recently moved ingest from one row per flush to an atomic `$inc` into a 10-minute `(user, project, language)` bucket — real seconds are summed either way so every total is byte-identical, but the write and row rate dropped about 10×, and I kept `ACTIVITY_BUCKET_MS=0` as an escape hatch to the old behaviour."
-3. "The API key is functionally an unscoped, non-expiring plaintext bearer credential — a fine MVP, but I'd hash it at rest with a keyId prefix and add rotation with a grace window."
-4. "The leaderboard is O(all activity) per request; I've built the nightly `dailysummaries` rollup that turns it into an O(user·days) read, and a Redis sorted set is the endgame for rank lookups."
-5. "Insights is deterministic descriptive statistics — medians, MAD, surviving-minutes scoring, all confidence-gated — plus a small rules layer that says what stands out, chosen so every number is explainable; the LLM narration layer is designed with a numbers-must-be-grounded validator but not built."
-6. "I audited my own code into `IMPROVEMENT_PLAN.md` — 30-odd findings by severity — and closed the high-severity security items with a regression test that statically scans routes and fails if an auth middleware disappears."
+1. "I measure before I claim: the leaderboard went from 6.7 s to 62 ms at a million rows in a
+   local benchmark, and bucketing turned out to save 5× documents, not the 10× I'd guessed."
+2. "Keys are stored like GitHub tokens — an id for lookup and a hash of the secret — because a
+   database leak shouldn't hand out working credentials."
+3. "You can't make client telemetry unforgeable; you can bound it. Credited time is capped per
+   window with an atomic counter, so the best a script can do is real time."
+4. "Before refactoring the analytics I copied the old code into a test as an oracle and required
+   identical output — that's how I found the weekly-window bug."
+5. "My API tests all passed while the browser blocked every PATCH — CORS is part of the contract,
+   so now a test sends real preflights."

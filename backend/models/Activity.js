@@ -13,8 +13,12 @@ const mongoose = require('mongoose');
  * Every read path already treats a missing sub-document / leaf as zero.
  */
 const activitySchema = new mongoose.Schema({
+    // Mixed during the String -> ObjectId migration (roadmap item 10): new
+    // writes store an ObjectId, legacy documents hold the hex string, and
+    // services/activityUser.js matches both. Mixed stops Mongoose casting one
+    // form into the other. Becomes ObjectId once the migration has run.
     userId: {
-        type: String,
+        type: mongoose.Schema.Types.Mixed,
         required: true,
         index: true
     },
@@ -109,7 +113,11 @@ const activitySchema = new mongoose.Schema({
     // have none of these.
     bucketStart: { type: Date },
     files: { type: [String] },
-    flushCount: { type: Number, default: 1 }
+    flushCount: { type: Number, default: 1 },
+    // Seconds the client CLAIMED for uploads in this bucket, before the anti-cheat
+    // limits (focus corroboration, 600 s window cap). `duration` holds what was
+    // credited. A large gap between the two is the signal of an inflated client.
+    claimedDuration: { type: Number }
 }, { timestamps: true });
 
 // The range queries every read path actually does filter on `timestamp`.

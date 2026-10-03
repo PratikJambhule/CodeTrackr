@@ -1,17 +1,24 @@
 const express = require('express');
+const { log } = require('../services/logger');
 const passport = require('passport');
 const jwt = require('jsonwebtoken');
 const router = express.Router();
 
+const frontendUrl = () => process.env.FRONTEND_URL || 'http://localhost:5173';
+
 // Route to start Google authentication
 router.get('/google', (req, res, next) => {
-  console.log('Google OAuth triggered');
     passport.authenticate('google', { scope: ['profile', 'email'], session: false })(req, res, next);
 });
 
 // Google auth callback
-router.get('/google/callback', passport.authenticate('google', { failureRedirect: '/login', session: false }), (req, res) => {
-    console.log("✅ Google callback HIT!", req.user);
+// failureRedirect must be absolute: a relative '/login' resolved against the
+// API host and showed "Cannot GET /login" when a user cancelled (M-26).
+router.get('/google/callback', (req, res, next) => passport.authenticate('google', {
+    failureRedirect: `${frontendUrl()}/login?error=signin`, session: false
+})(req, res, next), (req, res) => {
+    // Log the id only: the user document carries API-key fields.
+    log.info('oauth sign-in', { requestId: req.id, user: String(req.user.id), firstLogin: Boolean(req.user.isFirstLogin) });
 
     // Successful authentication, create a JWT with more user info
     const payload = { 
@@ -39,7 +46,6 @@ router.get('/google/callback', passport.authenticate('google', { failureRedirect
         ? (process.env.FRONTEND_URL || 'http://localhost:5173') + '/onboarding'
         : (process.env.FRONTEND_URL || 'http://localhost:5173') + '/dashboard';
     
-    console.log("🔄 Redirecting to:", redirectUrl);
     res.redirect(redirectUrl);
 });
 

@@ -1,0 +1,39 @@
+name: Deploy
+
+# Continuous deployment of the API (roadmap item 17), gated on a green CI run
+# for main. OFF until the repository secret RENDER_DEPLOY_HOOK_URL exists
+# (Render dashboard -> service -> Settings -> Deploy Hook). To make this the
+# only way main reaches production, also turn off Render's own auto-deploy.
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+
+jobs:
+  backend:
+    if: github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    env:
+      HOOK: ${{ secrets.RENDER_DEPLOY_HOOK_URL }}
+      API: https://codetrackr-backend-uckp.onrender.com
+    steps:
+      - name: Trigger the Render deploy
+        run: |
+          if [ -z "$HOOK" ]; then
+            echo "RENDER_DEPLOY_HOOK_URL is not set; continuous deployment is off."
+            exit 0
+          fi
+          curl -fsS -X POST "$HOOK"
+
+      - name: Wait for /health to report the database connected
+        if: env.HOOK != ''
+        run: |
+          # Render builds, starts, and the free tier cold-starts (~22 s): allow 10 minutes.
+          for i in $(seq 1 40); do
+            if curl -fsS "$API/health" | grep -q '"db":true'; then echo "healthy"; exit 0; fi
+            sleep 15
+          done
+          echo "the API did not become healthy in time" >&2
+          exit 1

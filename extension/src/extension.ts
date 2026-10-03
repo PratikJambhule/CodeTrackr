@@ -12,6 +12,8 @@ import { TerminalTracker, createTerminalTracker } from "./terminalTracker";
 import { EditorTracker, createEditorTracker } from "./editorTracker";
 import { FocusTracker, createFocusTracker } from "./focusTracker";
 import { GitStateTracker, createGitStateTracker } from "./gitStateTracker";
+import { Outbox, SendResult } from "./outbox";
+import { randomUUID } from "crypto";
 
 // Production endpoints. These are the fallbacks used when the user has not
 // overridden `codetrackr.apiBase`; the manifest default must match.
@@ -47,11 +49,19 @@ const state: AppState = {
 let telemetryInitialized = false;
 
 /**
- * Counters consumed from the trackers but not yet successfully uploaded.
- * `buildPayload` resets the trackers, so every bail-out after that point must
- * park the payload here or the interval is lost for good.
+ * Signal-less interval (reading, no edits/commands/commits) waiting to be
+ * merged into the NEXT interval. The two are contiguous, so merging is exact:
+ * earliest start, summed duration. `buildPayload` resets the trackers, so
+ * this is where those counters live until then.
  */
-let pendingPayload: any = null;
+let carry: any = null;
+
+/**
+ * Uploads that have signal but have not reached the server, persisted in
+ * globalState and sent oldest first, each with its own flushId (item 8).
+ * Replaced with the persisted one in activate().
+ */
+let outbox = new Outbox();
 
 // Only nag about a missing/rejected API key once per session.
 let authWarningShown = false;
@@ -63,6 +73,50 @@ let editorTracker: EditorTracker;
 let focusTracker: FocusTracker;
 let gitStateTracker: GitStateTracker;
 
+// --------- API key (SecretStorage) ----------
+// The key is a credential, so it lives in VS Code SecretStorage (the OS
+// keychain), not in settings.json where it was plaintext and could be synced
+// or committed with a dotfiles repo. Reads are async, so it is cached here.
+const SECRET_KEY = "codetrackr.apiKey";
+let secretStorage: vscode.SecretStorage | undefined;
+let cachedApiKey = "";
+
+/** Load the key; move a key left in settings.json by an older version. */
+async function loadApiKey(context: vscode.ExtensionContext): Promise<void> {
+  secretStorage = context.secrets;
+  if (!secretStorage) return; // very old host: fall back to settings.json
+  const cfg = vscode.workspace.getConfiguration("codetrackr");
+  const fromSettings = (cfg.get<string>("apiKey") || "").trim();
+  let stored = ((await secretStorage.get(SECRET_KEY)) || "").trim();
+  if (!stored && fromSettings) {
+    await secretStorage.store(SECRET_KEY, fromSettings);
+    stored = fromSettings;
+  }
+  if (stored && fromSettings) {
+    await cfg.update("apiKey", undefined, vscode.ConfigurationTarget.Global);
+  }
+  cachedApiKey = stored;
+  context.subscriptions.push(
+    secretStorage.onDidChange(async (e) => {
+      if (e.key === SECRET_KEY) cachedApiKey = ((await secretStorage!.get(SECRET_KEY)) || "").trim();
+    })
+  );
+}
+
+async function saveApiKey(apiKey: string): Promise<void> {
+  if (secretStorage) {
+    await secretStorage.store(SECRET_KEY, apiKey);
+    cachedApiKey = apiKey;
+    await vscode.workspace
+      .getConfiguration("codetrackr")
+      .update("apiKey", undefined, vscode.ConfigurationTarget.Global);
+  } else {
+    await vscode.workspace
+      .getConfiguration("codetrackr")
+      .update("apiKey", apiKey, vscode.ConfigurationTarget.Global);
+  }
+}
+
 // --------- Config Helpers ----------
 function getCfg() {
   const cfg = vscode.workspace.getConfiguration("codetrackr");
@@ -71,7 +125,7 @@ function getCfg() {
 
   return {
     apiBase: (cfg.get<string>("apiBase") || DEFAULT_API_BASE).replace(/\/+$/, ""),
-    apiKey: (cfg.get<string>("apiKey") || "").trim(),
+    apiKey: cachedApiKey || (cfg.get<string>("apiKey") || "").trim(),
     // Honour the user's configured values (these were previously hardcoded,
     // so the contributed settings did nothing).
     flushIntervalSeconds: Number.isFinite(flushIntervalSeconds)
@@ -165,7 +219,7 @@ export function mergeAnalytics(base: any, incoming: any): any {
   const MAX_KEYS = new Set(["longestBlockMs", "uniqueFiles"]);
   const NEWER_KEYS = new Set([
     "uncommittedFiles", "uncommittedAgeMs", "lastCommand", "lastCommandTimestamp",
-    "fileName", "fileType", "projectName", "language", "timestamp",
+    "fileName", "fileType", "projectName", "language",
   ]);
   const RATE_KEYS = new Set(["successRate", "buildSuccessRate"]);
 
@@ -176,6 +230,14 @@ export function mergeAnalytics(base: any, incoming: any): any {
       const bv = b[key];
 
       if (RATE_KEYS.has(key)) { out[key] = bv; continue; } // recomputed below
+      if (key === "timestamp") {
+        // Merged intervals are contiguous: the result starts at the EARLIER one.
+        // (Taking the newer one filed held time late — part of M-30.)
+        const at = Date.parse(av);
+        const bt = Date.parse(bv);
+        out[key] = Number.isFinite(at) && (!Number.isFinite(bt) || at <= bt) ? av : bv;
+        continue;
+      }
       if (NEWER_KEYS.has(key)) {
         out[key] = bv !== undefined && bv !== null && bv !== 0 && bv !== "" && bv !== "unknown"
           ? bv : av;
@@ -213,9 +275,10 @@ export function mergeAnalytics(base: any, incoming: any): any {
     t.buildSuccessRate = num(t.buildRuns) > 0
       ? Math.round((num(t.successfulBuilds) / num(t.buildRuns)) * 100) : 0;
   }
-  // The merged interval starts at the earlier of the two.
+  // The merged interval starts at the earlier of the two (handled in merge()).
+  // It used to be re-stamped as now − total duration, which moved held time
+  // later than it happened (M-30).
   merged.duration = num(base.duration) + num(incoming.duration);
-  merged.timestamp = new Date(Date.now() - merged.duration * 1000).toISOString();
   return merged;
 }
 
@@ -279,9 +342,11 @@ function warnAboutAuth(message: string): void {
   authWarningShown = true;
 
   vscode.window
-    .showWarningMessage(`CodeTrackr: ${message}`, "Set API Key", "Open Dashboard")
+    .showWarningMessage(`CodeTrackr: ${message}`, "Sign In", "Set API Key", "Open Dashboard")
     .then((choice) => {
-      if (choice === "Set API Key") {
+      if (choice === "Sign In") {
+        vscode.commands.executeCommand("codetrackr.signIn");
+      } else if (choice === "Set API Key") {
         vscode.commands.executeCommand("codetrackr.setupApiKey");
       } else if (choice === "Open Dashboard") {
         vscode.env.openExternal(vscode.Uri.parse(`${DASHBOARD_URL}/profile`));
@@ -353,44 +418,62 @@ export function buildPayloadForTest(durationSeconds: number) {
 }
 
 /**
- * Drain the trackers *and* any previously-held payload into one flush payload.
- * Every real flush path goes through this so no caller can forget the merge.
+ * Drain the trackers, plus any carried signal-less interval, into one payload.
+ * Every real flush path goes through this so no caller can forget the carry.
  */
 function takePayload(durationSeconds: number, fileOpened?: string) {
   const fresh = buildPayload(durationSeconds, fileOpened);
-  const merged = pendingPayload ? mergeAnalytics(pendingPayload, fresh) : fresh;
-  pendingPayload = null;
+  const merged = carry ? mergeAnalytics(carry, fresh) : fresh;
+  carry = null;
   return merged;
 }
 
-/** Park an un-uploaded payload so the next flush carries it forward. */
-function holdPayload(payload: any): void {
-  pendingPayload = pendingPayload ? mergeAnalytics(pendingPayload, payload) : payload;
+/** Keep a signal-less interval for the next flush (contiguous, so merged exactly). */
+function carryForward(payload: any): void {
+  carry = carry ? mergeAnalytics(carry, payload) : payload;
+  // A long stretch of pure reading would grow past what one upload may claim;
+  // queue it on its own before it gets there instead of losing it.
+  if (carry.duration >= MAX_FLUSH_SECONDS - 600) {
+    const long = carry;
+    carry = null;
+    void queueUpload(long);
+  }
 }
 
-/** Test seam: inspect/reset the carry-forward buffer. */
-export function getPendingPayloadForTest() {
-  return pendingPayload;
+/** Give a finished interval its idempotency key, persist it, try to send. */
+async function queueUpload(payload: any): Promise<void> {
+  if (!payload.flushId) payload.flushId = randomUUID();
+  await outbox.enqueue(payload);
+  await drainOutbox();
 }
-export function resetPendingPayloadForTest() {
-  pendingPayload = null;
+
+function drainOutbox(): Promise<void> {
+  return outbox.drain(sendActivity);
+}
+
+/** Test seam: the carry buffer and the queue. */
+export function getCarryForTest() {
+  return carry;
+}
+export function getOutboxForTest() {
+  return outbox;
 }
 
 // --------- Activity Tracking ----------
 /**
- * @returns true only when the backend accepted the payload. A false return
- * means the caller must `holdPayload` it — the trackers have already been
- * reset, so dropping it here loses the interval permanently.
+ * Upload one queued payload.
+ * @returns "ok" when the server has it (accepted, or a duplicate of an earlier
+ * send), "drop" when the server will never accept it, "retry" when it is worth
+ * trying again later (offline, 5xx, rate-limited, no key yet).
  */
-async function sendActivity(payload: ReturnType<typeof buildPayload>): Promise<boolean> {
+async function sendActivity(payload: any): Promise<SendResult> {
   const { apiBase, apiKey } = getCfg();
 
   const durationSeconds = payload.duration;
 
-  // Below one second the backend treats the duration as missing and 400s, so
-  // hold the buffered counters and let the next flush carry them.
+  // Below one second the backend treats the duration as missing and 400s.
   if (!Number.isFinite(durationSeconds) || durationSeconds < MIN_FLUSH_SECONDS) {
-    return false;
+    return "drop";
   }
   if (durationSeconds > MAX_FLUSH_SECONDS) {
     // A clock jump would poison the bucket, and the backend rejects it anyway.
@@ -398,12 +481,12 @@ async function sendActivity(payload: ReturnType<typeof buildPayload>): Promise<b
     console.warn(
       `CodeTrackr: implausible duration ${durationSeconds}s (clock jump?), dropping flush`
     );
-    return true;
+    return "drop";
   }
 
   if (!apiKey) {
-    warnAboutAuth("no API key is configured, so your activity is not being saved.");
-    return false;
+    warnAboutAuth("no API key is configured yet. Your activity is queued and will upload once you set one.");
+    return "retry";
   }
 
   try {
@@ -417,7 +500,7 @@ async function sendActivity(payload: ReturnType<typeof buildPayload>): Promise<b
 
     authWarningShown = false;
     vscode.window.setStatusBarMessage("CodeTrackr: Activity tracked ✅", 2000);
-    return true;
+    return "ok";
   } catch (err: any) {
     const statusCode = err?.response?.status;
     const errorMsg = err?.response?.data?.message || err?.message || String(err);
@@ -431,9 +514,9 @@ async function sendActivity(payload: ReturnType<typeof buildPayload>): Promise<b
         3000
       );
     }
-    // A 400 means the backend will never accept this payload — carrying it
-    // forward would poison every subsequent flush. Anything else is transient.
-    return statusCode === 400;
+    // A 400 means the backend will never accept this payload — keeping it would
+    // block the queue behind it forever. Anything else is transient.
+    return statusCode === 400 ? "drop" : "retry";
   }
 }
 
@@ -457,22 +540,20 @@ async function flushIfNeeded(force: boolean = false): Promise<void> {
 
   const payload = takePayload(Math.round(totalBuffered * 60), fileOpened);
 
+  state.startedMs = Date.now();
+  state.bufferedMinutes = 0;
+
   // Nothing happened this interval (window focused but no edits/commands/
-  // commits). The trackers are already drained, so the payload must be held —
-  // returning here used to destroy readMs / fileSwitches / focusedMs outright.
+  // commits). The trackers are already drained, so the counters are carried
+  // into the next interval rather than destroyed.
   if (!force && !payloadHasSignal(payload)) {
-    holdPayload(payload);
-    state.startedMs = Date.now();
-    state.bufferedMinutes = 0;
+    carryForward(payload);
     return;
   }
 
-  const accepted = await sendActivity(payload);
-  state.startedMs = Date.now();
-  state.bufferedMinutes = 0;
-  // sendActivity swallows its own errors, so the old try/catch here was dead
-  // code and every failed upload silently lost the interval.
-  if (!accepted) holdPayload(payload);
+  // Persisted before the network call: a failed upload, a restart or a crash
+  // can no longer lose the interval.
+  await queueUpload(payload);
 }
 
 // --------- Core Functions ----------
@@ -515,15 +596,11 @@ function start(context: vscode.ExtensionContext): void {
           state.lastKnownFile
         );
         if (payloadHasSignal(idlePayload)) {
-          sendActivity(idlePayload)
-            .then((accepted) => {
-              if (!accepted) holdPayload(idlePayload);
-            })
-            .catch(() => holdPayload(idlePayload));
+          queueUpload(idlePayload).catch(() => {});
         } else {
           // Below the flush threshold or signal-less: carry it forward rather
           // than dropping it with `bufferedMinutes = 0` below.
-          holdPayload(idlePayload);
+          carryForward(idlePayload);
         }
       }
 
@@ -568,7 +645,7 @@ async function setupApiKey(): Promise<void> {
   const entered = await vscode.window.showInputBox({
     title: "CodeTrackr API Key",
     prompt: `Paste the API key from your profile page (${DASHBOARD_URL}/profile)`,
-    placeHolder: "64-character key from your CodeTrackr profile",
+    placeHolder: "ct_… key from your CodeTrackr profile",
     password: true,
     ignoreFocusOut: true,
     validateInput: (value) =>
@@ -580,9 +657,8 @@ async function setupApiKey(): Promise<void> {
   if (!entered) return;
   const apiKey = entered.trim();
 
-  await vscode.workspace
-    .getConfiguration("codetrackr")
-    .update("apiKey", apiKey, vscode.ConfigurationTarget.Global);
+  await saveApiKey(apiKey);
+  drainOutbox().catch(() => {});
 
   try {
     const res = await axios.get(`${apiBase}/api/extension/verify`, {
@@ -605,6 +681,62 @@ async function setupApiKey(): Promise<void> {
       );
     }
   }
+}
+
+/**
+ * Sign in without copying a key (roadmap item 13): the device-code flow.
+ * Ask the API for a short code, copy it, open the dashboard's approval page,
+ * and poll until the signed-in user approves it. The key that comes back is a
+ * per-device key, stored in SecretStorage like any other.
+ */
+async function signIn(): Promise<void> {
+  const { apiBase } = getCfg();
+  let start: any;
+  try {
+    start = (await axios.post(`${apiBase}/api/device/code`,
+      { clientName: `VS Code (${process.platform})` }, { timeout: 15000 })).data;
+  } catch (err: any) {
+    vscode.window.showErrorMessage(`CodeTrackr: could not reach ${apiBase} to start sign-in (${err?.message}).`);
+    return;
+  }
+
+  await vscode.env.clipboard.writeText(start.userCode);
+  await vscode.env.openExternal(vscode.Uri.parse(start.verificationUriComplete || start.verificationUri));
+
+  const deadline = Date.now() + Number(start.expiresIn || 600) * 1000;
+  const intervalMs = Math.max(0, Number(start.interval ?? 5)) * 1000;
+
+  const apiKey: string | undefined = await vscode.window.withProgress(
+    {
+      location: vscode.ProgressLocation.Notification,
+      title: `CodeTrackr: approve code ${start.userCode} in your browser (copied to clipboard)`,
+      cancellable: true,
+    },
+    async (_progress, token) => {
+      while (!token.isCancellationRequested && Date.now() < deadline) {
+        try {
+          const res = await axios.post(`${apiBase}/api/device/token`,
+            { deviceCode: start.deviceCode }, { timeout: 15000 });
+          return res.data?.apiKey as string;
+        } catch (err: any) {
+          const status = err?.response?.status;
+          if (status === 410) return undefined; // expired or already used
+          // 428 authorization_pending, or a network blip: wait and ask again.
+        }
+        await new Promise((r) => setTimeout(r, intervalMs));
+      }
+      return undefined;
+    }
+  );
+
+  if (!apiKey) {
+    vscode.window.showWarningMessage("CodeTrackr: sign-in was not completed. Run \"CodeTrackr: Sign In\" to try again.");
+    return;
+  }
+  await saveApiKey(apiKey);
+  authWarningShown = false;
+  drainOutbox().catch(() => {});
+  vscode.window.showInformationMessage("CodeTrackr: signed in. This VS Code now uploads with its own key (see Profile > Connected devices).");
 }
 
 async function showInfo(): Promise<void> {
@@ -661,7 +793,7 @@ function showStats(): void {
   vscode.window.showInformationMessage(
     `CodeTrackr — Backend: ${apiBase} · ` +
       `${state.isPaused ? "Paused (idle)" : state.timer ? "Tracking" : "Stopped"} · ` +
-      `Pending: ${pending} min · ` +
+      `Pending: ${pending} min · Queued uploads: ${outbox.size} · ` +
       `Lines +${editorSnapshot?.linesInserted ?? 0}/-${editorSnapshot?.linesDeleted ?? 0} ` +
       `(churn ${editorSnapshot?.churnLines ?? 0}) · ` +
       `Focus: ${Math.round((focusSnapshot?.focusedMs ?? 0) / 60000)} min, ` +
@@ -701,6 +833,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       vscode.commands.registerCommand("codetrackr.showStats", () => showStats()),
       vscode.commands.registerCommand("codetrackr.showLogs", () => showStats()),
       vscode.commands.registerCommand("codetrackr.setupApiKey", () => setupApiKey()),
+      vscode.commands.registerCommand("codetrackr.signIn", () => signIn()),
       vscode.commands.registerCommand("codetrackr.showInfo", () => showInfo())
     );
 
@@ -716,11 +849,29 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         }
         if (event.affectsConfiguration("codetrackr.apiKey")) {
           authWarningShown = false;
+          // Someone pasted a key into settings.json by hand: move it to SecretStorage.
+          const typed = (vscode.workspace.getConfiguration("codetrackr").get<string>("apiKey") || "").trim();
+          if (typed && secretStorage) void saveApiKey(typed);
         }
       })
     );
 
+    // The persisted queue: anything left from the last session is sent first.
+    outbox = new Outbox(context.globalState);
+    if (outbox.size > 0) {
+      console.log(`CodeTrackr: ${outbox.size} queued upload(s) from the last session`);
+    }
+
+    try {
+      await loadApiKey(context);
+    } catch (err) {
+      // Keychain unavailable (e.g. a Linux box without a secret service):
+      // keep working from settings.json rather than failing activation.
+      console.error("CodeTrackr: SecretStorage unavailable, using settings.json", err);
+    }
+
     start(context);
+    drainOutbox().catch(() => {});
 
     if (!getCfg().apiKey) {
       warnAboutAuth("no API key is configured yet. Set one to start saving your activity.");
@@ -754,4 +905,4 @@ export async function deactivate(): Promise<void> {
 }
 
 // Re-exported so tests can exercise the trackers through the built bundle.
-export { EditorTracker, FocusTracker, GitStateTracker };
+export { EditorTracker, FocusTracker, GitStateTracker, Outbox };

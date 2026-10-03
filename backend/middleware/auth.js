@@ -1,6 +1,9 @@
 const jwt = require('jsonwebtoken');
+const { log } = require('../services/logger');
 const { isBypassAllowed } = require('../services/authorization');
 const User = require('../models/user');
+const { parseKey, hashSecret, verifySecret } = require('../services/apiKeys');
+const DeviceToken = require('../models/DeviceToken');
 const Activity = require('../models/Activity');
 
 let bypassWarningLogged = false;
@@ -13,10 +16,10 @@ function bypassEnabled() {
     const allowed = isBypassAllowed(process.env);
     if (allowed && !bypassWarningLogged) {
         bypassWarningLogged = true;
-        console.warn('⚠️  AUTH_BYPASS is ON — all authentication is disabled. Never use this in production.');
+        log.warn('AUTH_BYPASS is ON: all authentication is disabled. Never use this in production.');
     }
     if (!allowed && process.env.AUTH_BYPASS === 'true') {
-        console.error('❌ AUTH_BYPASS was requested but refused because NODE_ENV=production.');
+        log.error('AUTH_BYPASS was requested but refused because NODE_ENV=production');
     }
     return allowed;
 }
@@ -38,7 +41,7 @@ const resolveTestingUser = async (req) => {
 
     // Prefer the user with the most tracked activity so dashboards show existing data.
     const topActivityUser = await Activity.aggregate([
-        { $group: { _id: '$userId', count: { $sum: 1 } } },
+        { $group: { _id: { $toString: '$userId' }, count: { $sum: 1 } } },
         { $sort: { count: -1 } },
         { $limit: 1 }
     ]);
@@ -72,7 +75,7 @@ const resolveTestingUser = async (req) => {
         lastLogin: new Date()
     });
 
-    user.generateApiKey();
+    user.issueApiKey();
     await user.save();
     return user;
 };
@@ -112,13 +115,47 @@ const isAuthenticated = async (req, res, next) => {
         req.user = jwtUser;
         return next();
     } catch (error) {
-        console.error('Auth check error:', error);
+        log.error('auth check failed', { requestId: req.id, err: error });
         return res.status(500).json({
             success: false,
             message: 'Failed to authenticate user'
         });
     }
 };
+
+/**
+ * Resolve an extension key to its user, or null.
+ *  - ct_<id>_<secret>: look up by id, compare SHA-256(secret) in constant time.
+ *  - legacy 64-hex key: look up by its SHA-256. A row still holding the key in
+ *    plaintext (not yet migrated) is accepted once and converted on the spot,
+ *    the same opportunistic upgrade used for group passwords (H-9).
+ */
+async function findUserByApiKey(token) {
+    const parsed = parseKey(token);
+    if (parsed) {
+        const user = await User.findOne({ apiKeyId: parsed.id }).select('+apiKeyHash');
+        if (user) return verifySecret(parsed.secret, user.apiKeyHash) ? user : null;
+
+        // A per-device key from the device sign-in (roadmap item 13).
+        const device = await DeviceToken.findOne({ keyId: parsed.id }).select('+hash');
+        if (!device || device.expiresAt <= new Date() || !verifySecret(parsed.secret, device.hash)) return null;
+        if (!device.lastUsedAt || Date.now() - device.lastUsedAt.getTime() > 60 * 60 * 1000) {
+            await DeviceToken.updateOne({ _id: device._id }, { $set: { lastUsedAt: new Date() } }); // at most hourly
+        }
+        return User.findById(device.userId);
+    }
+
+    const legacyHash = hashSecret(token);
+    const hashed = await User.findOne({ legacyApiKeyHash: legacyHash });
+    if (hashed) return hashed;
+
+    const plain = await User.findOne({ apiKey: token }).select('+apiKey');
+    if (!plain) return null;
+    plain.legacyApiKeyHash = legacyHash;
+    plain.apiKey = undefined;
+    await plain.save();
+    return plain;
+}
 
 // API key validation is intentionally bypassed in testing mode.
 const verifyApiKey = async (req, res, next) => {
@@ -138,7 +175,7 @@ const verifyApiKey = async (req, res, next) => {
             });
         }
 
-        const user = await User.findOne({ apiKey });
+        const user = await findUserByApiKey(apiKey);
         if (!user) {
             return res.status(401).json({
                 success: false,
@@ -149,7 +186,7 @@ const verifyApiKey = async (req, res, next) => {
         req.user = user;
         return next();
     } catch (error) {
-        console.error('API key check error:', error);
+        log.error('api key check failed', { requestId: req.id, err: error });
         return res.status(500).json({
             success: false,
             message: 'Failed to authenticate API key'
@@ -157,5 +194,5 @@ const verifyApiKey = async (req, res, next) => {
     }
 };
 
-module.exports = { isAuthenticated, verifyApiKey };
+module.exports = { isAuthenticated, verifyApiKey, findUserByApiKey };
 

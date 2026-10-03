@@ -1,4 +1,6 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import { apiGet } from '../api';
 import { BarChart3, Clock, Code, TrendingUp, ArrowLeft, Terminal, CheckCircle, XCircle, Hammer, GitBranch, Timer } from 'lucide-react';
 import { Chart as ChartJS, CategoryScale, LinearScale, BarElement, LineElement, PointElement, Title, Tooltip, Legend, ArcElement } from 'chart.js';
 import ChartDataLabels from 'chartjs-plugin-datalabels';
@@ -6,113 +8,44 @@ import { Line, Pie, Bar } from 'react-chartjs-2';
 import { useTheme } from '../contexts/ThemeContext';
 import GradientText from '../components/GradientText';
 import TextType from '../components/TextType';
-import { API_URL } from '../config';
 
 ChartJS.register(CategoryScale, LinearScale, BarElement, LineElement, PointElement, Title, Tooltip, Legend, ArcElement, ChartDataLabels);
 
 export default function Dashboard({ user }: { user: any }) {
   const { theme } = useTheme();
-  const [analytics, setAnalytics] = useState<any>(null);
-  const [weeklyAnalytics, setWeeklyAnalytics] = useState<any>(null);
-  const [loading, setLoading] = useState(true);
   const [viewMode, setViewMode] = useState<'daily' | 'weekly'>('daily');
   const [selectedTimeSlot, setSelectedTimeSlot] = useState<{ start: number, end: number } | null>(null);
-  const [timeSlotData, setTimeSlotData] = useState<any>(null);
 
+  // React Query (roadmap item 11). One request per view, cached for 30 s, so
+  // toggling Daily/Weekly re-uses data instead of refetching. The old pair of
+  // effects fired three requests on every mount, one a duplicate (M-11).
+  // Timezone offset in minutes, negative east of UTC (IST = -330).
+  const tz = new Date().getTimezoneOffset();
+  const daily = useQuery({
+    queryKey: ['analytics', 'daily', user.id, tz],
+    queryFn: () => apiGet(`/api/analytics/${user.id}?timezone=${tz}`),
+  });
+  const weekly = useQuery({
+    queryKey: ['analytics', 'weekly', user.id, tz],
+    queryFn: () => apiGet(`/api/analytics/weekly/${user.id}?timezone=${tz}`),
+  });
+  const timeSlot = useQuery({
+    queryKey: ['analytics', 'timeslot', user.id, tz, selectedTimeSlot?.start, selectedTimeSlot?.end],
+    queryFn: () => apiGet(`/api/analytics/timeslot/${user.id}?start=${selectedTimeSlot!.start}&end=${selectedTimeSlot!.end}&timezone=${tz}`),
+    enabled: selectedTimeSlot !== null,
+  });
 
-  useEffect(() => {
-    fetchAnalytics();
-    fetchWeeklyAnalytics();
-  }, []);
-
-  useEffect(() => {
-    // Refetch data when view mode changes
-    if (viewMode === 'daily') {
-      fetchAnalytics();
-    } else {
-      fetchWeeklyAnalytics();
-    }
-  }, [viewMode]);
-
-  const fetchAnalytics = useCallback(async () => {
-    try {
-      console.log('Fetching analytics for user:', user);
-      console.log('User ID:', user.id);
-      // Get user's timezone offset in minutes (negative for IST)
-      const timezoneOffset = new Date().getTimezoneOffset();
-      const res = await fetch(`${API_URL}/api/analytics/${user.id}?timezone=${timezoneOffset}`, {
-        credentials: 'include',
-        cache: 'no-cache',
-        headers: {
-          'Cache-Control': 'no-cache',
-          'Pragma': 'no-cache'
-        }
-      });
-      console.log('Response status:', res.status);
-      if (res.ok) {
-        const data = await res.json();
-        console.log('Analytics data received:', data);
-        setAnalytics(data);
-      } else {
-        console.error('Failed to fetch analytics, status:', res.status);
-        const errorText = await res.text();
-        console.error('Error response:', errorText);
-      }
-    } catch (error) {
-      console.error('Failed to fetch analytics:', error);
-    } finally {
-      setLoading(false);
-    }
-  }, [user]);
-
-  const fetchWeeklyAnalytics = useCallback(async () => {
-    try {
-      const timezoneOffset = new Date().getTimezoneOffset();
-      const res = await fetch(`${API_URL}/api/analytics/weekly/${user.id}?timezone=${timezoneOffset}`, {
-        credentials: 'include',
-        cache: 'no-cache',
-        headers: {
-          'Cache-Control': 'no-cache',
-          'Pragma': 'no-cache'
-        }
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setWeeklyAnalytics(data);
-      }
-    } catch (error) {
-      console.error('Failed to fetch weekly analytics:', error);
-    }
-  }, [user]);
-
-  const fetchTimeSlotData = async (startHour: number, endHour: number) => {
-    try {
-      const timezoneOffset = new Date().getTimezoneOffset();
-      const res = await fetch(`${API_URL}/api/analytics/timeslot/${user.id}?start=${startHour}&end=${endHour}&timezone=${timezoneOffset}`, {
-        credentials: 'include',
-        cache: 'no-cache',
-        headers: {
-          'Cache-Control': 'no-cache',
-          'Pragma': 'no-cache'
-        }
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setTimeSlotData(data);
-      }
-    } catch (error) {
-      console.error('Failed to fetch time slot data:', error);
-    }
-  };
+  const analytics: any = daily.data ?? null;
+  const weeklyAnalytics: any = weekly.data ?? null;
+  const loading = daily.isPending;
+  const timeSlotData: any = selectedTimeSlot ? timeSlot.data ?? null : null;
 
   const handleTimeSlotClick = (startHour: number, endHour: number) => {
     setSelectedTimeSlot({ start: startHour, end: endHour });
-    fetchTimeSlotData(startHour, endHour);
   };
 
   const handleBackToOverview = () => {
     setSelectedTimeSlot(null);
-    setTimeSlotData(null);
   };
 
   if (loading) {

@@ -16,6 +16,7 @@ const okCases = [
   ['timestamp now', { ...base, timestamp: new Date().toISOString() }],
   ['timestamp 23h ago', { ...base, timestamp: new Date(Date.now() - 23 * 3600e3).toISOString() }],
   ['projectName present', { ...base, projectName: 'CodeTrackr' }],
+  ['flushId as a UUID', { ...base, flushId: '3f2b8c1e-9a4d-4c7b-8e2f-1a2b3c4d5e6f' }],
 ];
 const badCases = [
   ['duration 0', { ...base, duration: 0 }],
@@ -32,6 +33,10 @@ const badCases = [
   ['timestamp 2 days ago', { ...base, timestamp: new Date(Date.now() - 48 * 3600e3).toISOString() }],
   ['timestamp garbage', { ...base, timestamp: 'not-a-date' }],
   ['null body', null],
+  ['flushId too short', { ...base, flushId: 'abc' }],
+  ['flushId 100 chars', { ...base, flushId: 'a'.repeat(100) }],
+  ['flushId with spaces', { ...base, flushId: 'not a valid id!!' }],
+  ['flushId not a string', { ...base, flushId: { $gt: '' } }],
 ];
 
 console.log('\ningestValidation: accepts valid payloads');

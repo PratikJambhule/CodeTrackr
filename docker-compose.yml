@@ -1,0 +1,62 @@
+# Run the whole app locally with one command:   docker compose up --build
+#
+#   mongo     a real MongoDB 7; data is kept in the `mongo-data` volume between runs
+#   backend   the API on http://localhost:5050, built from backend/Dockerfile
+#   frontend  the website on http://localhost:5173 (Vite dev server, live reload)
+#
+# LOCAL ONLY. Google sign-in is replaced by AUTH_BYPASS (you are the demo user
+# "Soham (local)"), and nothing here reads backend/.env or touches Atlas.
+# Stop with Ctrl+C; `docker compose down -v` also deletes the local data.
+
+services:
+  mongo:
+    image: mongo:7
+    ports:
+      # Published on 27018 so it never clashes with a MongoDB installed on the laptop
+      # (which usually owns 27017). From your laptop: mongodb://localhost:27018/codetrackr
+      - "27018:27017"
+    volumes:
+      - mongo-data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  backend:
+    build: ./backend
+    depends_on:
+      mongo:
+        condition: service_healthy
+    ports:
+      - "5050:5050"
+    environment:
+      MONGO_URI: mongodb://mongo:27017/codetrackr
+      MONGO_TLS: "false"
+      PORT: "5050"
+      FRONTEND_URL: http://localhost:5173
+      NODE_ENV: development       # overrides the image's production default so AUTH_BYPASS is allowed
+      AUTH_BYPASS: "true"         # local only: no Google sign-in (refused when NODE_ENV=production)
+      JWT_SECRET: local-docker-only-not-a-secret
+      GOOGLE_CLIENT_ID: local
+      GOOGLE_CLIENT_SECRET: local
+      GOOGLE_CALLBACK_URL: http://localhost:5050/auth/google/callback
+    # Seed demo data on the first start (skipped once users exist), then start the API.
+    command: ["sh", "-c", "node scripts/seed-local.js && node app.js"]
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.dev
+    depends_on:
+      - backend
+    ports:
+      - "5173:5173"
+    environment:
+      VITE_API_URL: http://localhost:5050   # the browser calls the API on your laptop's port
+      CHOKIDAR_USEPOLLING: "true"           # file-change detection through a Windows bind mount
+    volumes:
+      - ./frontend/src:/app/src             # edit files on your laptop, the page reloads
+
+volumes:
+  mongo-data:

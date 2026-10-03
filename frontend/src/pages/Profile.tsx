@@ -4,6 +4,7 @@ import { useTheme } from '../contexts/ThemeContext';
 import GradientText from '../components/GradientText';
 import TextType from '../components/TextType';
 import { API_URL } from '../config';
+import DeviceList from '../components/DeviceList';
 
 const Profile = () => {
     const { theme } = useTheme();
@@ -11,9 +12,14 @@ const Profile = () => {
         name: string;
         email: string;
         profilePictureUrl: string;
-        apiKey: string;
+        // The key itself is only ever shown right after it is created: the
+        // server stores a hash, so the profile returns a hint (ct_<id>_…last4).
+        hasApiKey: boolean;
+        apiKeyHint: string | null;
+        legacyApiKey: boolean;
         createdAt: string;
     } | null>(null);
+    const [newKey, setNewKey] = useState<string | null>(null);
     const [loading, setLoading] = useState(true);
     const [copied, setCopied] = useState(false);
     const [regenerating, setRegenerating] = useState(false);
@@ -41,8 +47,8 @@ const Profile = () => {
     };
 
     const copyApiKey = () => {
-        if (user?.apiKey) {
-            navigator.clipboard.writeText(user.apiKey);
+        if (newKey) {
+            navigator.clipboard.writeText(newKey);
             setCopied(true);
             setTimeout(() => setCopied(false), 2000);
         }
@@ -58,7 +64,8 @@ const Profile = () => {
             const data = await response.json();
             
             if (data.success && user) {
-                setUser({ ...user, apiKey: data.apiKey });
+                setNewKey(data.apiKey);
+                setUser({ ...user, hasApiKey: true, apiKeyHint: data.apiKeyHint, legacyApiKey: false });
                 setShowConfirm(false);
             }
         } catch (error) {
@@ -171,8 +178,15 @@ const Profile = () => {
                                     backgroundColor: `${theme.colors.surface}60`,
                                 }}
                             >
-                                {user?.apiKey || 'No API key generated'}
+                                {newKey
+                                    || user?.apiKeyHint
+                                    || (user?.legacyApiKey
+                                        ? 'Old-format key (still works). Generate a new one to upgrade.'
+                                        : 'No API key yet. Generate one below.')}
                             </div>
+                            {/* Only a freshly created key can be copied: the server keeps a hash,
+                                so afterwards there is nothing to copy, just a hint (ct_<id>_…last4). */}
+                            {newKey && (
                             <button
                                 onClick={copyApiKey}
                                 className="flex-shrink-0 px-6 py-3 text-white rounded-lg transition-all flex items-center gap-2"
@@ -192,8 +206,25 @@ const Profile = () => {
                                     </>
                                 )}
                             </button>
+                            )}
                         </div>
                     </div>
+
+                    {!newKey && user?.apiKeyHint && (
+                        <p className="mb-6 text-sm" style={{ color: theme.colors.textSecondary }}>
+                            This is a hint of your active key (its ID and last 4 characters), not the key itself.
+                            Keys are stored hashed, so the full key is only shown once, when it is created.
+                            To connect VS Code, run <strong>CodeTrackr: Sign In</strong> there, or regenerate below
+                            to get a new key to paste.
+                        </p>
+                    )}
+
+                    {newKey && (
+                        <p role="status" className="mb-6 text-sm" style={{ color: theme.colors.accent }}>
+                            Copy this key now and paste it into VS Code (CodeTrackr: Setup API Key).
+                            It is stored hashed, so it will not be shown again.
+                        </p>
+                    )}
 
                     {/* Regenerate Section */}
                     {!showConfirm ? (
@@ -281,6 +312,8 @@ const Profile = () => {
                         </div>
                     )}
                 </div>
+
+                <DeviceList />
             </div>
         </div>
     );

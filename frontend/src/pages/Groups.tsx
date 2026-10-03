@@ -13,7 +13,6 @@ interface Group {
   createdBy: {
     _id: string;
     name: string;
-    email: string;
   };
   createdAt: string;
 }
@@ -21,7 +20,6 @@ interface Group {
 interface Member {
   id: string;
   name: string;
-  email: string;
   joinedAt: string;
 }
 
@@ -29,7 +27,6 @@ interface LeaderboardEntry {
   rank: number;
   userId: string;
   userName: string;
-  email: string;
   codingHours: number;
   totalLinesAdded: number;
   commits: number;
@@ -47,9 +44,26 @@ interface GroupDetails {
   group: Group;
   members: Member[];
   leaderboard: LeaderboardEntry[];
+  window: { from: string; to: string } | null;
 }
 
-export default function Groups(_props: { user?: unknown }) {
+// Board period for contest weeks (roadmap item 7). The API takes ?from=&to=.
+type BoardPeriod = 'all' | 'week' | '7d';
+
+function periodStart(period: BoardPeriod): Date | null {
+  const now = new Date();
+  if (period === '7d') return new Date(now.getTime() - 7 * 864e5);
+  if (period === 'week') {
+    const monday = new Date(now);
+    monday.setHours(0, 0, 0, 0);
+    monday.setDate(monday.getDate() - ((monday.getDay() + 6) % 7));
+    return monday;
+  }
+  return null;
+}
+
+export default function Groups(props: { user?: unknown }) {
+  const myId = (props.user as { id?: string } | undefined)?.id;
   const { theme } = useTheme();
   const [activeTab, setActiveTab] = useState<'my-groups' | 'discover'>('my-groups');
   const [myGroups, setMyGroups] = useState<Group[]>([]);
@@ -61,6 +75,10 @@ export default function Groups(_props: { user?: unknown }) {
   const [selectedGroup, setSelectedGroup] = useState<Group | null>(null);
   const [groupDetails, setGroupDetails] = useState<GroupDetails | null>(null);
   const [showDetailsModal, setShowDetailsModal] = useState(false);
+  const [boardPeriod, setBoardPeriod] = useState<BoardPeriod>('all');
+  const [renaming, setRenaming] = useState(false);
+  const [newName, setNewName] = useState('');
+  const [adminError, setAdminError] = useState('');
 
   // Create group form
   const [groupName, setGroupName] = useState('');
@@ -194,14 +212,17 @@ export default function Groups(_props: { user?: unknown }) {
     }
   };
 
-  const handleViewDetails = async (group: Group) => {
+  const handleViewDetails = async (group: Group, period: BoardPeriod = 'all') => {
     try {
-      const res = await fetch(`${API_URL}/api/groups/${group._id}/details`, {
+      const from = periodStart(period);
+      const query = from ? `?from=${encodeURIComponent(from.toISOString())}` : '';
+      const res = await fetch(`${API_URL}/api/groups/${group._id}/details${query}`, {
         credentials: 'include'
       });
       if (res.ok) {
         const data = await res.json();
         setGroupDetails(data);
+        setBoardPeriod(period);
         setShowDetailsModal(true);
       } else {
         alert('Failed to fetch group details');
@@ -241,6 +262,41 @@ export default function Groups(_props: { user?: unknown }) {
       // Show password modal for private groups
       setShowJoinModal(true);
     }
+  };
+
+  // ---- Admin (roadmap item 12): only the group's creator sees these ----
+  const renameGroup = async () => {
+    if (!groupDetails) return;
+    setAdminError('');
+    const res = await fetch(`${API_URL}/api/groups/${groupDetails.group._id}`, {
+      method: 'PATCH',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ groupName: newName }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      setAdminError(data.message || 'Could not rename the group');
+      return;
+    }
+    setGroupDetails({ ...groupDetails, group: { ...groupDetails.group, name: data.group.name } });
+    setRenaming(false);
+    fetchMyGroups();
+  };
+
+  const removeMember = async (memberId: string, memberName: string) => {
+    if (!groupDetails || !window.confirm(`Remove ${memberName} from ${groupDetails.group.name}?`)) return;
+    setAdminError('');
+    const res = await fetch(`${API_URL}/api/groups/${groupDetails.group._id}/members/${memberId}`, {
+      method: 'DELETE',
+      credentials: 'include',
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      setAdminError(data.message || 'Could not remove that member');
+      return;
+    }
+    handleViewDetails(groupDetails.group, boardPeriod);
   };
 
   const handleLeaveGroup = async (groupId: string) => {
@@ -552,6 +608,35 @@ export default function Groups(_props: { user?: unknown }) {
               </button>
             </div>
 
+            {groupDetails.group.createdBy?._id === myId && (
+              <div className="flex flex-wrap items-center gap-2 text-sm" style={{ color: theme.colors.textSecondary }}>
+                <span className="font-semibold" style={{ color: theme.colors.text }}>You are the admin.</span>
+                {renaming ? (
+                  <>
+                    <input
+                      aria-label="New group name"
+                      value={newName}
+                      maxLength={80}
+                      onChange={(e) => setNewName(e.target.value)}
+                      className="px-2 py-1 rounded-md"
+                      style={{ backgroundColor: theme.colors.surface, color: theme.colors.text, border: `1px solid ${theme.colors.border}` }}
+                    />
+                    <button onClick={renameGroup} className="px-3 py-1 rounded-md text-white" style={{ backgroundColor: theme.colors.primary }}>Save</button>
+                    <button onClick={() => setRenaming(false)} className="px-3 py-1 rounded-md">Cancel</button>
+                  </>
+                ) : (
+                  <button
+                    onClick={() => { setNewName(groupDetails.group.name); setRenaming(true); }}
+                    className="px-3 py-1 rounded-md"
+                    style={{ border: `1px solid ${theme.colors.border}`, color: theme.colors.text }}
+                  >
+                    Rename group
+                  </button>
+                )}
+                {adminError && <span role="alert" style={{ color: theme.colors.accent }}>{adminError}</span>}
+              </div>
+            )}
+
             {/* Members Section */}
             <div>
               <h3 className="text-xl font-bold mb-4 flex items-center gap-2" style={{ color: theme.colors.text }}>
@@ -573,8 +658,18 @@ export default function Groups(_props: { user?: unknown }) {
                     </div>
                     <div className="flex-1 min-w-0">
                       <div className="font-medium truncate" style={{ color: theme.colors.text }}>{member.name}</div>
-                      <div className="text-sm truncate" style={{ color: theme.colors.textSecondary }}>{member.email}</div>
+                      <div className="text-sm truncate" style={{ color: theme.colors.textSecondary }}>Joined {new Date(member.joinedAt).toLocaleDateString()}</div>
                     </div>
+                    {groupDetails.group.createdBy?._id === myId && member.id !== myId && (
+                      <button
+                        onClick={() => removeMember(member.id, member.name)}
+                        aria-label={`Remove ${member.name}`}
+                        className="text-xs px-2 py-1 rounded-md"
+                        style={{ border: `1px solid ${theme.colors.border}`, color: theme.colors.textSecondary }}
+                      >
+                        Remove
+                      </button>
+                    )}
                   </div>
                 ))}
               </div>
@@ -585,6 +680,17 @@ export default function Groups(_props: { user?: unknown }) {
               <h3 className="text-xl font-bold mb-4 flex items-center gap-2" style={{ color: theme.colors.text }}>
                 <Trophy className="w-5 h-5" />
                 Leaderboard
+                <select
+                  aria-label="Leaderboard period"
+                  value={boardPeriod}
+                  onChange={(e) => handleViewDetails(groupDetails.group, e.target.value as BoardPeriod)}
+                  className="ml-auto text-sm font-normal rounded-md px-2 py-1"
+                  style={{ backgroundColor: theme.colors.surface, color: theme.colors.text, border: `1px solid ${theme.colors.border}` }}
+                >
+                  <option value="all">All time</option>
+                  <option value="week">This week</option>
+                  <option value="7d">Last 7 days</option>
+                </select>
               </h3>
               <div className="rounded-lg overflow-x-auto" style={{ backgroundColor: `${theme.colors.surface}80` }}>
                 <table className="w-full min-w-[640px]">
@@ -627,7 +733,6 @@ export default function Groups(_props: { user?: unknown }) {
                         </td>
                         <td className="px-4 py-3">
                           <div className="font-medium" style={{ color: theme.colors.text }}>{entry.userName}</div>
-                          <div className="text-sm" style={{ color: theme.colors.textSecondary }}>{entry.email}</div>
                         </td>
                         <td className="px-4 py-3 text-right font-semibold" style={{ color: theme.colors.text }}>
                           <GradientText animationSpeed={4}>

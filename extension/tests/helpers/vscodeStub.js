@@ -9,6 +9,9 @@ function createVscodeStub(overrides = {}) {
   const registeredCommands = [];
   const warnings = [];
   const infos = [];
+  const opened = [];
+  const clipboard = [];
+  const commandHandlers = {};
 
   const settings = Object.assign(
     {
@@ -45,6 +48,8 @@ function createVscodeStub(overrides = {}) {
       showWarningMessage: (m) => { warnings.push(m); return Promise.resolve(undefined); },
       showErrorMessage: (m) => { warnings.push(m); return Promise.resolve(undefined); },
       showInputBox: () => Promise.resolve(undefined),
+      // Runs the task at once with a never-cancelled token.
+      withProgress: (_opts, task) => task({ report() {} }, { isCancellationRequested: false, onCancellationRequested: () => DISPOSABLE }),
       createOutputChannel: () => ({ appendLine() {}, show() {}, dispose() {} }),
       onDidOpenTerminal: on('onDidOpenTerminal'),
       onDidCloseTerminal: on('onDidCloseTerminal'),
@@ -70,6 +75,7 @@ function createVscodeStub(overrides = {}) {
     commands: {
       registerCommand: (id, handler) => {
         registeredCommands.push(id);
+        commandHandlers[id] = handler;
         if (typeof handler !== 'function') throw new Error(`handler for ${id} not a function`);
         return DISPOSABLE;
       },
@@ -84,13 +90,17 @@ function createVscodeStub(overrides = {}) {
       getExtension: (id) =>
         overrides.gitExtension && id === 'vscode.git' ? overrides.gitExtension : undefined,
     },
-    env: { openExternal: () => Promise.resolve(true) },
+    env: {
+      openExternal: (uri) => { opened.push(String(uri)); return Promise.resolve(true); },
+      clipboard: { writeText: (t) => { clipboard.push(t); return Promise.resolve(); } },
+    },
+    ProgressLocation: { Notification: 15 },
     Uri: { parse: (u) => ({ toString: () => u }) },
     ConfigurationTarget: { Global: 1, Workspace: 2 },
     TextDocumentChangeReason: { Undo: 1, Redo: 2 },
   };
 
-  return { vscode, emit, registeredCommands, warnings, infos, settings };
+  return { vscode, emit, registeredCommands, commandHandlers, warnings, infos, settings, opened, clipboard };
 }
 
 /** Install the stub as the resolution for require('vscode'). */

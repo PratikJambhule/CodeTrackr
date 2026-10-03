@@ -69,7 +69,7 @@ check('metrics route takes no user id from the request', () => {
   assert.ok(/isAuthenticated/.test(src), 'metrics route is unguarded');
 });
 
-console.log('\ngoals and teams');
+console.log('\ngoals (and the removed teams API)');
 check('every goals route requires authentication', () => {
   const unguarded = routeDeclarations(read('goals.js'))
     .filter((r) => !/isAuthenticated/.test(r.rest))
@@ -100,9 +100,25 @@ check('goal activity is matched within the goal lifetime, not all history', () =
   assert.ok(/\$gte:\s*from/.test(src), 'goal activity query needs a lower time bound');
   assert.ok(!/language:\s*goal\.techStack/.test(src), 'exact free-text language match removed');
 });
-check('single-team read checks membership', () => {
-  const src = read('team.js');
-  assert.ok(/isMember|sameUser/.test(src), 'GET /:teamId does not check membership');
+check('device sign-in: approving and managing keys needs a session; the open endpoints are rate-limited', () => {
+  const src = read('device.js');
+  for (const route of ["'/pending/:userCode'", "'/approve'", "'/tokens'", "'/tokens/:id'"]) {
+    const line = src.split('\n').find((l) => l.includes(`router.`) && l.includes(route));
+    assert.ok(line && line.includes('isAuthenticated'), `${route} must use isAuthenticated`);
+  }
+  for (const route of ["'/code'", "'/token'"]) {
+    const line = src.split('\n').find((l) => l.includes('router.post(') && l.includes(route));
+    assert.ok(line && line.includes('deviceLimiter'), `${route} must be rate-limited`);
+  }
+});
+
+check('the dead Teams API is gone, not just unrouted in the UI', () => {
+  // It had no page in the app but /api/teams was live: an unused surface that
+  // still had to be secured (H-11). Deleted with its model and page (roadmap item 11).
+  const fs = require('fs');
+  assert.ok(!fs.existsSync(path.join(__dirname, '..', 'routes', 'team.js')), 'routes/team.js still exists');
+  const app = fs.readFileSync(path.join(__dirname, '..', 'app.js'), 'utf8');
+  assert.ok(!/api\/teams/.test(app), 'app.js still mounts /api/teams');
 });
 
 console.log('\ngroup passwords');

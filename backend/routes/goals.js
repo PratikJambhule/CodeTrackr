@@ -4,6 +4,8 @@ const Goal = require('../models/Goal');
 const Activity = require('../models/Activity');
 const { isAuthenticated } = require('../middleware/auth');
 const { exactRegex } = require('../services/textQuery');
+const { bucketStartFor } = require('../services/activityBucket');
+const { matchActivityUser } = require('../services/activityUser');
 
 // Create a new goal
 router.post('/create', isAuthenticated, async (req, res, next) => {
@@ -53,14 +55,17 @@ function goalActivityQuery(goal, userIdStr) {
     const stack = String(goal.techStack || '').trim();
     if (!stack) return null;
 
-    const from = goal.createdAt ? new Date(goal.createdAt) : null;
+    // Bucketed activity is stamped with its 10-minute window start, so a window
+    // that began before the goal was created can hold work done after it. Floor
+    // the lower bound to the same grid or that window is silently dropped (M-31).
+    const from = goal.createdAt ? bucketStartFor(new Date(goal.createdAt)) : null;
     const to = new Date(goal.completedAt || goal.deadline || Date.now());
     if (!from || Number.isNaN(from.getTime()) || Number.isNaN(to.getTime())) return null;
 
     const stackRe = exactRegex(stack);
     if (!stackRe) return null;
     return {
-        userId: userIdStr,
+        userId: matchActivityUser(userIdStr),
         timestamp: { $gte: from, $lte: to },
         $or: [{ language: stackRe }, { projectName: stackRe }],
     };

@@ -1,4 +1,5 @@
 const express = require('express');
+const { log } = require('../services/logger');
 const router = express.Router();
 const User = require('../models/user');
 const { isAuthenticated } = require('../middleware/auth');
@@ -6,7 +7,7 @@ const { isAuthenticated } = require('../middleware/auth');
 // Get user profile with API key
 router.get('/profile', isAuthenticated, async (req, res) => {
     try {
-        const user = await User.findById(req.user.id).select('-__v');
+        const user = await User.findById(req.user.id).select('-__v +legacyApiKeyHash +apiKey');
         
         if (!user) {
             return res.status(404).json({ 
@@ -22,14 +23,20 @@ router.get('/profile', isAuthenticated, async (req, res) => {
                 name: user.name,
                 email: user.email,
                 profilePictureUrl: user.profilePictureUrl,
-                apiKey: user.apiKey,
+                // The key itself is never returned after creation: only its
+                // SHA-256 is stored. The hint identifies which key is active.
+                hasApiKey: Boolean(user.apiKeyId),
+                apiKeyHint: user.apiKeyHint(),
+                apiKeyCreatedAt: user.apiKeyCreatedAt,
+                // An old-format key may still be configured in an extension.
+                legacyApiKey: !user.apiKeyId && Boolean(user.legacyApiKeyHash || user.apiKey),
                 isFirstLogin: user.isFirstLogin,
                 lastLogin: user.lastLogin,
                 createdAt: user.createdAt
             }
         });
     } catch (error) {
-        console.error('Get profile error:', error);
+        log.error('get profile failed', { requestId: req.id, err: error });
         res.status(500).json({ 
             success: false, 
             message: 'Failed to fetch profile' 
@@ -49,17 +56,18 @@ router.post('/regenerate-api-key', isAuthenticated, async (req, res) => {
             });
         }
 
-        // Generate new API key
-        user.generateApiKey();
+        // Issue a new key; every older key (new-format or legacy) stops working.
+        const apiKey = user.issueApiKey();
         await user.save();
 
         res.json({
             success: true,
             message: 'API key regenerated successfully',
-            apiKey: user.apiKey
+            apiKey,
+            apiKeyHint: user.apiKeyHint()
         });
     } catch (error) {
-        console.error('Regenerate API key error:', error);
+        log.error('regenerate api key failed', { requestId: req.id, err: error });
         res.status(500).json({ 
             success: false, 
             message: 'Failed to regenerate API key' 
@@ -87,7 +95,7 @@ router.post('/complete-onboarding', isAuthenticated, async (req, res) => {
             message: 'Onboarding completed'
         });
     } catch (error) {
-        console.error('Complete onboarding error:', error);
+        log.error('complete onboarding failed', { requestId: req.id, err: error });
         res.status(500).json({ 
             success: false, 
             message: 'Failed to complete onboarding' 

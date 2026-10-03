@@ -1,134 +1,162 @@
-# CodeTrackr — Architecture & Data Flow
+# CodeTrackr — Architecture
 
-_Reverse-engineered from the codebase (no assumptions from filenames). Last verified: 2026-08-28 (extension 2.1.0)._
-
-> **Superseded — read `CODETRACKR_PROJECT_CONTEXT.md` (repo root) first.** This file predates
-> two batches of work: the **DB write-reduction batch** (2026‑09‑08 — 10-minute bucket-on-write,
-> `DailySummary` rollup, dropped `date` field) and the **quick-wins Tier 1 + security batch**
-> (2026‑09‑09 — `JWT_SECRET` fail-fast, `helmet` + rate-limit, 409 on dup join, `/health`,
-> central error handler, ingest bounds-check, serverless-safe bootstrap + `/api/internal` cron,
-> frontend build fixed, GitHub Actions CI). Details in `CODETRACKR_PROJECT_CONTEXT.md`,
-> `docs/IMPROVEMENT_PLAN.md`, and `docs/interview-preparation/`.
+_Rewritten 2026-10-03 from the code on `main` (`92b899b` + working tree). The previous version
+(verified 2026-08-28, extension 2.1.0) described per-flush documents, the `date` field and
+unauthenticated analytics, all of which are gone. For line-level detail see
+`CODETRACKR_PROJECT_CONTEXT.md`; for known defects see `docs/IMPROVEMENT_PLAN.md`._
 
 ## 1. Components
 
-| Layer | Location | Stack |
+| Component | Where | What it does |
 |---|---|---|
-| VS Code extension | `extension/src/*.ts` → `dist/extension.js` | TypeScript, axios, esbuild. Published as `CodeTrackr-ext.codetrackr-vscode`; source at v2.1.0 |
-| Backend API | `backend/` | Express 5, Mongoose 8, Passport (Google OAuth), JWT in httpOnly cookie |
-| Database | MongoDB Atlas | 7 collections (below) |
-| Web dashboard | `frontend/src/` | React 19 + Vite + TS + Tailwind, React Router |
-| Deploy | `backend/vercel.json`, `frontend/vercel.json` | Vercel serverless (`backend/api/index.js` wraps app with `serverless-http`) |
+| VS Code extension 2.4.0 | `extension/src/*.ts` → `dist/extension.js` | Five trackers collect counters; a 30 s timer decides when to upload one summary. |
+| Express API | `backend/app.js`, `routes/`, `services/`, `models/` | One process (a modular monolith). Feature routers, a thin service layer for ingest and insights, a central error handler. |
+| MongoDB Atlas | 13 collections | `activities` is the only high-volume one. |
+| React SPA | `frontend/src/` | Pages: Login, Onboarding, Dashboard, Insights, Leaderboard, Goals, Groups, Profile, Device (approve a VS Code sign-in). Reads use React Query (`src/api.ts`). |
+| Scheduler | `.github/workflows/cron.yml` | Calls two secret-protected internal routes: hourly goal-deadline sweep, nightly daily-summary rollup. |
 
-`extension/extension.js` (560 lines, repo root of `extension/`) is **legacy v1** and is not the build entry — `package.json` `main` is `./dist/extension.js`, compiled from `src/`.
-
-## 2. Activity capture (the source of truth)
-
-`extension/src/extension.ts`:
-
-- `activate()` → `start(context)` registers listeners on `onDidChangeTextDocument`, `onDidOpenTextDocument`, `onDidSaveTextDocument`, `onDidChangeActiveTextEditor`. Each calls `markActivity()`, updating `state.lastActivityMs`.
-- Edit volume is accumulated by `EditorTracker` from `event.contentChanges`: gross characters and lines inserted/deleted, churn, undo/redo, saves, file switches and a read-vs-write attention split. (Before 2.1.0 this was a net `doc.lineCount` delta that recorded zero for replace-in-place edits.)
-- `FocusTracker` records real window focus/blur time and completed flow blocks; `GitStateTracker` reads commits from the `vscode.git` extension API.
-- A `setInterval` ticks every 30s. On each tick:
-  - idle ≥ 2 min → flush remaining active time, set `isPaused`, stop accumulating.
-  - otherwise → `flushIfNeeded()` sends if buffered ≥ `minFlushMinutes`.
-- Duration sent = **wall-clock minutes since last flush, converted to seconds** (`minutes * 60`). Idle time under the 2-minute threshold is counted as coding time.
-- `TerminalTracker` (`terminalTracker.ts` + `commandClassifier.ts` + `gitTracker.ts`) shell-integration-hooks terminal command executions, classifies them (git/npm/node/python/docker/gcc/java/pip/misc), records exit codes, and `consumeInterval()` attaches a `terminalAnalytics` snapshot to each flush.
-
-**Transport:** `POST {apiBase}/api/extension/track` with header `x-api-key`. One document per flush.
-
-Since 2.1.0 the flush also carries `editorAnalytics`, `focusAnalytics` and `gitAnalytics`.
-Commits come from the built-in Git extension API (`vscode.git`), not terminal parsing, so
-commits made through the Source Control panel are counted. Edit volume is gross insert/delete
-from `contentChanges`; the net `doc.lineCount` delta has been removed. Derived metrics are
-served by `GET /api/metrics` (session identity only).
-
-### Removed in 2.0.11
-
-An `EventLogger`/`SyncService` pipeline used to post batches to `POST /api/extension/events` —
-a route that does not exist — with no API key, retaining every failed batch in memory. It never
-delivered any data and has been deleted. Debug session counts, which only fed that pipeline,
-now ride along in `terminalAnalytics.debuggingSessions`.
-
-## 3. Storage
-
-`models/Activity.js` — the only high-volume collection.
-
-```
-userId       String (indexed)   // hex string of User._id, NOT an ObjectId ref
-fileName     String (required)
-fileType, projectName, language  String
-duration     Number             // SECONDS
-linesAdded, linesRemoved  Number
-terminalAnalytics { totalCommands, successfulCommands, failedCommands,
-                    buildRuns, testRuns, successfulBuilds, failedBuilds,
-                    debuggingSessions, commandUsage{9 keys},
-                    gitActivity{6 keys}, repeatedFailedCommands[], ... }
-timestamp    Date               // real event time — use this
-date         Date               // written as a "YYYY-MM-DD" string by /track → UTC midnight
-```
-**Added in extension 2.1.0** (additive; older documents lack these and read as zero):
-```
-editorAnalytics { charsInserted, charsDeleted, linesInserted, linesDeleted, churnLines,
-                  undoCount, redoCount, saveCount, fileSwitches, uniqueFiles,
-                  readMs, writeMs, largeInsertCount, largeInsertChars }
-focusAnalytics  { focusedMs, blurredMs, blurEvents, flowBlocksMs[], longestBlockMs }
-gitAnalytics    { commits, filesChanged, uncommittedFiles, uncommittedAgeMs }
+```mermaid
+flowchart LR
+  subgraph VSCode["VS Code"]
+    T["Trackers: editor, focus, git, terminal, debug"] --> F["flush timer (30 s)"]
+  end
+  F -- "POST /api/extension/track<br/>x-api-key" --> API
+  B["Browser: React SPA (Vercel)"] -- "fetch, JWT cookie" --> API
+  GH["GitHub Actions cron"] -- "POST /api/internal/run-*<br/>x-internal-secret" --> API
+  subgraph API["Express API (Render)"]
+    I["ingest: validate → normalise → plan bucket"]
+    R["analytics, leaderboard, groups, goals, notifications"]
+    M["metrics: aggregate → derive → rules"]
+  end
+  API --> DB[("MongoDB Atlas")]
 ```
 
-Indexes: `{userId:1,date:-1}`, `{userId:1,projectName:1}`, `{userId:1,language:1}`, `{userId:1}`.
+Static figures (architecture, DFD level 0/1, use cases, class diagram, ML pipeline) are in
+`docs/images/figure-*.png`, with HTML sources in `docs/diagrams-src/`.
 
-Other models: `User` (googleId, email, `apiKey` — 32 random bytes hex, sparse unique), `Group` (name, description, visibility, **plaintext password**, createdBy), `GroupMember` (groupId+userId, unique compound), `Goal` (targetHours, techStack, deadline, status), `Team` (embedded `members[]`), `Notification`.
+## 2. Write path: from keystroke to database
 
-**`duration` is in seconds.** `analytics.js`, `leaderboard.js`, and `groups.js` all divide by 3600. `goals.js` does not (see IMPROVEMENT_PLAN.md H-3).
+1. **Collect.** `EditorTracker` counts gross inserts/deletes, churn, saves, undo/redo, file
+   switches and read-vs-write time. `FocusTracker` measures window-focus time and *flow blocks*
+   (a block ends after 2 minutes idle). `GitStateTracker` counts commits by watching `HEAD` through
+   the built-in Git extension. `TerminalTracker` uses shell-integration events to classify each
+   command (git, npm, build, test, ...) and record its exit code. `DebugTracker` counts debug
+   sessions.
+2. **Decide when to send.** Every 30 s: if idle ≥ 2 min, flush and pause; otherwise flush once
+   ≥ 2 minutes of active time are buffered **and** the interval has real signal (an edit, save,
+   command, commit or flow block). A signal-less or failed flush is *held* in memory and merged
+   into the next one.
+3. **Authenticate.** `verifyApiKey` looks the `x-api-key` header up with `User.findOne({ apiKey })`.
+4. **Validate.** `ingestValidation.js` rejects duration outside (0, 3600] s, over-long strings and
+   timestamps outside [now − 24 h, now + 60 s].
+5. **Normalise.** `activityNormalizers.js` coerces every counter, drops negatives, caps arrays.
+6. **Bucket.** `activityBucket.planActivityWrite` floors the timestamp to a 10-minute grid and
+   issues one atomic `findOneAndUpdate(..., { $inc, $max, $push, $addToSet }, { upsert: true })`
+   keyed by `(userId, projectName, language, bucketStart)`. A partial unique index makes
+   concurrent upserts safe (a duplicate-key race retries without the insert). Only non-zero
+   counters are written, so documents stay sparse.
 
-## 4. Identity & auth
+7. **Credit, don't trust (since 2026-10-03).** Before the write, the upload's time is limited to
+   its focus time + 120 s, spread over the 10-minute windows it covers, and claimed against an
+   atomic per-user window counter (`windowusages`) capped at 600 s. `duration` stores the credited
+   seconds, `claimedDuration` the raw claim. An optional `flushId` makes a resend a no-op
+   (`ingestreceipts`, 48 h TTL).
 
-- Browser: Google OAuth → `routes/auth.js` signs a JWT → httpOnly cookie `token` → `middleware/auth.js:isAuthenticated` verifies and loads `req.user`.
-- Extension: `x-api-key` header → `verifyApiKey` looks up `User.findOne({apiKey})`.
-- `AUTH_BYPASS=true` makes both middlewares skip all checks in non-production only; it is refused outright when `NODE_ENV=production`.
+Result: roughly one document per 10 minutes per project-language pair instead of one per
+upload. Setting `ACTIVITY_BUCKET_MS=0` restores one document per upload.
 
-## 5. API surface
+## 3. Read paths
 
-| Route | Auth | Notes |
+| Request | How it is computed | Cost |
 |---|---|---|
-| `POST /api/extension/track` | apiKey | main ingest |
-| `POST /api/extension/track/batch` | apiKey | exists, unused by extension |
-| `GET /api/extension/verify` | apiKey | |
-| `GET /api/analytics/:userId` | isAuthenticated + ownership | today's hourly breakdown + 7d fetch |
-| `GET /api/analytics/weekly/:userId` | isAuthenticated + ownership | 7-day daily breakdown |
-| `GET /api/analytics/timeslot/:userId` | isAuthenticated + ownership | 2-hour drilldown, 10-min slots |
-| `GET /api/analytics/summary/:userId` | isAuthenticated + ownership | |
-| `GET /api/leaderboard` | isAuthenticated | global, full-collection scan (H-7 unfixed) |
-| `/api/groups/*` | isAuthenticated | `:groupId/details` checks membership |
-| `/api/goals/*` | isAuthenticated | `:goalId/progress` scoped to owner |
-| `/api/teams/*` | isAuthenticated | `GET /:teamId` checks membership |
-| `/api/notifications/*` | isAuthenticated | correctly scoped by `req.user._id` |
+| `GET /api/analytics/:userId` (today), `/weekly` | one `$facet` pipeline (`services/analyticsViews.js`) over today / the last 7 local days | Response size independent of document count (M-1 fixed) |
+| `GET /api/analytics/timeslot/:userId` | `Activity.find()` of a 2-hour window, reduced in JavaScript | Bounded by the window |
+| `GET /api/analytics/summary/:userId` | `$group` pipeline by day and language | All of the user's history |
+| `GET /api/metrics` | `metricsService` runs `$group` pipelines → `metricsDerive` (pure functions) → `sessionize` → `insightsBaseline` (90-day baseline cached once a day in `userinsights`) → `rulesEngine` | Measured 239 ms cold, 44 ms warm |
+| `GET /api/leaderboard` | Top N `userstats` rows + two indexed maxima; `?days=` windows scan activities | O(N) all-time (H-7 fixed); windowed scan bounded by the window |
+| `GET /api/groups/:id/details` | Members' `userstats`; `?from=&to=` scans that window | O(members) all-time (H-8 fixed) |
+| `GET /api/goals/:id/progress` | `$match` on language or project (case-insensitive, regex-escaped) inside the goal's lifetime, `$sum` duration | One user, one window |
 
-| `GET /api/metrics` | isAuthenticated | derived metrics, session identity only (no `:userId`) |
+Every per-user route takes the user from the session. The four `/:userId` analytics routes keep
+the parameter for the old dashboard but reject any id that is not the caller's (H-1).
+`/api/metrics` has no id parameter at all.
 
-## 6. Analytics computation
+**Rollup.** `services/dailyRollup.js` writes one `dailysummaries` document per user per UTC day,
+nightly via `/api/internal/run-rollup`. Nothing reads it yet. It exists so the all-time reads
+can stop scanning raw activities (the planned `UserStats` step).
 
-All analytics **load raw documents into Node and aggregate in JavaScript** (`Activity.find(...)` then `.reduce`/`.forEach`), except `/summary/:userId`, which uses a real `$group` pipeline. The daily endpoint fetches 7 days of documents and then filters to today in memory.
+## 4. Identity and security
 
-Timezone: the client sends `new Date().getTimezoneOffset()` (minutes, negative east of UTC) as `?timezone=`. The daily and timeslot endpoints use it to compute user-local midnight. **The weekly endpoint ignores it entirely** and buckets by UTC day.
+| Who | Credential | Checked by |
+|---|---|---|
+| Browser | Google OAuth → JWT `{id, name, email, isFirstLogin}` (1 day) in an httpOnly cookie, `SameSite=None; Secure` in production | `isAuthenticated`: verify JWT, load user |
+| Extension | `ct_<id>_<secret>` key — either the profile key or a per-device key from **Sign In** (device-code flow, `devicetokens`, 1-year expiry); server stores only SHA-256(secret); extension 2.5.0 keeps it in SecretStorage | `verifyApiKey`: look up the id in `users` then `devicetokens`, constant-time compare of the hash (legacy keys by their hash) |
+| Scheduler | `INTERNAL_CRON_SECRET` header | constant-time compare; 404 when wrong or unset |
 
-Leaderboard: aggregates the **entire Activity collection** with no time window, `$addToSet`s every project name, joins against **every user**, then sorts and scores in Node on each request. Scores (`speed`/`quality`/`engagement`/`impact`) are relative to the current max, so every user's score shifts whenever the top user codes.
+Cross-cutting: `helmet`, CORS allow-list (`FRONTEND_URL` + localhost), per-IP rate limits on
+`/auth` (50 / 15 min), `/api/extension` and `/api/analytics` (120 / min), group join
+(10 / 15 min); group passwords hashed with scrypt; `AUTH_BYPASS` refused in production; a central
+error handler that returns `{ error, id }` and maps `CastError`/`ValidationError` to 400.
 
-Group leaderboard: same pattern, scoped to member IDs, all-time, no pagination.
+Open weaknesses that sit in this layer: non-expiring, unscoped API key; the auth cookie is
+third-party between `vercel.app` and `onrender.com` (H-19); IP-keyed limits punish a shared
+campus network (H-20); H-21, M-28/29 and L-11 were fixed on 2026-10-03.
 
-## 7. Dashboard flow
+## 5. Data model
 
-`Dashboard.tsx` mounts → `useEffect([])` calls `fetchAnalytics()` + `fetchWeeklyAnalytics()`; a second `useEffect([viewMode])` also fires on mount and calls `fetchAnalytics()` again → **3 requests on every mount, one redundant**. Analytics fetches omit `credentials:'include'` (they work only because those endpoints are unauthenticated). `NotificationPanel` polls `/unread-count` every 30s; its interval closure captures `isOpen` from a `[]`-dep effect, so the `if (isOpen)` branch inside is permanently stale.
+| Collection | Shape | Notes |
+|---|---|---|
+| `activities` | `userId` (String), `projectName`, `language`, `bucketStart`, `duration` (seconds), `linesAdded/Removed`, `files[]`, `flushCount`, sparse `editorAnalytics`, `focusAnalytics`, `gitAnalytics`, `terminalAnalytics` | Indexes: `{userId, timestamp}`, `{userId, projectName}`, `{userId, language}`, partial-unique bucket key, 400-day TTL on `createdAt` |
+| `dailysummaries` | one per (user, UTC day) | Written by the rollup, not yet read |
+| `windowusages`, `ingestreceipts` | anti-cheat window counters; idempotency receipts | both expire after 48 h |
+| `userstats` | one row of running totals per user | read by the all-time leaderboard and group boards |
+| `deviceauths`, `devicetokens` | pending device sign-ins (10 min TTL); issued per-device keys | only hashes of codes and secrets |
+| `userinsights` | cached 90-day baseline per user | Refreshed on read, at most daily |
+| `users` | `googleId`, `email`, `apiKey` | |
+| `groups`, `groupmembers` | group + join table with a unique `(groupId, userId)` index | Last member leaving deletes the group |
+| `goals`, `notifications` | owner-scoped | Notifications created by the hourly sweep |
 
-## 8. Extension → insight path (what AI can build on)
+`activities.userId` is moving from String to ObjectId (M-6, roadmap item 10): new writes are
+ObjectIds, reads match both forms through `services/activityUser.js`, and
+`scripts/migrate-activity-userid.js` converts the old documents.
 
-```
-VS Code events → 30s flush → POST /api/extension/track → Activity doc (1 per flush)
-                                                              ↓
-                                          JS-side aggregation in routes/analytics.js
-                                                              ↓
-                                                   Dashboard.tsx charts
-```
+## 6. Deployment and operations
 
-The `Activity` collection already carries everything an insights engine needs: `timestamp` (hour-of-day, day-of-week), `duration`, `language`, `projectName`, line deltas, and rich `terminalAnalytics` (build/test success rates, git actions, repeated failures). No schema change is required to compute the metrics in the AI plan — only a proper aggregation layer.
+- **Backend:** Render web service, auto-deploys `main`, `node app.js`. `app.listen` and the
+  in-process cron only start when the file is run directly, so `api/index.js` (Vercel serverless
+  wrapper) can also import it safely; that config is unused today. `backend/Dockerfile` builds a
+  portable image (Node 20 Alpine, production deps, non-root, `HEALTHCHECK` on `/health`).
+- **Frontend:** Vercel. `frontend/vercel.json` forwards `/api/*` and `/auth/*` to the Render API and
+  sends everything else to `index.html`. The production site calls its own address, so the browser
+  sees one site and the login cookie is first-party (H-19). The extension still calls Render
+  directly. Behind the proxy Render sees Vercel's IPs, so browser-facing rate limits key by user or
+  session (`services/rateLimitKeys.js`).
+- **Scheduler:** GitHub Actions, hourly + 03:30 UTC, with the same secret in GitHub and Render.
+- **CI:** `.github/workflows/ci.yml` on every push and PR: backend unit tests + an import smoke
+  of `app.js`, backend integration tests (in-memory MongoDB), extension tests, frontend build,
+  and a Docker job that builds the image and waits for `/health` with `db:true`.
+- **CD:** `.github/workflows/deploy.yml` triggers a Render deploy hook after green CI on `main`
+  and waits for `/health` — inert until `RENDER_DEPLOY_HOOK_URL` is set (see `docs/RELEASE.md`).
+- **Observability:** every request gets an id (`X-Request-Id`, also in error bodies); the server
+  writes JSON lines — one access line per request, stack traces for 5xx — via
+  `services/logger.js`; Sentry reporting switches on with `SENTRY_DSN`.
+- **Local with Docker:** `docker compose up --build` starts three containers — `mongo` (MongoDB 7,
+  data in a named volume, published on 27018), `backend` (the production `Dockerfile`, run with
+  `NODE_ENV=development` + `AUTH_BYPASS`, `scripts/seed-local.js` seeds demo data once) and
+  `frontend` (`frontend/Dockerfile.dev`, Vite dev server, `src/` bind-mounted for live reload).
+  Containers reach each other by service name (`mongodb://mongo:27017`); the browser reaches the
+  API on the laptop's `localhost:5050`.
+- **Local:** `node backend/scripts/dev-local.js` runs the real API on an in-memory MongoDB with
+  `AUTH_BYPASS` and demo data; benchmarks live in `backend/bench/` (`docs/BENCHMARKS.md`).
+
+## 7. Where it breaks first at scale (after the October 2026 work)
+
+1. **Windowed leaderboards** (`?days=`, group `?from=&to=`) still aggregate raw activity in the
+   window. All-time boards read `userstats` (measured 62 ms p50 at 1M rows vs 6.7 s for the scan).
+   Next step: per-day stats rows (or the existing `dailysummaries`) for windowed boards.
+2. **Ingest does several writes per upload** (receipt, window counter, bucket, stats). Throughput
+   matched the single-insert path locally (~450 req/s), but at much higher volume a queue in front
+   of the database (and batching the stats `$inc`) becomes the next move.
+3. **One region, one free instance:** Render's free tier sleeps (~22 s cold start, L-10) and the
+   cookie is third-party across `vercel.app`/`onrender.com` (H-19). Both are hosting decisions,
+   not code.

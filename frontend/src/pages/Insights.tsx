@@ -1,8 +1,9 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { Brain, Timer, Activity, Sunrise, Target, RefreshCw, Flame, Repeat, Layers } from 'lucide-react';
 import { useTheme } from '../contexts/ThemeContext';
 import GradientText from '../components/GradientText';
-import { API_URL } from '../config';
+import { apiGet } from '../api';
 
 type Confidence = 'insufficient' | 'low' | 'high';
 
@@ -120,42 +121,23 @@ const SEVERITY_ICON: Record<Severity, string> = {
 
 export default function Insights() {
   const { theme } = useTheme();
-  const [metrics, setMetrics] = useState<Metrics | null>(null);
-  const [insights, setInsights] = useState<InsightsPayload | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
   const [days, setDays] = useState(30);
 
-  const fetchMetrics = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const timezone = new Date().getTimezoneOffset();
-      const res = await fetch(`${API_URL}/api/metrics?days=${days}&timezone=${timezone}`, {
-        credentials: 'include',
-      });
-      if (!res.ok) {
-        setError(
-          res.status === 401
-            ? 'Please sign in again to view your insights.'
-            : 'Could not load your insights.'
-        );
-        return;
-      }
-      const data = await res.json();
-      setMetrics(data.metrics);
-      // Older backends do not send `insights`; the panel simply hides.
-      setInsights(data.insights ?? null);
-    } catch {
-      setError('Could not reach the server.');
-    } finally {
-      setLoading(false);
-    }
-  }, [days]);
-
-  useEffect(() => {
-    fetchMetrics();
-  }, [fetchMetrics]);
+  // React Query (roadmap item 11): each window (7/30/90 days) is cached, so
+  // switching back to one already loaded is instant.
+  const timezone = new Date().getTimezoneOffset();
+  const query = useQuery({
+    queryKey: ['metrics', days, timezone],
+    queryFn: () => apiGet<{ metrics: Metrics; insights?: InsightsPayload }>(`/api/metrics?days=${days}&timezone=${timezone}`),
+  });
+  const metrics: Metrics | null = query.data?.metrics ?? null;
+  // Older backends do not send `insights`; the panel simply hides.
+  const insights: InsightsPayload | null = query.data?.insights ?? null;
+  const loading = query.isFetching;
+  const error: string | null = query.isError
+    ? (String(query.error?.message).includes(' 401') ? 'Please sign in again to view your insights.' : 'Could not load your insights.')
+    : null;
+  const fetchMetrics = () => { void query.refetch(); };
 
   const card = {
     backgroundColor: theme.colors.surface,

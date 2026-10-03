@@ -2,11 +2,11 @@ const cron = require('node-cron');
 const Goal = require('../models/Goal');
 const Notification = require('../models/Notification');
 const { rollupDaily } = require('./dailyRollup');
+const { log } = require('./logger');
 
 // Run every hour to check for goals with deadlines in 6 hours
 const checkUpcomingDeadlines = async () => {
   try {
-    console.log('🔔 Checking for upcoming goal deadlines...');
     
     const now = new Date();
     const sixHoursFromNow = new Date(now.getTime() + 6 * 60 * 60 * 1000);
@@ -25,7 +25,7 @@ const checkUpcomingDeadlines = async () => {
       reminderSent: false
     });
 
-    console.log(`Found ${upcomingGoals.length} goals with upcoming deadlines`);
+    log.info('deadline sweep', { upcoming: upcomingGoals.length });
 
     // Create notifications for each goal
     for (const goal of upcomingGoals) {
@@ -42,17 +42,15 @@ const checkUpcomingDeadlines = async () => {
       // Mark reminder as sent
       await Goal.findByIdAndUpdate(goal._id, { reminderSent: true });
       
-      console.log(`✅ Reminder created for goal: ${goal.title}`);
     }
   } catch (error) {
-    console.error('Error checking deadlines:', error);
+    log.error('deadline sweep failed', { err: error });
   }
 };
 
 // Check for overdue goals (run every hour)
 const checkOverdueGoals = async () => {
   try {
-    console.log('⏳ Checking for overdue goals...');
     
     const now = new Date();
 
@@ -78,11 +76,10 @@ const checkOverdueGoals = async () => {
           message: `The deadline for "${goal.title}" has passed. Consider updating or completing it.`
         });
         
-        console.log(`⚠️ Overdue notification created for goal: ${goal.title}`);
       }
     }
   } catch (error) {
-    console.error('Error checking overdue goals:', error);
+    log.error('overdue sweep failed', { err: error });
   }
 };
 
@@ -90,7 +87,6 @@ const checkOverdueGoals = async () => {
 const initScheduler = () => {
   // Run every hour at minute 0
   cron.schedule('0 * * * *', () => {
-    console.log('🕐 Running scheduled deadline check...');
     checkUpcomingDeadlines();
     checkOverdueGoals();
   });
@@ -98,17 +94,16 @@ const initScheduler = () => {
   // Daily rollup of raw activity into DailySummary. Inherits the same
   // serverless caveat as the hourly job (see IMPROVEMENT_PLAN.md H-13).
   cron.schedule('30 3 * * *', () => {
-    console.log('🗓️  Running daily activity rollup...');
     rollupDaily({ apply: true, beforeDays: 2 })
-      .then((r) => console.log(`✅ Rollup wrote ${r.wrote} daily summaries`))
-      .catch((err) => console.error('Daily rollup failed:', err.message));
+      .then((r) => log.info('daily rollup', { wrote: r.wrote }))
+      .catch((err) => log.error('daily rollup failed', { err }));
   });
 
   // Run immediately on startup
   checkUpcomingDeadlines();
   checkOverdueGoals();
 
-  console.log('✅ Goal deadline scheduler initialized');
+  log.info('scheduler started');
 };
 
 module.exports = { initScheduler, checkUpcomingDeadlines, checkOverdueGoals, rollupDaily };

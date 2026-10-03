@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { BrowserRouter as Router, Routes, Route, Navigate, Link } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route, Navigate, Link, useLocation, useNavigate } from 'react-router-dom';
 import { Code2, LayoutDashboard, Trophy, Target, Users2, UserCircle, Sparkles } from 'lucide-react';
 import './index.css';
 import Orb from './components/Orb';
@@ -19,6 +19,31 @@ import Groups from './pages/Groups';
 import Onboarding from './pages/Onboarding';
 import Profile from './pages/Profile';
 import Login from './pages/Login';
+import Device from './pages/Device';
+
+// A signed-out visitor who opens the VS Code approval link (/device?code=...)
+// would lose the code on the way through Google sign-in. Remember where they
+// were going and return them there once signed in.
+const AFTER_LOGIN_KEY = 'codetrackr.afterLogin';
+
+function RememberThenLogin() {
+  const location = useLocation();
+  try { sessionStorage.setItem(AFTER_LOGIN_KEY, location.pathname + location.search); } catch { /* storage blocked */ }
+  return <Navigate to="/login" />;
+}
+
+function ResumeAfterLogin() {
+  const navigate = useNavigate();
+  useEffect(() => {
+    let target: string | null = null;
+    try {
+      target = sessionStorage.getItem(AFTER_LOGIN_KEY);
+      sessionStorage.removeItem(AFTER_LOGIN_KEY);
+    } catch { /* storage blocked */ }
+    if (target && target.startsWith('/device')) navigate(target, { replace: true });
+  }, [navigate]);
+  return null;
+}
 
 function App() {
   const { theme } = useTheme();
@@ -93,6 +118,7 @@ function App() {
       <Router>
         <Routes>
           <Route path="/login" element={<Login />} />
+          <Route path="/device" element={<RememberThenLogin />} />
           <Route path="*" element={<Navigate to="/login" />} />
         </Routes>
       </Router>
@@ -197,6 +223,7 @@ function App() {
             </div>
           </nav>
 
+          <ResumeAfterLogin />
           <Routes>
             <Route path="/login" element={<Navigate to="/dashboard" />} />
             <Route path="/onboarding" element={<Onboarding />} />
@@ -206,6 +233,7 @@ function App() {
             <Route path="/goals" element={<Goals />} />
             <Route path="/groups" element={<Groups user={user} />} />
             <Route path="/profile" element={<Profile />} />
+            <Route path="/device" element={<Device />} />
             <Route path="/" element={<Navigate to="/dashboard" />} />
           </Routes>
         </div>

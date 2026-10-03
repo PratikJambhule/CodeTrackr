@@ -24,8 +24,11 @@ adds no measurable latency.
 That is a deliberate constraint, not a limitation we intend to lift:
 
 - The whole Insights surface is honest about being deterministic statistics. Adding a
-  probabilistic layer on top of ~140 documents of real analytics data would manufacture exactly
-  the false authority the 2026-09-10 audit existed to remove.
+  probabilistic layer on top of the data that existed would manufacture exactly the false
+  authority the 2026-09-10 audit existed to remove. *(When this was written the analytics were
+  believed to be ~140 real documents; they turned out to be demo data — see the session log §14.
+  The real figure was lower still.)* A k-means replacement for the session archetypes is designed
+  in `docs/ML_INTEGRATION_PLAN.md`, blocked on the same shortage.
 - A rule can be unit tested against a fixture. A generated sentence cannot.
 - The reader can check the claim, because the numbers that produced it travel with it.
 

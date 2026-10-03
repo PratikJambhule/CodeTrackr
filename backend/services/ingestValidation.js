@@ -8,6 +8,9 @@ const MAX_BACKDATE_MS = 24 * 60 * 60 * 1000;
 const MAX_FILENAME = 255;
 const MAX_LANGUAGE = 64;
 const MAX_PROJECT = 128;
+// Idempotency key from the client (a UUID in practice). Optional, so older
+// extensions that do not send one keep working.
+const FLUSH_ID_RE = /^[A-Za-z0-9-]{8,64}$/;
 
 function isBoundedString(v, max) {
   return typeof v === 'string' && v.trim().length >= 1 && v.length <= max;
@@ -39,6 +42,11 @@ function validateIngestPayload(body) {
     errors.push(`projectName, if present, must be a string of 1..${MAX_PROJECT} chars`);
   }
 
+  if (b.flushId !== undefined && b.flushId !== null &&
+      !(typeof b.flushId === 'string' && FLUSH_ID_RE.test(b.flushId))) {
+    errors.push('flushId, if present, must be 8..64 letters, digits or dashes');
+  }
+
   if (b.timestamp !== undefined && b.timestamp !== null) {
     const t = new Date(b.timestamp).getTime();
     if (!Number.isFinite(t)) {
@@ -59,6 +67,7 @@ function validateIngestPayload(body) {
       language: b.language,
       projectName: b.projectName,
       timestamp: b.timestamp,
+      flushId: b.flushId || null,
     },
   };
 }

@@ -7,6 +7,8 @@ const Onboarding = () => {
     const [apiKey, setApiKey] = useState('');
     const [userName, setUserName] = useState('');
     const [copied, setCopied] = useState(false);
+    const [keyHint, setKeyHint] = useState<string | null>(null);
+    const [loadError, setLoadError] = useState('');
     const [loading, setLoading] = useState(true);
     const navigate = useNavigate();
 
@@ -14,19 +16,37 @@ const Onboarding = () => {
         fetchUserProfile();
     }, []);
 
+    /** Create a key and show it once (the server keeps only a hash). */
+    const createApiKey = async () => {
+        const response = await fetch(`${API_URL}/api/user/regenerate-api-key`, {
+            method: 'POST',
+            credentials: 'include'
+        });
+        const data = await response.json();
+        if (!response.ok || !data.success) throw new Error('Could not create your API key');
+        setApiKey(data.apiKey);
+        setKeyHint(data.apiKeyHint);
+    };
+
+    // A failed load used to render an empty key box with no message (M-27).
     const fetchUserProfile = async () => {
+        setLoading(true);
+        setLoadError('');
         try {
             const response = await fetch(`${API_URL}/api/user/profile`, {
                 credentials: 'include'
             });
             const data = await response.json();
-            
-            if (data.success) {
-                setApiKey(data.user.apiKey);
-                setUserName(data.user.name);
+            if (!response.ok || !data.success) throw new Error('Could not load your profile');
+            setUserName(data.user.name);
+            if (data.user.hasApiKey) {
+                setKeyHint(data.user.apiKeyHint);
+            } else {
+                await createApiKey();
             }
         } catch (error) {
-            console.error('Failed to fetch profile:', error);
+            console.error('Onboarding failed to load:', error);
+            setLoadError('We could not load your account. If you use Safari, Firefox or a private window, allow cookies for this site, then try again.');
         } finally {
             setLoading(false);
         }
@@ -54,6 +74,19 @@ const Onboarding = () => {
         return (
             <div className="min-h-screen bg-gradient-to-br from-[#0a0a0f] via-[#1a1a2e] to-[#16213e] flex items-center justify-center">
                 <div className="text-white text-xl">Loading...</div>
+            </div>
+        );
+    }
+
+    if (loadError) {
+        return (
+            <div className="min-h-screen bg-gradient-to-br from-[#0a0a0f] via-[#1a1a2e] to-[#16213e] flex items-center justify-center p-4">
+                <div role="alert" className="max-w-md text-center text-white">
+                    <p className="mb-6 text-gray-300">{loadError}</p>
+                    <button onClick={fetchUserProfile} className="px-6 py-3 bg-blue-600 hover:bg-blue-700 rounded-lg">
+                        Try again
+                    </button>
+                </div>
             </div>
         );
     }
@@ -92,13 +125,15 @@ const Onboarding = () => {
                     <div className="bg-black/30 rounded-lg p-6 border border-white/10">
                         <div className="flex items-center gap-4">
                             <div className="flex-1 font-mono text-white bg-black/40 px-4 py-3 rounded-lg overflow-x-auto">
-                                {apiKey}
+                                {apiKey || keyHint}
                             </div>
                             <button
-                                onClick={copyApiKey}
+                                onClick={apiKey ? copyApiKey : () => createApiKey().catch(() => setLoadError('Could not create a new key.'))}
                                 className="flex-shrink-0 px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors flex items-center gap-2"
                             >
-                                {copied ? (
+                                {!apiKey ? (
+                                    <>New key</>
+                                ) : copied ? (
                                     <>
                                         <CheckCircle className="w-5 h-5" />
                                         Copied!
@@ -111,6 +146,11 @@ const Onboarding = () => {
                                 )}
                             </button>
                         </div>
+                        <p className="mt-3 text-sm text-gray-400">
+                            {apiKey
+                                ? 'Copy it now: the key is stored hashed and will not be shown again.'
+                                : 'You already have a key. "New key" replaces it; the old one stops working.'}
+                        </p>
                     </div>
                 </div>
 
@@ -154,7 +194,7 @@ const Onboarding = () => {
                         <div className="bg-black/30 rounded-lg p-6 border border-white/10">
                             <h3 className="text-white font-semibold mb-3">Option 2: Install from Marketplace</h3>
                             <a
-                                href="https://marketplace.visualstudio.com/items?itemName=YOUR_PUBLISHER.codetrackr"
+                                href="https://marketplace.visualstudio.com/items?itemName=CodeTrackr-ext.codetrackr-vscode"
                                 target="_blank"
                                 rel="noopener noreferrer"
                                 className="inline-flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white rounded-lg transition-all"

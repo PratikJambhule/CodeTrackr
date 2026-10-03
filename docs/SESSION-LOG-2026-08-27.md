@@ -395,7 +395,8 @@ read, no cron).
 
 **End-to-end verification against the live DB (read-only) found the real blockers:**
 - **0 of 7034 documents carry `bucketStart`** → this branch has never been deployed.
-- Rich analytics exist in only **140 documents, all 2026‑07‑15 → 2026‑08‑27**. The newest
+- Rich analytics exist in only **140 documents, all 2026-07-15 → 2026-08-27** *(correction, §14:
+  these were demo data, not extension output)*. The newest
   stored document is `{ duration: 120, language: "latex" }`. The live extension is not sending
   analytics at all.
 - Performance measured, not assumed: `IXSCAN`, 32 examined / 32 returned, 1 ms;
@@ -451,7 +452,7 @@ nothing ever reading them back. Now returned with rates and rendered. A rate is 
 `—`) when nothing ran, so "never failed a build" and "never ran a build" cannot be confused.
 
 **The rules engine.** `services/rulesEngine.js` turns the metrics into a short list of plain
-statements. Deliberately not a model and not an LLM: on ~140 documents of real analytics data,
+statements. Deliberately not a model and not an LLM: on ~140 documents of analytics data (later found to be demo data, §14),
 a probabilistic layer would manufacture exactly the false authority §11 existed to remove.
 Thirteen declarative rules, each gated on the same confidence sidecar the grid uses, each finding
 carrying the evidence that fired it.
@@ -525,6 +526,92 @@ rebuilt (Preparation 72 pp, Condensed 23 pp).
 
 Verified green before and after the edits: backend 18 suites / 292, extension 3 / 52. Frontend
 build green (no frontend code touched).
+
+---
+
+## 14. Deploy completed, and a small-fix batch (2026-09-12)
+
+**Everything is live.** `main` was replaced by the branch (force-push, old `main` preserved as tag
+`backup-main-4c1ae25`). Render auto-deployed; Vercel did not, because production was pinned by an
+Instant Rollback — pushes built fine but never took the domain, and the rollback dialog only
+offers the immediately previous deployment, so it looked like no build existed when one did. The
+fix was Promote, not rebuild.
+
+**The ingest pipeline is verified end to end for the first time.** Real documents now arrive with
+`bucketStart` on the 10-minute grid, sparse analytics sub-documents, and `flushCount: 3` where
+three flushes merged into one bucket. Before today, 0 of 7,034 documents had ever been bucketed.
+
+**A correction to §11.** The 140 analytics-bearing documents that audit found were **demo data**
+from `seed-demo-insights.js`, not extension output — the seeder reported them as already present
+when re-run. The extension had never delivered rich analytics to production at all.
+
+**Cron is wired.** `.github/workflows/cron.yml` calls the two internal routes hourly and daily
+with `INTERNAL_CRON_SECRET`. A manual run went green and the rollup wrote 98 `dailysummaries`
+documents — a collection previously written by nothing.
+
+**Six small fixes, found by running the code against real data:**
+
+- **M-22.** `activeDaysRatio` could only ever return 1. `observedDays` was
+  `min(days, max(activeDays, 1))`, and activeDays can never exceed the window, so the ratio was
+  `activeDays / activeDays`. The metric built in M-16(b) to measure cadence measured nothing and
+  `cadence-low` could never fire. Now the span from the first active day through today. The same
+  account went from 1.0 to 0.48.
+- **M-23.** The leaderboard returned every user's email to every signed-in user.
+- **M-24.** Rate limits extended to `/api/groups/:groupId/join` (10 per IP / 15 min) and
+  `/api/analytics` (120/min).
+- **L-1.** `NotificationPanel`'s polling effect closed over a stale `isOpen`.
+- The seeder now backdates goal `createdAt`/`completedAt`; without it the goal lifetime window
+  excluded all seeded activity and `estimationCalibration` stayed null. With the fix it returns
+  2.26x (range 1.75-4.55) at high confidence, so the metric M-17 revived is demonstrable.
+- Demo data was seeded for verification and removed again; production carries none of it.
+
+One self-inflicted lesson: the first version of the email test asserted `!/email/` over the whole
+file and tripped on the word "email" inside the comment added in the same change. It now matches
+the projection and the response field, not prose.
+
+**New in the interview docs:** a section mapping the project to core computer-engineering subjects
+(DBMS, OS, networks, theory of computation, algorithms, statistics, security, software
+engineering, distributed systems) with a file and a decision for each — plus an explicit list of
+what the project does *not* demonstrate.
+
+Backend 18 suites / **296 assertions**, extension 3 / 52, frontend build green.
+
+---
+
+## 15. Resume check, the ML plan, and doc reconciliation (2026-09-16)
+
+No application code changed.
+
+**State on resuming.** `main` at `92b899b`, in sync with the remote; backend 18 suites / 296,
+extension 3 / 52, frontend build green. Render `/health` → 200, but a sleeping instance took
+**~22 s** to answer. The scheduler is healthy: the rollup wrote the 2026-09-12 summary on schedule.
+
+**Data has stalled.** 4 bucketed documents in total, from 1 user, and **none since 2026-09-12**.
+Nobody else has installed the extension. This now limits the product more than any code does.
+
+**The ML plan was re-checked against the code, and several earlier statements were wrong:**
+- The session feature vectors are **not persisted**. `featureVector()` runs per request inside
+  `sessionize()` and is discarded, so training needs an export script.
+- The vector has **12** fields, not 11 — `commits` had been missed.
+- Four fields are size absolutes that must **not** be clustered on.
+- Thin legacy sessions become all-zero vectors that would **inflate** the silhouette score.
+- Per-user scaling divides by a near-zero spread for users with few sessions.
+- Cluster ids reorder on retraining, so names must be matched to centres.
+- With no labels, the existing rules become the evaluation yardstick.
+
+The existing interview answers on "how would you add ML" were also technically wrong: they
+proposed commits and session length as features, a separate Python serving tier, and RMSE/AUC —
+supervised metrics that do not apply to clustering. All corrected.
+
+**Written:** `docs/ML_INTEGRATION_PLAN.md` (+ PDF), the plan in plain language, marked designed and
+not built. Asked to describe the model as implemented, the user chose instead to document the
+design honestly: an interviewer's first follow-up would have been the training-set size, and the
+true answer was four sessions.
+
+**Doc drift fixed.** The context file and improvement plan still described the deploy as broken and
+extension 2.4.0 as unpublished, and four places still called the 140 demo documents real
+analytics. New findings recorded: **M-25** (the onboarding Marketplace link is a placeholder that
+404s) and **L-10** (Render cold start).
 
 ---
 

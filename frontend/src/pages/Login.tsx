@@ -5,6 +5,9 @@ import { API_URL } from '../config';
 
 export default function Login() {
   const { theme } = useTheme();
+  // The API redirects here with ?error=signin when Google sign-in is cancelled
+  // or its state check fails (M-26, L-11).
+  const signInFailed = new URLSearchParams(window.location.search).get('error') === 'signin';
   
   const handleGoogleLogin = () => {
     window.location.href = `${API_URL}/auth/google`;
@@ -43,6 +46,12 @@ export default function Login() {
               Track your coding journey and achieve your goals
             </p>
           </div>
+
+          {signInFailed && (
+            <p role="alert" className="mb-4 text-center text-sm" style={{ color: theme.colors.textSecondary }}>
+              Sign-in was cancelled or could not be verified. Please try again.
+            </p>
+          )}
 
           <button
             onClick={handleGoogleLogin}

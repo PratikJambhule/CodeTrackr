@@ -1,8 +1,8 @@
-import { useState, useEffect } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { Trophy, Users } from 'lucide-react';
 import { useTheme } from '../contexts/ThemeContext';
 import GradientText from '../components/GradientText';
-import { API_URL } from '../config';
+import { apiGet } from '../api';
 
 interface LeaderboardEntry {
   rank: number;
@@ -25,27 +25,14 @@ interface LeaderboardEntry {
 
 export default function Leaderboard() {
   const { theme } = useTheme();
-  const [leaders, setLeaders] = useState<LeaderboardEntry[]>([]);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    fetchLeaderboard();
-  }, []);
-
-  const fetchLeaderboard = async () => {
-    try {
-      const res = await fetch(`${API_URL}/api/leaderboard`, { credentials: 'include' });
-      if (res.ok) {
-        const data = await res.json();
-        console.log('Leaderboard data:', data);
-        setLeaders(data);
-      }
-    } catch (error) {
-      console.error('Failed to fetch leaderboard:', error);
-    } finally {
-      setLoading(false);
-    }
-  };
+  // React Query (roadmap item 11): cached for 30 s, so navigating away and
+  // back does not refetch the whole board.
+  const board = useQuery({
+    queryKey: ['leaderboard'],
+    queryFn: () => apiGet<LeaderboardEntry[]>('/api/leaderboard'),
+  });
+  const leaders: LeaderboardEntry[] = board.data ?? [];
+  const loading = board.isPending;
 
   const getRankBadge = (rank: number) => {
     if (rank === 1) {

@@ -16,6 +16,30 @@
 > is now the 10-minute grid. `ACTIVITY_BUCKET_MS=0` restores the old per-flush inserts.
 > See `CodeTrackr_DB_Write_Reduction.md` and `docs/superpowers/{specs,plans}/2026-09-08-*`.
 
+> ## October 2026 update — read this first (added 2026-10-03)
+>
+> This document was written before the October 2026 roadmap (`docs/ROADMAP_2026-10.md`). That work
+> is **built and tested but not deployed yet**, and extension **2.5.0 is not published** — say "I
+> built", not "it's live". **Wherever the text below disagrees with this box, this box wins.**
+> Up-to-date short versions: `CodeTrackr_Interview_Cheat_Sheet.md` (rewritten) and
+> `docs/INTERVIEW_PREP.md`. Measured numbers: `docs/BENCHMARKS.md`.
+>
+> | Topic | Old text says | Now |
+> |---|---|---|
+> | Extension API key | plaintext, non-expiring, unscoped; in `settings.json` | `ct_<id>_<secret>`, DB stores SHA-256 of the secret (id lookup + `timingSafeEqual`), shown once; **device-code sign-in** issues per-device keys that expire in 1 year and can be revoked one by one; extension keeps the key in **SecretStorage** |
+> | Leaderboard | O(all activity + all users) scan per request (H-7/H-8) | `userstats` running totals updated on every write; all-time board = 3 indexed reads. **1M rows: p50 6.72 s → 62 ms** (local benchmark). Group boards too; contest windows `?from=&to=` |
+> | Cheating | a valid key + loop inflates hours (H-21) | credited time = min(duration, focus + 120 s), ≤ 600 s per user per 10-minute window via an atomic counter, long uploads spread; per-key quota; raw claim kept |
+> | Duplicates / offline | no idempotency; memory-only buffer, lost on restart | `flushId` receipts (applied once); persisted outbox in `globalState`, FIFO, survives restart (M-30 fixed) |
+> | Analytics | `find()` then JS reduce (M-1) | daily/weekly from one `$facet` pipeline, proven equal to the old code by an oracle test |
+> | Write reduction | "~10× fewer writes" | **measured**: 4.9× fewer documents, 12.7× less data at the 2-minute cadence (19.6× / 51× vs the old 30 s); same throughput |
+> | Tests | 18 suites / 296; nothing against a real DB | unit **23 suites / 346**, **35 integration tests** (supertest + in-memory MongoDB, incl. CORS preflight), extension **6 / 70**; no frontend tests |
+> | `userId` type | String on activities (M-6) | ObjectId migration in progress (reads accept both; script converts) |
+> | Teams | orphaned page + live API | deleted |
+> | Groups | no admin powers | creator can rename / remove members; ownership passes on when the creator leaves |
+> | Ops | no Docker, no CD, console logs | Dockerfile + CI health check; **`docker compose up` runs MongoDB + API + website locally** (verified); deploy-on-green (off until a secret), JSON logs with request ids, optional Sentry |
+> | Bugs found while building | — | **H-23** CORS lacked PATCH → goal completion and mark-as-read never worked in a browser; M-31 goal window; M-32 weekly window; H-22 IST "today"; email leaks M-28/M-29 |
+> | Still open | — | H-19 login fix built (Vercel forwards `/api` + `/auth`; deploy + Google/Render callback setting pending); client-chosen timestamps, no web refresh token. H-20 fixed (limits per user/session) |
+
 ---
 
 ## Table of contents
@@ -47,6 +71,7 @@
 25. Codebase map
 26. "Defend your project" — 30 interviewer exchanges
 27. Final self-audit
+28. Core computer-engineering subjects — where each one actually appears
 
 ---
 
@@ -900,8 +925,8 @@ card with "Try again"; `Leaderboard`/`Groups`/`Dashboard` render "No data yet" e
 3. **`Goals.tsx` to-dos** (`addTodo`/`toggleTodo`/`deleteTodo`) mutate React state only —
    never persisted, no API. No goal completion / delete / progress-bar UI; the
    `/:goalId/progress` endpoint is never called.
-4. **`NotificationPanel`** polling `useEffect` closes over a stale `isOpen` (L-1) — the
-   "refetch full list while open" branch never runs from the interval.
+4. ~~**`NotificationPanel`** polling `useEffect` closes over a stale `isOpen` (L-1)~~ — ✅ fixed
+   2026-09-12; the interval reads `isOpenRef.current`, so an open panel refreshes again.
 5. **`Teams.tsx`** is dead (no route).
 6. No client caching / dedup — every nav refetches.
 
@@ -1118,7 +1143,7 @@ GET /api/metrics?days=30&timezone=<offset>
                              (÷ focusedMs mixed two clocks and could exceed 1 — fixed 2026-09-10)
        flowBlockStats      = { medianMs, longestMs, deepBlockCount, blockCount, totalMs }
        volumeStability     = clamp(1 − MAD/median, 0, 1)      alias: consistencyIndex
-       activeDaysRatio     = activeDays / windowDays          ← real cadence
+       activeDaysRatio     = activeDays / observedDays        ← real cadence (span, not count)
        qualityStreak       = consecutive days containing a ≥25min block
        truePeakWindow      = argmax over 2h windows of Σ minutes×(1−churnRatio), ≥3 days
        estimationCalibration = median(actual/estimated) + range, from 1 completed goal
@@ -1134,7 +1159,7 @@ GET /api/metrics?days=30&timezone=<offset>
 | `deepWorkRatio` | `Σ blocks ≥ 25 min ÷ Σ all blocks`, rounded 2dp | fraction of *flow-block* time spent in long stretches | `0` if no blocks. Divided by `totalFocusedMs` until 2026‑09‑10 — a different clock, so it could exceed 1 |
 | `flowBlocks` | median / longest / deep-count / count / `totalMs` of `flowBlocksMs` | shape of sessions | zeros on empty |
 | `volumeStability` | `clamp(1 − MAD/median, 0, 1)` of daily minutes | steadiness of *how much* you code on the days you code | `0` if no days or `median ≤ 0`. Was `1 − σ/μ`; the mean/σ pair is dominated by one outlier day |
-| `activeDaysRatio` | `activeDays ÷ windowDays` | the actual *cadence* metric — the daily `$group` emits no zero-days, so `volumeStability` never saw them | `0` on an empty window |
+| `activeDaysRatio` | `activeDays ÷ observedDays`, where `observedDays` spans your first active day in the window through today, capped at the window | the actual *cadence* metric — the daily `$group` emits no zero-days, so `volumeStability` never saw them | `0` on an empty window. *(Until 2026-09-12 `observedDays` was `min(window, activeDays)`, which made the ratio 1 for everyone — M-22.)* |
 | `consistencyIndex` | alias of `volumeStability` (back-compat for older dashboard builds) | — | — |
 | `truePeakWindow` | **2-hour** window maximising `Σ minutes × (1 − churnRatio)` ("surviving minutes"), eligible only at ≥3 distinct days | most *productive* window (vs busiest) | `null` if no window clears the day floor |
 | `estimationCalibration` | `median(actual/estimated)` over completed goals with `estimated > 0`, plus `minFactor`/`maxFactor` | `>1` = you underestimate | `null` if no usable pair. Usable from **one** goal; was a mean requiring ≥2 |
@@ -1178,24 +1203,31 @@ skipped** — the correct answer. Design notes: `docs/RULES_ENGINE.md`.
 > number it states must be traceable to the metrics object, to stop it hallucinating. That's
 > specced (Gemini was the pick) but not built."
 
-### 12.6 If asked to "make it ML" [RECOMMENDED IMPROVEMENT]
+### 12.6 The machine-learning plan [DESIGNED, NOT BUILT]
 
-- **Feature engineering:** per-day/session vectors — focused minutes, deep-block count, churn
-  ratio, commits, context switches, hour-of-day, day-of-week, language mix.
-- **Preprocessing:** per-user z-score normalisation (habits are relative), handle missing
-  focus data (pre-2.1.0), aggregate to session grain.
-- **Unsupervised first:** k-means / GMM over session vectors → "session archetypes"
-  (deep-focus, exploratory, firefighting); PCA for a 2-D "session map".
-- **Supervised only if you have a label:** predict next-day minutes (regression) or
-  goal-slip risk (classification) — needs labelled outcomes you don't currently store.
-- **Anomaly detection** on ingest for anti-cheat (isolation forest on `duration` vs `edits`).
-- **Serving:** a separate Python/FastAPI service or batch job writing an `insights` collection;
-  never inline in the request.
-- **Evaluation:** hold-out RMSE / AUC; guard against leakage (don't train on the same window
-  you predict); monitor drift.
-- **The LLM layer:** structured-metrics-only prompt, JSON-schema-constrained output, a
-  validator that rejects any figure not present in the metrics object, a cache keyed on
-  `(userId, window, metricsHash)`.
+The full plan, in plain language: `docs/ML_INTEGRATION_PLAN.md`. The short version:
+
+- **What:** replace the hand-written `classify()` rule cascade with **k-means clustering** over
+  session feature vectors, so the session archetypes are learned rather than hand-coded.
+- **Features — 8, chosen deliberately:** five ratios (`churnRatio`, `readRatio`, `buildFailRatio`,
+  `commandFailRatio`, `deepShare`) and three rates (`linesPerMin`, `commandsPerMin`,
+  `switchesPerMin`). `featureVector()` also returns four absolutes — `activeMin`, `editVolume`,
+  `debugSessions`, `commits` — which are **excluded**: they measure a session's *size*, so
+  clustering on them splits long sessions from short ones instead of debugging from building.
+- **Preprocessing:** filter out sessions too thin to classify (the same guard `classify()` uses),
+  then scale per user, falling back to global scaling for users with too few sessions.
+- **Train offline, serve in JavaScript:** scikit-learn in a notebook; only the k × 8 centres are
+  stored, versioned, in MongoDB; the API assigns the nearest centre. No Python in production.
+- **Evaluation without labels:** the elbow method and silhouette score choose k, and an agreement
+  table against the existing rules turns the rule cascade into the yardstick. Supervised metrics
+  such as RMSE or AUC do not apply — there is no label.
+- **The trap:** thin legacy sessions are all-zero vectors that form one perfectly tight cluster
+  and inflate the silhouette score. Filtering first is not optional.
+- **Why it is not built:** on 2026-09-16 there were 4 usable sessions from 1 person and 0 completed
+  goals. A model trained on that would be confident nonsense.
+- **Other routes considered:** supervised goal-slip prediction (blocked — no completed goals),
+  anomaly detection on ingest, and the LLM narration layer with a validator that rejects any figure
+  not present in the metrics object.
 
 ---
 
@@ -1270,9 +1302,11 @@ Format: **Current → Vulnerability → Attack → Fix.**
 
 - **Now:** `express-rate-limit` on `/auth` (50 / 15 min) and `/api/extension` (120 / min),
   skipped under `NODE_ENV=test`. `trust proxy` is set so the client IP is correct behind Render.
-- **Still uncapped:** `/api/groups/:id/join` (private-group password brute force), the analytics
-  routes, and there's no *per-key* quota on ingest (only per-IP).
-- **Next:** add a limiter on `/join`; per-key limits + an idempotency key on ingest (#10, deferred).
+- **Added 2026-09-12 (M-24):** `/api/groups/:groupId/join` at 10 per IP per 15 min — a private group
+  is gated by one shared password, so it was an unlimited guessing surface — and `/api/analytics` at
+  120/min, because each call is unbounded aggregation work.
+- **Still uncapped:** there is no *per-key* quota on ingest (only per-IP).
+- **Next:** per-key limits + an idempotency key on ingest (#10, deferred).
 
 ### 14.3 Security headers — done (2026-09-09)
 
@@ -1303,10 +1337,12 @@ Format: **Current → Vulnerability → Attack → Fix.**
   error', id }`. Routes call `next(err)`; deliberate 4xx bodies (with fixed strings) stay
   per-route. `try/catch` wrappers kept for now.
 
-### 14.6 Leaderboard exposes every user's email
+### 14.6 Leaderboard exposed every user's email — ✅ FIXED 2026-09-12 (M-23)
 
-- **Current:** `GET /api/leaderboard` returns `email` per row.
-- **Fix:** return a display name / handle only.
+- **Was:** `GET /api/leaderboard` returned `email` on every row, to every signed-in user — 35
+  accounts on the live install.
+- **Now:** the field is gone from the projection and the response, and the frontend no longer
+  renders the handle derived from it. `quickWins.test.js` asserts both.
 
 ### 14.7 `AUTH_BYPASS` — fixed, but note it
 
@@ -1578,11 +1614,12 @@ Walk it in order (this is `CodeTrackr_Architecture.md` §9 as a checklist):
 - **Backend:** `backend/vercel.json` — `@vercel/node` build of `api/index.js` (which wraps
   `app.js` with `serverless-http`), route-all to it. Also runnable as a plain process
   (`node app.js`, `app.listen(PORT || 5050)`). The extension's default `apiBase` points at
-  **Render** (`codetrackr-backend-uckp.onrender.com`) — so the *live* backend is most likely
-  Render, with the Vercel config as an alternative/earlier setup.
+  **Render** (`codetrackr-backend-uckp.onrender.com`), which is the live backend (verified
+  2026-09-12: `GET /health` → 200, auto-deploys `main`); the Vercel config is an unused alternative.
 - **DB:** MongoDB Atlas (`MONGO_URI`, TLS, `family:4`, 15 s selection timeout).
 - **Extension:** `vsce package` → `.vsix`; publisher `CodeTrackr-ext`;
-  `codetrackr-vscode-2.2.0.vsix` committed. `PUBLISHING_v2.0.0.md` documents the Azure DevOps
+  `.vsix` files are gitignored (none committed); **2.4.0** is the published Marketplace version.
+  `PUBLISHING_v2.0.0.md` documents the Azure DevOps
   PAT + `vsce publish` flow.
 - **No** Dockerfile, Procfile, or `render.yaml`. **GitHub Actions CI added 2026‑09‑09**
   (`.github/workflows/ci.yml`) — backend + extension tests + frontend build on push / PR;
@@ -1729,31 +1766,33 @@ Each: **Decision → Reason → Alternative → Trade-off → When the alternati
 
 | # | Problem | Why it matters | Impact | Fix |
 |---|---|---|---|---|
-| 1 | API key plaintext, non-expiring, unscoped | it's a credential, not an id | key leak → ingest hijack, leaderboard fraud | hash at rest, scope, rotate, per-device |
-| 2 | Leaderboard scans all activity + all users in Node | O(A+U) per request, no cache/window/pagination | times out at ~10k users | `UserStats` rollup + Redis sorted set |
-| 3 | Analytics aggregate in JS | ships/parses every doc, O(N) memory | slow reads, wasted DB egress | MongoDB `$group` pipelines |
-| 4 | Missing `{userId:1,timestamp:-1}` index | every query filters `timestamp` but indexes are on `date` | full per-user scans | add the index; drop the `date` index |
+| 1 | ~~API key plaintext, non-expiring, unscoped~~ ✅ built 2026-10-03 | it's a credential, not an id | — | SHA-256 at rest (`ct_<id>_<secret>`), shown once; per-device keys via device-code sign-in, 1-year expiry, revocable; SecretStorage in the extension |
+| 2 | ~~Leaderboard scans all activity~~ ✅ built 2026-10-03 | was O(A+U) per request | — | `userstats` running totals: 1M rows p50 6.72 s → 62 ms (local benchmark); windowed boards still scan their window |
+| 3 | ~~Analytics aggregate in JS~~ ✅ built 2026-10-03 (daily/weekly) | — | — | one `$facet` pipeline, proven equal to the old code by an oracle test |
+| 4 | ~~Missing `{userId:1,timestamp:-1}` index~~ ✅ fixed 2026-09-08 | — | — | index added, `date` dropped |
 | 5 | ~~`node-cron` on serverless~~ ✅ fixed 2026-09-09 | was: frozen between requests (H-13) | — | `require.main` guard + external `/api/internal/run-*` trigger |
-| 6 | ~~No helmet / rate limit / validation~~ ✅ mostly fixed 2026-09-09 | — | — | `helmet` + rate limits on `/auth`+`/api/extension`; ingest bounds-checked. Group `/join` still unlimited |
+| 6 | ~~No helmet / rate limit / validation~~ ✅ fixed | — | — | helmet; rate limits incl. group `/join` (2026-09-12) and a per-key ingest quota (2026-10-03). **Still per IP (H-20)** |
 | 7 | ~~Frontend doesn't typecheck~~ ✅ fixed 2026-09-09 | was 29 `tsc -b` errors | — | `npm run build` is green; CI enforces it |
 | 8 | ~~Dashboard "Repeated Failures" is mock~~ ✅ fixed 2026-09-09 | was fabricated commands | — | now renders `terminalSummary.repeatedFailedCommands` |
-| 9 | Goals to-dos not persisted; no complete/delete | data vanishes on refresh | feature is half-built | add routes + wire the UI; call `/progress` |
-| 10 | Teams UI orphaned | dead code, backend routes unused | confusion | route it or delete it |
+| 9 | Goals: no edit/delete | half-built to-dos were removed; complete/reopen exist (and work in browsers since H-23) | minor | add edit/delete routes |
+| 10 | ~~Teams UI orphaned~~ ✅ deleted 2026-10-03 | — | — | page, route and model removed |
 | 11 | Idle < 2 min counts as active | totals skew high | inflated hours | count only intervals with a real edit event (L-7) |
-| 12 | `activities.userId` String vs ObjectId elsewhere | coercion gymnastics, no `$lookup` | leaderboard hack, brittle | migrate with a compat window (M-6) |
-| 13 | Extension has no offline queue | un-flushed time lost on restart | data loss | persist buffer to `globalState` |
-| 14 | No idempotency on ingest | retry = double count | inflated data | client idempotency key + unique index |
+| 12 | `activities.userId` String vs ObjectId (M-6) — 🟡 migrating | — | — | expand step built 2026-10-03: ObjectId writes, dual reads, migration script; live `--apply` + contract pending |
+| 13 | ~~No offline queue~~ ✅ built 2026-10-03 (extension 2.5.0, unpublished) | — | — | persisted FIFO outbox in `globalState` |
+| 14 | ~~No idempotency~~ ✅ built 2026-10-03 | — | — | `flushId` + unique receipts, 48 h TTL |
 | 15 | Insights recomputed every request | 4 aggregations per page load | slow page, DB load | cache per (user, window) |
 | 16 | ~~Errors echo `err.message`~~ ✅ fixed 2026-09-09 | was a recon aid | — | central error middleware + correlation id |
-| 17 | Leaderboard exposes emails | PII in a shared list | privacy | return handles only |
-| 18 | No integration/e2e/frontend tests; nothing run vs a real DB | pipelines unverified end-to-end | regressions slip | supertest + `mongodb-memory-server`, Playwright |
+| 17 | ~~Leaderboard exposes emails~~ ✅ fixed 2026-09-12 | PII in a shared list | privacy | name only, asserted by a test |
+| 18 | No frontend/e2e tests | UI regressions slip | — | **integration tests exist since 2026-10-03** (35, supertest + in-memory MongoDB); next: React Testing Library, Playwright |
+| 19 | Cross-site auth cookie (H-19) | Safari/Firefox/incognito logins likely fail | blocks a campus launch | proxy the API through Vercel, or a custom domain |
+| 20 | Leaderboard can still be paced by a script | timestamps are client-chosen | one credited hour per real hour | server-side anomaly checks once there is data |
 
 ### 21.2 Production-level concerns (would block a real launch)
 
-- No observability (logs are `console.log`, no metrics, no tracing, no error tracking).
-- CI (GitHub Actions, 2026-09-09) runs tests + build on push; still no CD — manual deploys; manual `vsce publish` (once stalled on an expired PAT).
+- Observability is basic: JSON logs with request ids and optional Sentry (2026-10-03); no metrics or tracing.
+- CI runs unit + integration tests, the build and a Docker health check; a deploy-on-green workflow exists but is off until a secret is set; `vsce publish` is still manual (`docs/RELEASE.md`).
 - No backups/DR story documented.
-- No abuse/anti-cheat (leaderboard is trivially gamed — see §26).
+- Anti-cheat is bounded, not solved: credited time is capped per window (2026-10-03), but timestamps are client-chosen.
 - No data-retention / privacy policy for a tool that records developer behaviour;
   GDPR-style "export/delete my data" not implemented.
 - Single points of failure: one Mongo, one API instance, Render free-tier sleep.
@@ -1769,6 +1808,16 @@ Each: **Decision → Reason → Alternative → Trade-off → When the alternati
 - ✅ 10-minute bucket-on-write (`$inc` upsert); extension 2.3.0 skip-empty + `minFlushMinutes` 2.
 - ✅ Sparse analytics sub-docs; dropped the dead `date` field + index.
 - ✅ Added `{userId:1,timestamp:-1}`; `DailySummary` + nightly rollup + 400-day TTL.
+
+### Done 2026-10-03 (October roadmap — built and tested, not deployed)
+
+- ✅ Hashed API keys, device-code sign-in with per-device keys, SecretStorage.
+- ✅ `userstats` leaderboard + group boards; contest-week windows; group admin.
+- ✅ Idempotency key, anti-cheat crediting, per-key quota; persisted extension outbox.
+- ✅ `$facet` dashboard pipeline; `userId` → ObjectId expand step; React Query; Teams deleted.
+- ✅ Integration tests (35); benchmarks; JSON logs + request ids; Dockerfile + deploy-on-green.
+- Remaining from the lists below: Redis, warehouse, LLM layer, anomaly detection, data
+  export/delete, WebSockets — all still future.
 
 ### Short term (days)
 
@@ -1822,16 +1871,16 @@ Let `N` = a user's activity docs in the query window; `A` = all activity docs ev
 
 | Operation | Time | Space | Notes / can it be better? |
 |---|---|---|---|
-| `POST /track` ingest | O(1) (one insert) | O(1) | fine |
+| `POST /track` ingest | O(w) small writes: receipt, w window counters (w = windows the upload spans, usually 1), bucket upsert, `userstats` `$inc` *(since 2026-10-03)* | O(1) | measured ~450 req/s locally, same as one insert (`docs/BENCHMARKS.md`) |
 | `POST /track/batch` | O(k) inserts | O(k) | `insertMany`; unused |
-| `verifyApiKey` | O(log U) index lookup | O(1) | fine (would be same on a hashed `keyId`) |
+| `verifyApiKey` | O(log U) index lookup on `apiKeyId` (then `devicetokens`) + one SHA-256 | O(1) | hashed keys cost the same as plaintext lookup *(since 2026-10-03)* |
 | `isAuthenticated` | O(1) verify + O(log U) `findById` | O(1) | could cache the user for the request |
-| Daily analytics | O(N) transfer+parse + O(N) reduce | **O(N)** (all docs resident) | → O(N) *in Mongo* with `$group`, O(1) app memory |
+| Daily analytics | O(N) inside MongoDB (`$facet`), O(24) rows back *(since 2026-10-03)* | O(1) app memory | was O(N) transfer + JS reduce over 7 days to show 1 |
 | `computeStreak` | O(N₉₀) `$group` + O(90) walk | O(distinct days) | good enough; index on `timestamp` would help the `$match` |
-| Weekly / timeslot | O(N) | O(N) | same as daily |
+| Weekly / timeslot | weekly: same pipeline, O(7) rows back; timeslot: O(N) in JS over a 2-hour window | O(1) / O(N) | timeslot is bounded by its window |
 | `/summary` | O(N) in Mongo (`$group`) | O(days + langs) | already a pipeline — the model to follow |
-| **Global leaderboard** | **O(A)** aggregate + **O(U)** merge + O(U log U) sort | **O(A_projects + U)** | → O(U) read + O(U log U) sort from a rollup; O(log U) with a Redis ZSET |
-| Group leaderboard | O(A_member) aggregate + O(M) | O(M) | same rollup idea, scoped |
+| **Global leaderboard** | **O(k log U)** — top-k from the `totalSeconds` index + two O(log U) max lookups *(since 2026-10-03)* | O(k) | was O(A) aggregate + O(U) merge; **1M rows: 6.72 s → 62 ms p50** (local). Redis ZSET would add O(log U) "my rank" |
+| Group leaderboard | all-time: O(M log U) `userstats` lookups; contest window: O(A_member in window) | O(M) | windowed boards still scan their window |
 | `/api/metrics` | 4 × O(N) `$group` + O(B log B) sort in `flowBlockStats` + O(D log D) median/MAD + O(24) peak + O(G) pairs + O(S) sessionize + O(R) rules | O(B + D + S) | only the 90-day baseline is cached — cache the rest per (user, window) |
 | `consistencyIndex` | O(D) | O(D) | |
 | `truePeakWindow` | O(24) | O(1) | |
@@ -1839,11 +1888,12 @@ Let `N` = a user's activity docs in the query window; `A` = all activity docs ev
 | EditorTracker `consumeChurn` | O(R) over recent inserts (bounded by 10-min window) | O(R) | fine |
 | `flowBlockStats` median | O(B log B) sort | O(B) | B capped at 200 by the normaliser |
 | Dashboard render | O(N) dataset build per chart | O(N) | cheap; not memoised deliberately |
-| Frontend nav | refetch every time, no cache | — | React Query would dedupe |
+| Frontend nav | React Query cache, 30 s fresh *(Dashboard, Leaderboard, Insights since 2026-10-03)* | O(cached queries) | Groups/Goals/Profile still refetch |
 
-**Headline:** the two costs that matter are (1) **leaderboard = O(all activity)** and
-(2) **analytics = O(N) app memory + DB egress**. Both have the same fix family: aggregate in
-the engine / precompute rollups.
+**Headline (updated 2026-10-03):** the two costs that used to matter — (1) **leaderboard =
+O(all activity)** and (2) **analytics = O(N) app memory + DB egress** — were fixed the way this
+section predicted: precompute running totals (`userstats`) and aggregate in the engine (`$facet`).
+What remains linear is windowed boards (`?days=`, contest weeks), which scan their window.
 
 ---
 
@@ -2195,3 +2245,174 @@ the engine / precompute rollups.
 4. **The broken frontend build** — own it, it's a cleanup not a design flaw.
 5. **Nothing tested against a real DB** — own it, name the fix (`supertest` + memory server).
 6. **"What did *you* build?"** — describe what you can defend in depth; don't over-claim.
+
+---
+
+## 28. Core computer-engineering subjects — where each one actually appears
+
+Interviewers often ask "which subjects did you actually use?" This maps each one to a **specific
+file and a specific decision**, so the answer is concrete rather than a list of course names.
+Everything here points at code that exists; §28.11 says plainly what the project does *not*
+demonstrate.
+
+| Subject | Where it shows up | The one-line answer |
+|---|---|---|
+| **DBMS** | `models/Activity.js`, `services/metricsService.js` | Compound-index field order, a partial-unique index used as a concurrency guard, TTL, and aggregation pipelines |
+| **Operating systems** | `services/activityBucket.js`, `app.js`, `extension/src/extension.ts` | Race conditions and atomicity without threads; why a timer-based scheduler dies on serverless |
+| **Computer networks** | `app.js`, `routes/auth.js`, `extension/src/extension.ts` | CORS, cookie flags, TLS, rate limiting, and at-least-once delivery over plain HTTP |
+| **Theory of computation** | `services/textQuery.js` | A regex is an automaton — catastrophic backtracking is a real denial of service |
+| **Algorithms** | `services/metricsDerive.js`, `routes/leaderboard.js` | Sliding-window argmax, gap-splitting, and an `O(A + U)` scan that fails at the argument limit |
+| **Probability & statistics** | `services/metricsDerive.js` | Median and MAD over mean and standard deviation, plus sample-size gating |
+| **Information security** | `services/passwordHash.js`, `routes/internal.js`, `middleware/auth.js` | scrypt, constant-time comparison, JWT, IDOR, and an honest threat model of the API key |
+| **Software engineering** | `backend/tests/`, `docs/IMPROVEMENT_PLAN.md` | Pure functions split from I/O so they are testable; regression tests that encode past bugs |
+| **Distributed systems** | `routes/extension.js`, `services/dailyRollup.js` | Exactly-once is not free; clock skew, idempotency, and eventual consistency |
+
+### 28.1 DBMS
+
+- **Index design.** `{ userId: 1, timestamp: -1 }` follows equality-then-range: every read filters
+  one user over a date range. Before it existed those queries fell back to the `userId` index and
+  filtered in memory. Measured with `.explain()`: `IXSCAN`, 32 keys examined for 32 returned.
+- **A unique index as a concurrency control.** `{userId, projectName, language, bucketStart}` is
+  **partial** (`bucketStart: {$exists: true}`) so it constrains only bucketed documents. A duplicate
+  key (`11000`) is not an error to hide — it is the database refusing a lost update, and the group
+  join route turns the same signal into a `409`.
+- **Aggregation vs application code.** `metricsService.js` pushes `$match`/`$group` into the engine;
+  most of `routes/analytics.js` still pulls documents and reduces in JavaScript (M-1). The contrast
+  between the two is the best "why does this matter" example in the codebase.
+- **Materialised views.** `dailysummaries` is a nightly rollup — precomputed aggregates traded
+  against staleness, the classic read/write amplification decision.
+- **No transactions.** MongoDB gives atomicity per document, so the design leans on single-document
+  `$inc` upserts instead of multi-document transactions. `Team.members.push()` + `save()` is a
+  read-modify-write and *can* lose an update under concurrency — a known, documented gap.
+
+### 28.2 Operating systems
+
+- **Concurrency without threads.** Node is a single-threaded event loop, so there are no data races
+  inside the process — but there are absolutely races *at the database*, between concurrent
+  requests. The fix is atomicity in the store (`findOneAndUpdate` + `$inc`), not a mutex.
+- **Blocking the loop is fatal.** One thread serves every request, which is exactly why the ReDoS in
+  §28.4 was severe: one bad regex stalls all users, not just the attacker.
+- **Process lifecycle.** `node-cron` assumes a long-lived process. On a serverless host the process
+  is frozen between requests, so the hourly job never fires and every cold start re-runs the startup
+  sweep. Fixed by guarding on `require.main === module` and moving the schedule to an external
+  trigger — a scheduling problem solved by understanding the process model.
+- **Idle detection.** The extension's flush loop distinguishes wall-clock time from *active* time,
+  pausing its samplers after two minutes idle. Getting this wrong added five idle hours to a metric.
+
+### 28.3 Computer networks
+
+- **CORS** is an allowlist of origins with credentialed requests, which is why a Vercel preview
+  deployment cannot call the API: a different origin is rejected before the handler runs.
+- **Cookies as a transport decision.** `httpOnly` (unreadable to JavaScript, so XSS cannot steal the
+  session), `Secure`, and `SameSite=None` because the SPA and API are on different domains.
+- **Rate limiting** is per-IP with a window — and `trust proxy` matters, because behind a proxy the
+  client IP is in `X-Forwarded-For`, not the socket.
+- **Delivery semantics.** The extension posts fire-and-forget over HTTP. Without an idempotency key
+  a retry double-counts, which is the at-least-once vs exactly-once distinction in miniature.
+- **Latency is not uniform.** A cold Render instance answers in ~22 s versus ~200 ms warm; the cron
+  workflow retries with a delay for exactly this reason.
+
+### 28.4 Theory of computation
+
+The group search put user input straight into a regular expression. Two consequences follow directly
+from formal-language theory:
+
+- A regex is compiled to a **backtracking automaton**. A pattern like `(a+)+$` against a
+  non-matching string explores exponentially many paths — **catastrophic backtracking**. One request
+  pins the event loop (§28.2) and the whole service stops. That is a denial of service from a
+  string, with no exploit code.
+- Escaping every metacharacter reduces the pattern to a **literal string match**, which is linear.
+  `textQuery.js` does that, and the test asserts `(a+)+$` against a 4,000-character input returns in
+  under 500 ms once escaped.
+
+### 28.5 Algorithms
+
+- **Complexity that bites.** The leaderboard is `O(A + U)` — every activity document plus every user
+  — per request, with an `O(U log U)` sort. Fine at 7,000 documents, fatal at scale; the fix is a
+  rollup that makes it `O(U)`.
+- **Argument limits are a real bound.** `Math.max(...array)` spreads one argument per element and
+  throws `RangeError` past roughly 100k. Replaced with a fold — a reminder that language-level
+  limits are part of complexity analysis in practice.
+- **Sliding window.** `truePeakWindow` is an argmax over 24 two-hour windows, scored on "surviving
+  minutes".
+- **Gap splitting.** Sessionization collapses documents by bucket, then walks them in order and cuts
+  wherever the gap exceeds 30 minutes — one linear pass.
+- **Backward walk.** `qualityStreak` anchors on today or yesterday and walks back through a `Set` of
+  day keys, so each lookup is `O(1)`.
+
+### 28.6 Probability and statistics
+
+- **Robust statistics.** The consistency metric used `1 − stddev/mean` — the coefficient of
+  variation — which one ten-hour Saturday can dominate. It is now `1 − MAD/median`: median absolute
+  deviation is robust to outliers. The test asserts `[60,60,60,60,600]` still scores ≥ 0.9.
+- **Median over mean** for estimation calibration, so a single runaway goal cannot skew the figure.
+- **Sample size is part of the answer.** Every metric ships a confidence level derived from its own
+  sample count. Below the minimum, the UI shows `—` rather than a number. Three days of data must
+  not render identically to six months.
+- **Survivorship in the data.** The daily aggregate emits no row for a day with zero activity, so a
+  statistic computed over it silently measures only active days — the exact bug behind two wrong
+  metrics.
+
+### 28.7 Information security
+
+- **Password storage.** Group passwords use **scrypt** — a memory-hard KDF with a per-password salt,
+  stored as `scrypt$salt$hash`. Memory-hard matters because it degrades GPU attacks specifically.
+- **Constant-time comparison.** The cron secret is checked with `crypto.timingSafeEqual`, and the
+  route answers **404** rather than 401 when the secret is wrong, so it is not discoverable. A naive
+  `===` leaks the secret one byte at a time through response timing.
+- **Tokens.** A JWT is a signed, self-contained claim — the server verifies a signature instead of
+  looking up a session. The trade-off is revocation: you cannot invalidate one before it expires.
+- **IDOR.** `/api/metrics` deliberately takes **no** `:userId`; identity comes from the session, so
+  the whole class of "change the id in the URL" bugs cannot exist there.
+- **Honest threat modelling.** The API key is an unscoped, non-expiring, plaintext bearer credential.
+  Stealing it lets an attacker forge activity but not read the victim's dashboard, which needs the
+  JWT. Naming the blast radius precisely is the skill being demonstrated.
+
+### 28.8 Software engineering
+
+- **Pure functions separated from I/O.** All the metric maths lives in `metricsDerive.js` with no
+  database access, so the 346 unit assertions run in seconds with no database. Since 2026-10-03,
+  35 integration tests also run the real app against an in-memory MongoDB, and one refactor was
+  proven by running the old code as an oracle next to the new one.
+- **Regression tests encode history.** Several tests exist only because a specific bug shipped —
+  one asserts that `Math.max(...spread)` really does throw at 200k elements, so the reason for the
+  replacement cannot be lost.
+- **Architectural guard rails.** `routeGuards.test.js` statically scans route source and fails if a
+  sensitive route loses its auth middleware — a test for a property, not a behaviour.
+- **A written debt register.** `docs/IMPROVEMENT_PLAN.md` tracks every finding by severity with its
+  fix and verification. The register itself is the artefact worth showing.
+
+### 28.9 Distributed systems
+
+- **Two clocks.** The client stamps `timestamp`; the server bounds it to `[now-24h, now+60s]`
+  because clock skew and malice are the same problem from the server's point of view.
+- **Idempotency.** Ingest is at-least-once. Since 2026-10-03 each upload carries a client-generated
+  `flushId` and a unique receipt index makes a retry apply once — the standard way to make an
+  at-least-once channel behave as exactly-once. An atomic `$inc` counter caps credited time per
+  window without a read-then-write race.
+- **Eventual consistency.** The rollup runs nightly against days older than two, so summaries lag
+  reality by design. Reads that need "now" go to the raw collection.
+- **Stateless services.** No in-process state survives a restart, which is what makes horizontal
+  scaling possible — and what forced the scheduler out of the process.
+
+### 28.10 A caveat worth volunteering: compiler design
+
+`commandClassifier.ts` tokenises a shell command and classifies it by category, which is
+tokenisation and rule-based classification — the nearest thing here to lexical analysis. It is not a
+parser, there is no grammar and no AST. Say that plainly rather than dressing it up.
+
+### 28.11 What this project does *not* demonstrate
+
+Volunteering this is worth more than padding the list above:
+
+- **No machine learning.** Deterministic statistics with a threshold-rule layer. No model, no
+  training, no inference. A work-type classifier (logistic regression on one-tap user labels; it
+  replaced the earlier k-means idea on 2026-09-17) is designed in `docs/ML_INTEGRATION_PLAN.md` and
+  deliberately not built — it needs ~300 labelled sessions from 10+ people.
+- **No OS-level concurrency** — no threads, locks, or shared memory. Concurrency here is I/O
+  scheduling and database atomicity.
+- **No distributed consensus, sharding, or replication** beyond what Atlas provides.
+- **No compiler or interpreter work** beyond the tokeniser above.
+- **No formal verification or queueing theory.** Performance evidence is two local benchmarks
+  (`docs/BENCHMARKS.md`: leaderboard 6.7 s → 62 ms at 1M rows; bucketing ~5× fewer documents) —
+  measured on one laptop, not in production.

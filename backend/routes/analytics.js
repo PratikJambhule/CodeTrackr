@@ -4,6 +4,8 @@ const Activity = require('../models/Activity');
 const mongoose = require('mongoose');
 const { isAuthenticated } = require('../middleware/auth');
 const { assertOwnership } = require('../services/authorization');
+const { viewData } = require('../services/analyticsViews');
+const { matchActivityUser } = require('../services/activityUser');
 
 /**
  * Verifies the caller owns :userId. Returns the id to query, or null when a
@@ -133,6 +135,20 @@ function localDayInfo(instant, timezoneOffset) {
     };
 }
 
+/**
+ * The UTC instant at which "today" began in the user's timezone (H-22).
+ * `timezoneOffset` is Date.getTimezoneOffset(): minutes, negative east of UTC.
+ * Take the LOCAL date first, then convert its midnight back to UTC. The old
+ * inline version took the UTC date, so it was a day off whenever the two
+ * dates differ (00:00-05:30 in India).
+ */
+function localMidnightUtc(instant, timezoneOffset) {
+    const offset = Number(timezoneOffset);
+    const offsetMs = (Number.isFinite(offset) && Math.abs(offset) <= 14 * 60 ? offset : 0) * 60000;
+    const local = new Date(new Date(instant).getTime() - offsetMs);
+    return new Date(Date.UTC(local.getUTCFullYear(), local.getUTCMonth(), local.getUTCDate()) + offsetMs);
+}
+
 const STREAK_WINDOW_DAYS = 90;
 
 // Consecutive days with recorded activity, bucketed in the user's local
@@ -143,7 +159,7 @@ async function computeStreak(userIdStr, timezoneOffset) {
     const since = new Date(Date.now() - STREAK_WINDOW_DAYS * 24 * 3600000);
 
     const days = await Activity.aggregate([
-        { $match: { userId: userIdStr, timestamp: { $gte: since } } },
+        { $match: { userId: matchActivityUser(userIdStr), timestamp: { $gte: since } } },
         {
             $group: {
                 _id: {
@@ -183,7 +199,6 @@ router.get('/:userId', isAuthenticated, async (req, res, next) => {
     try {
         const { userId } = req.params;
         const { timezone } = req.query; // Get timezone offset from query (in minutes)
-        console.log('Daily analytics request for userId:', userId, 'timezone offset:', timezone);
 
         const userIdStr = resolveOwnedUserId(req, res);
         if (!userIdStr) return;
@@ -192,154 +207,62 @@ router.get('/:userId', isAuthenticated, async (req, res, next) => {
         const now = new Date();
         const timezoneOffset = timezone ? parseInt(timezone) : 0; // Timezone offset in minutes
         
-        // Calculate midnight in user's timezone, converted to UTC
-        const userMidnightInUTC = new Date(Date.UTC(
-            now.getUTCFullYear(),
-            now.getUTCMonth(),
-            now.getUTCDate()
-        ));
-        userMidnightInUTC.setUTCMinutes(userMidnightInUTC.getUTCMinutes() + timezoneOffset);
+        // Midnight in the user's timezone, as a UTC instant (H-22).
+        const userMidnightInUTC = localMidnightUtc(now, timezoneOffset);
         
         const startOfToday = new Date(userMidnightInUTC.getTime());
         const endOfToday = new Date(userMidnightInUTC.getTime() + (24 * 3600000) - 1);
 
-        // Get activities from last 7 days for overall stats
-        const sevenDaysAgo = new Date();
-        sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
-
-        const activities = await Activity.find({
+        // One $facet pipeline over TODAY only (M-1). The old code loaded seven
+        // days of documents into Node to show one day.
+        const view = await viewData({
             userId: userIdStr,
-            timestamp: { $gte: sevenDaysAgo }
+            from: startOfToday,
+            to: new Date(endOfToday.getTime() + 1),
+            offsetMinutes: timezoneOffset,
+            unit: 'hour',
         });
 
-        console.log(`Found ${activities.length} activities in last 7 days`);
-
-        // Get TODAY's activities for stats
-        const todayActivities = activities.filter(a => {
-            const activityDate = new Date(a.timestamp);
-            return activityDate >= startOfToday && activityDate <= endOfToday;
-        });
-
-        console.log(`Found ${todayActivities.length} activities today`);
-
-        if (!activities || activities.length === 0) {
-            console.log('No activities found, returning empty data');
-            return res.json({
-                totalHours: 0,
-                projectCount: 0,
-                totalLinesAdded: 0,
-                streakDays: 0,
-                dailyActivity: [],
-                languageBreakdown: [],
-                terminalSummary: buildTerminalSummary([]),
-                terminalTimeline: [],
-                buildTimeline: [],
-                gitTimeline: []
-            });
+        if (view.docs === 0) {
+            // Same contract as before: empty arrays only when there has been no
+            // activity at all in the last 7 days; otherwise a zero-filled day.
+            const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 3600000);
+            const anyThisWeek = await Activity.exists({ userId: matchActivityUser(userIdStr), timestamp: { $gte: sevenDaysAgo } });
+            if (!anyThisWeek) {
+                return res.json({
+                    totalHours: 0,
+                    projectCount: 0,
+                    totalLinesAdded: 0,
+                    streakDays: 0,
+                    dailyActivity: [],
+                    languageBreakdown: [],
+                    terminalSummary: buildTerminalSummary([]),
+                    terminalTimeline: [],
+                    buildTimeline: [],
+                    gitTimeline: []
+                });
+            }
         }
 
-        // Calculate total hours for TODAY only
-        const totalSeconds = todayActivities.reduce((sum, a) => sum + (a.duration || 0), 0);
-        const totalHours = totalSeconds / 3600;
-
-        // Calculate unique projects for TODAY only
-        const uniqueProjects = new Set(todayActivities.map(a => a.projectName).filter(Boolean));
-        const projectCount = uniqueProjects.size;
-
-        // Calculate total lines added for TODAY only
-        const totalLinesAdded = todayActivities.reduce((sum, a) => sum + (a.linesAdded || 0), 0);
-
-        // Calculate streak days (consecutive days with activity)
+        const totalHours = view.totalSeconds / 3600;
+        const projectCount = view.projectCount;
+        const totalLinesAdded = view.totalLinesAdded;
         const streakDays = await computeStreak(userIdStr, timezoneOffset);
+        const languageBreakdown = view.languageBreakdown;
+        const terminalSummary = view.terminalSummary;
 
-        // HOURLY activity aggregation for TODAY only (for the line chart)
-        const hourlyMap = {};
-        todayActivities.forEach(a => {
-            const date = new Date(a.timestamp);
-            // Adjust to user's timezone
-            const userTime = new Date(date.getTime() - (timezoneOffset * 60000));
-            const hour = userTime.getUTCHours();
-            const hourKey = `${hour}:00`;
-            if (!hourlyMap[hourKey]) {
-                hourlyMap[hourKey] = 0;
-            }
-            hourlyMap[hourKey] += (a.duration || 0) / 3600; // Convert seconds to hours
-        });
-
-        // Create hourly breakdown (0:00 to 23:00)
+        // Lay the per-hour rows out on the 0:00..23:00 grid.
         const dailyActivity = [];
-        for (let hour = 0; hour < 24; hour++) {
-            const hourKey = `${hour}:00`;
-            dailyActivity.push({
-                day: hourKey,
-                hours: parseFloat((hourlyMap[hourKey] || 0).toFixed(2))
-            });
-        }
-
-        // Language breakdown - TODAY ONLY for daily view (already filtered above)
-        const languageMap = {};
-        todayActivities.forEach(a => {
-            const lang = a.language || 'Unknown';
-            if (!languageMap[lang]) {
-                languageMap[lang] = 0;
-            }
-            languageMap[lang] += (a.duration || 0) / 3600; // Convert seconds to hours
-        });
-
-        const languageBreakdown = Object.entries(languageMap)
-            .map(([_id, hours]) => ({ _id, hours: parseFloat(hours.toFixed(2)) }))
-            .sort((a, b) => b.hours - a.hours);
-
-        const terminalSummary = buildTerminalSummary(todayActivities);
-
-        const terminalHourlyMap = {};
-        const buildHourlyMap = {};
-        const gitHourlyMap = {};
-        todayActivities.forEach(a => {
-            const date = new Date(a.timestamp);
-            const userTime = new Date(date.getTime() - (timezoneOffset * 60000));
-            const hour = userTime.getUTCHours();
-            const hourKey = `${hour}:00`;
-            if (!terminalHourlyMap[hourKey]) {
-                terminalHourlyMap[hourKey] = { success: 0, failed: 0 };
-            }
-            if (!buildHourlyMap[hourKey]) {
-                buildHourlyMap[hourKey] = { success: 0, failed: 0 };
-            }
-            if (!gitHourlyMap[hourKey]) {
-                gitHourlyMap[hourKey] = { commits: 0, pushes: 0, pulls: 0 };
-            }
-            const terminal = a.terminalAnalytics || {};
-            terminalHourlyMap[hourKey].success += Number(terminal.successfulCommands) || 0;
-            terminalHourlyMap[hourKey].failed += Number(terminal.failedCommands) || 0;
-            buildHourlyMap[hourKey].success += Number(terminal.successfulBuilds) || 0;
-            buildHourlyMap[hourKey].failed += Number(terminal.failedBuilds) || 0;
-            gitHourlyMap[hourKey].commits += Number(terminal?.gitActivity?.commits) || 0;
-            gitHourlyMap[hourKey].pushes += Number(terminal?.gitActivity?.pushes) || 0;
-            gitHourlyMap[hourKey].pulls += Number(terminal?.gitActivity?.pulls) || 0;
-        });
-
         const terminalTimeline = [];
         const buildTimeline = [];
         const gitTimeline = [];
         for (let hour = 0; hour < 24; hour++) {
+            const row = view.timeline.get(String(hour)) || {};
             const hourKey = `${hour}:00`;
-            terminalTimeline.push({
-                hour: hourKey,
-                success: terminalHourlyMap[hourKey]?.success || 0,
-                failed: terminalHourlyMap[hourKey]?.failed || 0
-            });
-            buildTimeline.push({
-                hour: hourKey,
-                success: buildHourlyMap[hourKey]?.success || 0,
-                failed: buildHourlyMap[hourKey]?.failed || 0
-            });
-            gitTimeline.push({
-                hour: hourKey,
-                commits: gitHourlyMap[hourKey]?.commits || 0,
-                pushes: gitHourlyMap[hourKey]?.pushes || 0,
-                pulls: gitHourlyMap[hourKey]?.pulls || 0
-            });
+            dailyActivity.push({ day: hourKey, hours: parseFloat(((row.seconds || 0) / 3600).toFixed(2)) });
+            terminalTimeline.push({ hour: hourKey, success: row.success || 0, failed: row.failed || 0 });
+            buildTimeline.push({ hour: hourKey, success: row.buildSuccess || 0, failed: row.buildFailed || 0 });
+            gitTimeline.push({ hour: hourKey, commits: row.commits || 0, pushes: row.pushes || 0, pulls: row.pulls || 0 });
         }
 
         res.json({
@@ -366,24 +289,23 @@ router.get('/weekly/:userId', isAuthenticated, async (req, res, next) => {
         const { userId } = req.params;
         const { timezone } = req.query;
         const timezoneOffset = timezone ? parseInt(timezone) : 0;
-        console.log('Weekly analytics request for userId:', userId);
 
         const userIdStr = resolveOwnedUserId(req, res);
         if (!userIdStr) return;
 
-        // Get activities from the last 7 days
-        const sevenDaysAgo = new Date();
-        sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
-        sevenDaysAgo.setHours(0, 0, 0, 0);
-
-        const activities = await Activity.find({
+        // The seven local days shown on the chart: from local midnight six days
+        // ago. (The old window started at the SERVER's midnight seven days ago,
+        // so totals could include up to a day the chart did not show — M-32.)
+        const weekStart = new Date(localMidnightUtc(Date.now(), timezoneOffset).getTime() - 6 * 24 * 3600000);
+        const view = await viewData({
             userId: userIdStr,
-            timestamp: { $gte: sevenDaysAgo }
+            from: weekStart,
+            to: new Date(Date.now() + 24 * 3600000),
+            offsetMinutes: timezoneOffset,
+            unit: 'day',
         });
 
-        console.log(`Found ${activities.length} activities for weekly view`);
-
-        if (!activities || activities.length === 0) {
+        if (view.docs === 0) {
             return res.json({
                 totalHours: 0,
                 projectCount: 0,
@@ -398,100 +320,25 @@ router.get('/weekly/:userId', isAuthenticated, async (req, res, next) => {
             });
         }
 
-        // Calculate daily aggregations for last 7 days
-        const dailyMap = {};
-        activities.forEach(a => {
-            const dayKey = localDayInfo(a.timestamp, timezoneOffset).key;
-            
-            if (!dailyMap[dayKey]) {
-                dailyMap[dayKey] = 0;
-            }
-            dailyMap[dayKey] += (a.duration || 0) / 3600;
-        });
-
-        // Create array for last 7 days (even if no activity)
-        const dailyActivity = [];
-        for (let i = 6; i >= 0; i--) {
-            const { key: dayKey, label: dayName } = localDayInfo(Date.now() - i * 24 * 3600000, timezoneOffset);
-            
-            dailyActivity.push({
-                day: dayName,
-                hours: parseFloat((dailyMap[dayKey] || 0).toFixed(2))
-            });
-        }
-
-        // Language breakdown for entire week
-        const languageMap = {};
-        activities.forEach(a => {
-            const lang = a.language || 'Unknown';
-            if (!languageMap[lang]) {
-                languageMap[lang] = 0;
-            }
-            languageMap[lang] += (a.duration || 0) / 3600;
-        });
-
-        const languageBreakdown = Object.entries(languageMap)
-            .map(([_id, hours]) => ({ _id, hours: parseFloat(hours.toFixed(2)) }))
-            .sort((a, b) => b.hours - a.hours);
-
-        // Calculate totals
-        const totalSeconds = activities.reduce((sum, a) => sum + (a.duration || 0), 0);
-        const totalHours = totalSeconds / 3600;
-        const uniqueProjects = new Set(activities.map(a => a.projectName).filter(Boolean));
-        const totalLinesAdded = activities.reduce((sum, a) => sum + (a.linesAdded || 0), 0);
-
-        // Calculate streak
+        const totalHours = view.totalSeconds / 3600;
+        const uniqueProjects = { size: view.projectCount };
+        const totalLinesAdded = view.totalLinesAdded;
         const streakDays = await computeStreak(userIdStr, timezoneOffset);
+        const languageBreakdown = view.languageBreakdown;
+        const terminalSummary = view.terminalSummary;
 
-        const terminalSummary = buildTerminalSummary(activities);
-
-        const terminalDailyMap = {};
-        const buildDailyMap = {};
-        const gitDailyMap = {};
-        activities.forEach(a => {
-            const dayKey = localDayInfo(a.timestamp, timezoneOffset).key;
-            if (!terminalDailyMap[dayKey]) {
-                terminalDailyMap[dayKey] = { success: 0, failed: 0 };
-            }
-            if (!buildDailyMap[dayKey]) {
-                buildDailyMap[dayKey] = { success: 0, failed: 0 };
-            }
-            if (!gitDailyMap[dayKey]) {
-                gitDailyMap[dayKey] = { commits: 0, pushes: 0, pulls: 0 };
-            }
-
-            const terminal = a.terminalAnalytics || {};
-            terminalDailyMap[dayKey].success += Number(terminal.successfulCommands) || 0;
-            terminalDailyMap[dayKey].failed += Number(terminal.failedCommands) || 0;
-            buildDailyMap[dayKey].success += Number(terminal.successfulBuilds) || 0;
-            buildDailyMap[dayKey].failed += Number(terminal.failedBuilds) || 0;
-            gitDailyMap[dayKey].commits += Number(terminal?.gitActivity?.commits) || 0;
-            gitDailyMap[dayKey].pushes += Number(terminal?.gitActivity?.pushes) || 0;
-            gitDailyMap[dayKey].pulls += Number(terminal?.gitActivity?.pulls) || 0;
-        });
-
+        // Lay the per-day rows out on the last-7-local-days grid.
+        const dailyActivity = [];
         const terminalTimeline = [];
         const buildTimeline = [];
         const gitTimeline = [];
         for (let i = 6; i >= 0; i--) {
             const { key: dayKey, label: dayName } = localDayInfo(Date.now() - i * 24 * 3600000, timezoneOffset);
-
-            terminalTimeline.push({
-                day: dayName,
-                success: terminalDailyMap[dayKey]?.success || 0,
-                failed: terminalDailyMap[dayKey]?.failed || 0
-            });
-            buildTimeline.push({
-                day: dayName,
-                success: buildDailyMap[dayKey]?.success || 0,
-                failed: buildDailyMap[dayKey]?.failed || 0
-            });
-            gitTimeline.push({
-                day: dayName,
-                commits: gitDailyMap[dayKey]?.commits || 0,
-                pushes: gitDailyMap[dayKey]?.pushes || 0,
-                pulls: gitDailyMap[dayKey]?.pulls || 0
-            });
+            const row = view.timeline.get(dayKey) || {};
+            dailyActivity.push({ day: dayName, hours: parseFloat(((row.seconds || 0) / 3600).toFixed(2)) });
+            terminalTimeline.push({ day: dayName, success: row.success || 0, failed: row.failed || 0 });
+            buildTimeline.push({ day: dayName, success: row.buildSuccess || 0, failed: row.buildFailed || 0 });
+            gitTimeline.push({ day: dayName, commits: row.commits || 0, pushes: row.pushes || 0, pulls: row.pulls || 0 });
         }
 
         res.json({
@@ -517,13 +364,13 @@ router.get('/summary/:userId', isAuthenticated, async (req, res, next) => {
     try {
         const { userId } = req.params;
 
-        // userId is stored as String in Activity model
+        // Activity.userId may be a String (legacy) or an ObjectId (item 10).
         const userIdStr = resolveOwnedUserId(req, res);
         if (!userIdStr) return;
 
         // Daily total hours (duration is in seconds, so we divide by 3600)
         const dailyTotals = await Activity.aggregate([
-            { $match: { userId: userIdStr } },
+            { $match: { userId: matchActivityUser(userIdStr) } },
             {
                 $group: {
                     _id: { $dateToString: { format: "%Y-%m-%d", date: "$timestamp" } },
@@ -535,7 +382,7 @@ router.get('/summary/:userId', isAuthenticated, async (req, res, next) => {
 
         // Per-technology stack time (in seconds, convert to hours)
         const stackTotals = await Activity.aggregate([
-            { $match: { userId: userIdStr } },
+            { $match: { userId: matchActivityUser(userIdStr) } },
             {
                 $group: {
                     _id: "$language",
@@ -558,7 +405,6 @@ router.get('/timeslot/:userId', isAuthenticated, async (req, res, next) => {
         const { userId } = req.params;
         const { start, end, timezone } = req.query;
         
-        console.log(`Time slot analytics request for userId: ${userId}, ${start}:00 - ${end}:00, timezone offset: ${timezone}`);
 
         const userIdStr = resolveOwnedUserId(req, res);
         if (!userIdStr) return;
@@ -569,29 +415,20 @@ router.get('/timeslot/:userId', isAuthenticated, async (req, res, next) => {
         // Get today's date at midnight in user's timezone
         const now = new Date();
         
-        // Calculate what time in UTC corresponds to midnight in user's timezone
-        // If timezoneOffset is -330 (IST), we need to ADD 330 minutes to UTC to get IST
-        // So to go from IST midnight to UTC, we SUBTRACT 330 minutes
-        const userMidnightInUTC = new Date(Date.UTC(
-            now.getUTCFullYear(),
-            now.getUTCMonth(),
-            now.getUTCDate()
-        ));
-        userMidnightInUTC.setUTCMinutes(userMidnightInUTC.getUTCMinutes() + timezoneOffset);
+        // Midnight in the user's timezone, as a UTC instant (H-22).
+        const userMidnightInUTC = localMidnightUtc(now, timezoneOffset);
         
         // Now add the hours to get the time range in UTC
         const startTime = new Date(userMidnightInUTC.getTime() + (startHour * 3600000));
         const endTime = new Date(userMidnightInUTC.getTime() + (endHour * 3600000));
 
-        console.log(`Searching activities between ${startTime.toISOString()} and ${endTime.toISOString()}`);
 
         // Get activities in this time slot for today
         const activities = await Activity.find({
-            userId: userIdStr,
+            userId: matchActivityUser(userIdStr),
             timestamp: { $gte: startTime, $lt: endTime }
         }).sort({ timestamp: 1 });
 
-        console.log(`Found ${activities.length} activities in time slot`);
 
         // Calculate statistics
         const totalMinutes = activities.reduce((sum, a) => sum + (a.duration / 60), 0);

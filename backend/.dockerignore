@@ -1,0 +1,12 @@
+# Keep the image small and free of secrets and dev-only files.
+node_modules
+.env
+.env.*
+!.env.example
+tests
+bench
+tools
+*.md
+server.js.old
+new.html
+newest.java

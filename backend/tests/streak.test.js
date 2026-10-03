@@ -46,10 +46,11 @@ function buildSandbox(activeDayKeys) {
   const factory = new Function(
     'Activity',
     'STREAK_WINDOW_DAYS',
+    'matchActivityUser',
     `${extract('localDayInfo')}\n${extract('computeStreak')}\n` +
       'return { localDayInfo, computeStreak };'
   );
-  return factory(Activity, WINDOW);
+  return factory(Activity, WINDOW, require('../services/activityUser').matchActivityUser);
 }
 
 const IST = -330; // Date.getTimezoneOffset() for Asia/Kolkata
@@ -129,6 +130,28 @@ async function check(name, activeDays, offset, expected) {
   } catch (err) {
     console.log(`  FAIL  expected 2026-03-10, got ${utc.key}`);
     failed++;
+  }
+
+  // H-22: the start of "today" in the user's zone. The old inline code took the
+  // UTC date and shifted it, which is a day early from 00:00 to 05:30 IST and a
+  // day late in the evening west of UTC.
+  const localMidnightUtc = new Function(`${extract('localMidnightUtc')}\nreturn localMidnightUtc;`)();
+  const midnightCases = [
+    ['02:00 IST on 3 Oct starts at 3 Oct 00:00 IST', '2026-10-02T20:30:00.000Z', IST, '2026-10-02T18:30:00.000Z'],
+    ['10:00 IST on 3 Oct starts at 3 Oct 00:00 IST', '2026-10-03T04:30:00.000Z', IST, '2026-10-02T18:30:00.000Z'],
+    ['22:00 EST on 2 Oct starts at 2 Oct 00:00 EST', '2026-10-03T03:00:00.000Z', 300, '2026-10-02T05:00:00.000Z'],
+    ['UTC user', '2026-10-03T23:59:00.000Z', 0, '2026-10-03T00:00:00.000Z'],
+  ];
+  for (const [name, now, offset, expected] of midnightCases) {
+    const actual = localMidnightUtc(now, offset).toISOString();
+    try {
+      assert.strictEqual(actual, expected);
+      console.log(`  PASS  ${name} -> ${actual}`);
+      passed++;
+    } catch (err) {
+      console.log(`  FAIL  ${name}: expected ${expected}, got ${actual}`);
+      failed++;
+    }
   }
 
   console.log(`\n${passed} passed, ${failed} failed\n`);

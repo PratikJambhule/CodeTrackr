@@ -24,7 +24,8 @@ check('ACTIVITY_BUCKET_MS is read from env with a 600000 default', () => {
 check('the only Activity.create calls are in the legacy branch', () => {
   const creates = src.match(/Activity\.create\(/g) || [];
   assert.ok(creates.length <= 2, `expected <=2 Activity.create (track + batch legacy), found ${creates.length}`);
-  assert.ok(/mode === 'legacy'/.test(src), "legacy guard present");
+  // The legacy branch is now guarded directly on the knob (anti-cheat rewrite, 2026-10-03).
+  assert.ok(/if \(!ACTIVITY_BUCKET_MS\)/.test(src), "legacy guard present");
 });
 check('bucket writes use findOneAndUpdate with upsert', () => {
   assert.ok(/findOneAndUpdate\(/.test(src) && /upsert:\s*true/.test(src));

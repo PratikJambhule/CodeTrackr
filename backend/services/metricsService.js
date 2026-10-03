@@ -29,6 +29,8 @@ const {
 const { sessionize, archetypeMix } = require('./sessionize');
 const { getBaseline, deltaFrom } = require('./insightsBaseline');
 const { exactRegex } = require('./textQuery');
+const { bucketStartFor } = require('./activityBucket');
+const { matchActivityUser } = require('./activityUser');
 
 /**
  * Sessionization needs raw buckets (a daily summary has no within-day
@@ -72,7 +74,7 @@ async function buildMetrics(
     const now = Date.now();
     const since = new Date(now - days * 24 * 3600 * 1000);
     const offsetMs = Number(timezoneOffset) * 60000;
-    const match = { userId: userIdStr, timestamp: { $gte: since } };
+    const match = { userId: matchActivityUser(userIdStr), timestamp: { $gte: since } };
 
     const [totalsRow] = await Activity.aggregate([
         { $match: match },
@@ -248,7 +250,7 @@ async function buildMetrics(
         const sessionDays = Math.min(days, MAX_SESSION_DAYS);
         const sessionSince = new Date(now - sessionDays * 24 * 3600 * 1000);
         const docs = await Activity
-            .find({ userId: userIdStr, timestamp: { $gte: sessionSince } }, SESSION_PROJECTION)
+            .find({ userId: matchActivityUser(userIdStr), timestamp: { $gte: sessionSince } }, SESSION_PROJECTION)
             .sort({ timestamp: 1 })
             .lean();
         sessions = sessionize(docs);
@@ -342,7 +344,8 @@ async function buildGoalPairs(userId, userIdStr) {
         const stack = String(goal.techStack || '').trim();
         if (!stack || !(Number(goal.targetHours) > 0)) continue;
 
-        const from = goal.createdAt ? new Date(goal.createdAt) : null;
+        // Floored to the 10-minute bucket grid, as in routes/goals.js (M-31).
+        const from = goal.createdAt ? bucketStartFor(new Date(goal.createdAt)) : null;
         const to = new Date(goal.completedAt || goal.updatedAt || Date.now());
         if (!from || Number.isNaN(from.getTime()) || Number.isNaN(to.getTime())) continue;
 
@@ -351,7 +354,7 @@ async function buildGoalPairs(userId, userIdStr) {
         const [row] = await Activity.aggregate([
             {
                 $match: {
-                    userId: userIdStr,
+                    userId: matchActivityUser(userIdStr),
                     timestamp: { $gte: from, $lte: to },
                     $or: [{ language: stackRe }, { projectName: stackRe }],
                 },

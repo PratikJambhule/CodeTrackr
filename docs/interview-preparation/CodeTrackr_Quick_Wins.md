@@ -1,5 +1,8 @@
 # CodeTrackr — Quick Wins for Interview Impact
 
+> **2026-10-03:** items 9, 10, 13 and 24 are now built too (October roadmap, not yet deployed).
+> What is built and measured is summarised in `docs/ROADMAP_2026-10.md` and `docs/BENCHMARKS.md`.
+
 *A curated shortlist of changes that are **cheap to implement** but **signal strong
 engineering judgement** and **add real value**. Everything here is verified against the
 current code on branch `feat/security-and-insights`.*
@@ -235,7 +238,7 @@ response."*
 
 # Tier 2 — High-impact small features (2–6 hrs, real capability, strong stories)
 
-## 9. `UserStats` rollup — make the leaderboard O(users), not O(all activity) 🟠
+## 9. `UserStats` rollup — make the leaderboard O(users), not O(all activity) 🟠 — ✅ BUILT 2026-10-03 (1M rows: p50 6.72 s → 62 ms, `docs/BENCHMARKS.md`)
 
 **The flaw:** `GET /api/leaderboard` aggregates the **entire `activities` collection** and
 loads **every user** into Node on every request. No window, no cache, no pagination. It's
@@ -262,7 +265,7 @@ best scalability story and it's genuinely small.**
 
 ---
 
-## 10. Idempotency key on activity ingest 🟡
+## 10. Idempotency key on activity ingest 🟡 — ✅ BUILT 2026-10-03 (`flushId` receipts; extension 2.5.0 sends it)
 
 **The flaw:** the extension has **no offline queue and no dedupe** — if a flush is retried
 (network blip, restart), the backend stores it again and **double-counts**.
@@ -338,7 +341,7 @@ actually works.
 
 ---
 
-## 13. Adopt React Query on the dashboard 🟡
+## 13. Adopt React Query on the dashboard 🟡 — ✅ BUILT 2026-10-03 (Dashboard, Leaderboard, Insights)
 
 **The gap:** `@tanstack/react-query` is **installed but never used**. Every page refetches on
 navigation with `cache: 'no-cache'`, and `Dashboard.tsx` fires the analytics request twice
@@ -356,7 +359,7 @@ cache keys / staleness.
 
 ---
 
-## 14. Goal completion + persisted to-dos 🟡 — ✅ COMPLETION DONE 2026-09-10 (to-dos still open)
+## 14. Goal completion + persisted to-dos 🟡 — ✅ COMPLETION DONE 2026-09-10 (it only worked in a browser from 2026-10-03, when H-23 added PATCH to CORS); half-built to-dos removed
 
 > **Shipped:** owner-scoped `PATCH /api/goals/:goalId/complete` + `/reopen`, `Goal.completedAt`,
 > and the Goals-page button — this is what made `estimationCalibration` reachable at all.
@@ -427,7 +430,7 @@ you spotted a per-iteration unindexed query.
 | 21 | **`docker-compose.yml` for local dev** | 🟡 | "`docker compose up` gives you Mongo + API + frontend — one command to run the whole thing." |
 | 22 | **Delete dead code** (`server.js.old`, `extension.js` v1, orphaned `Teams.tsx`, `newest.java`) | 🟢 | "Removed ~1k lines of superseded code so the repo reflects what actually ships." |
 | 23 | **ESLint + Prettier on the backend** (frontend already has eslint) | 🟢 | "Added lint to the backend and to CI so style isn't a review conversation." |
-| 24 | **One integration test** (`supertest` + `mongodb-memory-server`) | 🟠 | "The gap was that nothing hit a real database — I added an in-memory Mongo test proving ingest + the ownership check work end-to-end." |
+| 24 | **One integration test** (`supertest` + `mongodb-memory-server`) — ✅ BUILT 2026-10-03: 35 tests | 🟠 | "The gap was that nothing hit a real database — I added an in-memory Mongo test proving ingest + the ownership check work end-to-end." |
 | 25 | **README with architecture diagram + run steps** | 🟡 | "A reviewer can understand and run the project in two minutes." |
 
 ---

@@ -3,6 +3,30 @@
 *Reconstructed from the actual codebase on 2026-09-07 (branch `feat/security-and-insights`).
 Where this contradicts the informal project description, the code is authoritative.*
 
+> ## October 2026 update — read this first (added 2026-10-03)
+>
+> This document was written before the October 2026 roadmap (`docs/ROADMAP_2026-10.md`). That work
+> is **built and tested but not deployed yet**, and extension **2.5.0 is not published** — say "I
+> built", not "it's live". **Wherever the text below disagrees with this box, this box wins.**
+> Up-to-date short versions: `CodeTrackr_Interview_Cheat_Sheet.md` (rewritten) and
+> `docs/INTERVIEW_PREP.md`. Measured numbers: `docs/BENCHMARKS.md`.
+>
+> | Topic | Old text says | Now |
+> |---|---|---|
+> | Extension API key | plaintext, non-expiring, unscoped; in `settings.json` | `ct_<id>_<secret>`, DB stores SHA-256 of the secret (id lookup + `timingSafeEqual`), shown once; **device-code sign-in** issues per-device keys that expire in 1 year and can be revoked one by one; extension keeps the key in **SecretStorage** |
+> | Leaderboard | O(all activity + all users) scan per request (H-7/H-8) | `userstats` running totals updated on every write; all-time board = 3 indexed reads. **1M rows: p50 6.72 s → 62 ms** (local benchmark). Group boards too; contest windows `?from=&to=` |
+> | Cheating | a valid key + loop inflates hours (H-21) | credited time = min(duration, focus + 120 s), ≤ 600 s per user per 10-minute window via an atomic counter, long uploads spread; per-key quota; raw claim kept |
+> | Duplicates / offline | no idempotency; memory-only buffer, lost on restart | `flushId` receipts (applied once); persisted outbox in `globalState`, FIFO, survives restart (M-30 fixed) |
+> | Analytics | `find()` then JS reduce (M-1) | daily/weekly from one `$facet` pipeline, proven equal to the old code by an oracle test |
+> | Write reduction | "~10× fewer writes" | **measured**: 4.9× fewer documents, 12.7× less data at the 2-minute cadence (19.6× / 51× vs the old 30 s); same throughput |
+> | Tests | 18 suites / 296; nothing against a real DB | unit **23 suites / 346**, **35 integration tests** (supertest + in-memory MongoDB, incl. CORS preflight), extension **6 / 70**; no frontend tests |
+> | `userId` type | String on activities (M-6) | ObjectId migration in progress (reads accept both; script converts) |
+> | Teams | orphaned page + live API | deleted |
+> | Groups | no admin powers | creator can rename / remove members; ownership passes on when the creator leaves |
+> | Ops | no Docker, no CD, console logs | Dockerfile + CI health check; **`docker compose up` runs MongoDB + API + website locally** (verified); deploy-on-green (off until a secret), JSON logs with request ids, optional Sentry |
+> | Bugs found while building | — | **H-23** CORS lacked PATCH → goal completion and mark-as-read never worked in a browser; M-31 goal window; M-32 weekly window; H-22 IST "today"; email leaks M-28/M-29 |
+> | Still open | — | H-19 login fix built (Vercel forwards `/api` + `/auth`; deploy + Google/Render callback setting pending); client-chosen timestamps, no web refresh token. H-20 fixed (limits per user/session) |
+
 > **Changed 2026‑09‑08:** the ingest write model. `POST /api/extension/track` no longer does
 > one `Activity.create` per flush — it **`$inc`-upserts a 10-minute `(userId, projectName,
 > language)` bucket** (`services/activityBucket.js` → `planActivityWrite`). The extension
@@ -313,7 +337,7 @@ else is `find()` + JavaScript.
        (was ÷ focusedMs — two different clocks, could exceed 1; fixed 2026-09-10)
      flowBlockStats(flowBlocksMs)     = { medianMs, longestMs, deepBlockCount, blockCount, totalMs }
      volumeStability(dailyMinutes)    = clamp(1 − MAD/median, 0, 1)   robust; alias consistencyIndex
-     activeDaysRatio(active, window)  = active ÷ window          ← the real cadence metric
+     activeDaysRatio(active, observed) = active ÷ observed      ← real cadence; observed = first
      qualityStreak(deepDays, today)   = consecutive days with a ≥25min block
      truePeakWindow(hourly)           = argmax over 2-HOUR windows of Σ minutes×(1−churnRatio),
                                         eligible only at ≥3 distinct days   (no magic weights)
@@ -340,7 +364,8 @@ else is `find()` + JavaScript.
 90-day baseline is cached), not ML.**
 An LLM narration layer is designed in `docs/TRACKING_ROADMAP.md` (§5) but **not built**; the
 plan there insists any generated number must be traceable to the structured metrics object
-(anti-hallucination), and Gemini was the chosen provider.
+(anti-hallucination), and Gemini was the chosen provider. A separate k-means plan for the session
+archetypes is designed in `docs/ML_INTEGRATION_PLAN.md` — also not built, and blocked on data.
 
 ---
 

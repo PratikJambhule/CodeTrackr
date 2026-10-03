@@ -2,6 +2,7 @@ const passport = require('passport');
 const GoogleStrategy = require('passport-google-oauth20').Strategy;
 const mongoose = require('mongoose');
 const User = require('../models/user');
+const { cookieStateStore } = require('../services/oauthState');
 
 const googleClientId = process.env.GOOGLE_CLIENT_ID;
 const googleClientSecret = process.env.GOOGLE_CLIENT_SECRET;
@@ -14,7 +15,9 @@ if (!googleClientId || !googleClientSecret || !googleCallbackUrl) {
 passport.use(new GoogleStrategy({
     clientID: googleClientId,
     clientSecret: googleClientSecret,
-    callbackURL: googleCallbackUrl
+    callbackURL: googleCallbackUrl,
+    // OAuth `state` nonce in a short-lived cookie (L-11: login CSRF).
+    store: cookieStateStore
   },
   async (accessToken, refreshToken, profile, done) => {
     try {
@@ -27,7 +30,8 @@ passport.use(new GoogleStrategy({
         await user.save();
         done(null, user);
       } else {
-        // If new user, create a new user record with API key
+        // New user. No API key yet: it is created on the onboarding page and
+        // shown exactly once, because only its hash is stored.
         user = await User.create({
           googleId: profile.id,
           name: profile.displayName,
@@ -36,9 +40,6 @@ passport.use(new GoogleStrategy({
           lastLogin: new Date(),
           isFirstLogin: true
         });
-        // Generate API key for new user
-        user.generateApiKey();
-        await user.save();
         done(null, user);
       }
     } catch (err) {

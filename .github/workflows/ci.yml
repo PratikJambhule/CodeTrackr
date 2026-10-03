@@ -11,10 +11,14 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 18
+          node-version: 20
       - run: npm ci
         working-directory: backend
       - run: npm test
+        working-directory: backend
+      # Real Express app against an in-memory MongoDB (downloads a mongod binary
+      # on first run). Covers track -> analytics -> leaderboard -> groups -> goals.
+      - run: npm run test:int
         working-directory: backend
       # Proves `require('./app.js')` starts no server and no scheduler, which is
       # what makes the serverless entry safe (H-13). Every variable that is
@@ -30,6 +34,25 @@ jobs:
           GOOGLE_CLIENT_SECRET: ci-placeholder
           GOOGLE_CALLBACK_URL: http://localhost:5050/auth/google/callback
         run: node -e "const a=require('./app.js'); if(typeof a!=='function'){process.exit(1)} setTimeout(()=>process.exit(0),500)"
+
+  # The production image builds and its health check passes against a real
+  # (throwaway) MongoDB container (roadmap item 17).
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -t codetrackr-api backend
+      - name: container answers /health with the database connected
+        run: |
+          docker network create ct
+          docker run -d --name mongo --network ct mongo:7
+          docker run -d --name api --network ct -p 5050:5050             -e MONGO_URI=mongodb://mongo:27017/ci -e MONGO_TLS=false -e JWT_SECRET=ci             -e GOOGLE_CLIENT_ID=ci -e GOOGLE_CLIENT_SECRET=ci -e GOOGLE_CALLBACK_URL=http://localhost/cb             codetrackr-api
+          for i in $(seq 1 30); do
+            if curl -fsS localhost:5050/health | grep -q '"db":true'; then echo healthy; exit 0; fi
+            sleep 2
+          done
+          docker logs api
+          exit 1
 
   frontend:
     runs-on: ubuntu-latest
@@ -49,7 +72,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 18
+          node-version: 20
       - run: npm ci
         working-directory: extension
       - run: npm test

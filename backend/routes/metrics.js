@@ -1,4 +1,5 @@
 const express = require('express');
+const { log } = require('../services/logger');
 const router = express.Router();
 const { isAuthenticated } = require('../middleware/auth');
 const { buildMetrics } = require('../services/metricsService');
@@ -30,12 +31,12 @@ router.get('/', isAuthenticated, async (req, res) => {
         try {
             insights = evaluate(metrics);
         } catch (err) {
-            console.error('rulesEngine failed; serving metrics without findings', err);
+            log.error('rules engine failed; serving metrics without findings', { requestId: req.id, err });
         }
 
         res.json({ success: true, metrics, insights });
     } catch (error) {
-        console.error('Error building metrics:', error);
+        log.error('building metrics failed', { requestId: req.id, err: error });
         res.status(500).json({ success: false, message: 'Failed to build metrics' });
     }
 });

@@ -58,13 +58,16 @@ check('app.js rate-limits /auth and /api/extension', () => {
 check('app.js rate-limits /api/analytics', () => {
   assert.ok(/app\.use\(\s*['"]\/api\/analytics['"]\s*,\s*rateLimit\(/.test(appSrc),
     'no limiter on /api/analytics');
+  assert.ok(/keyGenerator:\s*sessionKey/.test(appSrc), '/api/analytics must key by session (H-20)');
 });
 check('the group join route is rate-limited (brute-force surface)', () => {
   const src = read('routes/groups.js');
   assert.ok(/require\(['"]express-rate-limit['"]\)/.test(src),
     'express-rate-limit not required in groups.js');
-  assert.ok(/router\.post\(\s*['"]\/:groupId\/join['"]\s*,\s*joinLimiter/.test(src),
-    'join route is not behind joinLimiter');
+  // Authenticate first, then limit per user (H-20): per-IP lumped a campus together.
+  assert.ok(/router\.post\(\s*['"]\/:groupId\/join['"]\s*,\s*isAuthenticated\s*,\s*joinLimiter/.test(src),
+    'join route must authenticate before joinLimiter');
+  assert.ok(/keyGenerator:\s*userKey/.test(src), 'joinLimiter must key by user');
 });
 check('the leaderboard does not return user emails', () => {
   const src = read('routes/leaderboard.js');

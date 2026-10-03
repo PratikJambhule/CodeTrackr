@@ -2,13 +2,36 @@
 
 > **Purpose of this file.** A future AI assistant (or a new engineer) should be able to read
 > this file and understand CodeTrackr *without re-deriving everything from the repository*.
-> It records the **actual implementation** as of the `feat/security-and-insights` branch
-> (first analysed 2026-09-07; last reconciled against the code 2026-09-11 at `ecff806`), and clearly separates **what exists** from **what is
+> It records the **actual implementation** on `main` (the `feat/security-and-insights` work was
+> merged into `main` by force-push on 2026-09-12; first analysed 2026-09-07; live systems last checked
+> 2026-09-16; code re-audited 2026-10-03 at `92b899b`), and clearly separates **what exists** from **what is
 > recommended but not built**.
 >
 > When this file and the code disagree, the code wins — update this file.
 
 ---
+
+## 0. October 2026 roadmap — read this first
+
+Between 2026-10-03 and now, the 18-item plan in `docs/ROADMAP_2026-10.md` was built and tested
+(**not yet deployed** — steps in `docs/RELEASE.md`). Where a section below still describes the
+earlier design, this list wins; the dated detail is in `docs/PROGRESS.md`.
+
+- Integration tests (`npm run test:int`, in-memory MongoDB) — 35 tests; unit 23 suites / 346;
+  extension 6 suites / 70.
+- API keys hashed (`ct_<id>_<secret>`, SHA-256), shown once; per-device keys via **device-code
+  sign-in**; extension keeps keys in SecretStorage.
+- Idempotent ingest (`flushId`), anti-cheat crediting (focus corroboration, 600 s per user per
+  10-minute window, per-key quota), persisted extension outbox (extension 2.5.0, unpublished).
+- Leaderboard and group boards read `userstats` running totals (1M rows: 6.72 s → 62 ms p50);
+  contest-week group boards (`?from=&to=`); group admin (rename, remove, ownership hand-off).
+- Dashboard daily/weekly views aggregate in MongoDB (`$facet`); `activities.userId` → ObjectId in
+  an expand/contract migration; React Query; Teams deleted.
+- Login fix for Safari/Firefox (H-19) built: Vercel forwards `/api` + `/auth` to Render (deploy +
+  callback settings pending); H-20 fixed (rate limits per user/session).
+- Fixed: H-7, H-8, H-21, H-22, H-23 (browsers blocked every PATCH), M-1, M-11, M-25–M-32, L-3,
+  L-11, L-12. Ops: JSON logs + request ids, optional Sentry, Dockerfile, `docker-compose.yml` (local
+  MongoDB + API + website, verified), deploy-on-green workflow.
 
 ## 1. What CodeTrackr is
 
@@ -50,7 +73,7 @@ CodeTrackr-main/
 │   ├── routes/                   analytics, auth, extension, goals, groups, internal, leaderboard, metrics, notifications, team, user
 │   ├── services/                 authorization, passwordHash, textQuery, activityNormalizers, activityBucket, ingestValidation, metricsService, metricsDerive, sessionize, insightsBaseline, rulesEngine, dailySummary, dailyRollup, notificationScheduler
 │   ├── scripts/                  migrate-drop-date + rollup-daily (deploy-time, --apply); probe-activity-shape + measure-insights (read-only probes); preview-insights, seed-demo-insights, cleanup-terminal-analytics
-│   ├── tests/                    18 plain node:assert suites / 292 assertions — streak, ingest, metrics, authorization, routeGuards, passwordHash, activityBucket, activityModel, ingestWiring, rollup, quickWins, ingestValidation, metricsService, sessionize, insightsBaseline, textQuery, leaderboardScore, rulesEngine
+│   ├── tests/                    18 plain node:assert suites / 296 assertions — streak, ingest, metrics, authorization, routeGuards, passwordHash, activityBucket, activityModel, ingestWiring, rollup, quickWins, ingestValidation, metricsService, sessionize, insightsBaseline, textQuery, leaderboardScore, rulesEngine
 │   ├── tools/                    ~15 ad-hoc seed/cleanup scripts (dev only)
 │   ├── server.js.old             Legacy monolith (unused, kept for reference — had helmet + rate-limit)
 │   └── vercel.json               Serverless build config
@@ -59,7 +82,7 @@ CodeTrackr-main/
 │       ├── App.tsx               Router + auth gate + nav shell
 │       ├── config.ts             API_URL from VITE_API_URL
 │       ├── contexts/ThemeContext.tsx   28 themes, localStorage, CSS vars
-│       ├── pages/                Login, Onboarding, Dashboard, Insights, Leaderboard, Goals, Groups, Profile, Teams(orphaned)
+│       ├── pages/                Login, Onboarding, Dashboard, Insights, Leaderboard, Goals, Groups, Profile (Teams deleted 2026-10-03)
 │       └── components/           NotificationPanel, ThemeSelector, + decorative (Orb, Hyperspeed, LetterGlitch, TargetCursor, GradientText, TextType, ElectricBorder)
 ├── extension/        VS Code extension (TypeScript, esbuild bundle)
 │   ├── src/extension.ts          Activation, flush timer, payload build, axios POST
@@ -73,16 +96,22 @@ CodeTrackr-main/
 │   ├── src/debugTracker.ts       Debug session counts (folded into terminalAnalytics)
 │   ├── extension.js              Legacy v1 (excluded from .vsix via .vscodeignore)
 │   ├── tests/                    trackers, activation, flushSafety (node:assert against dist bundle) — 3 suites / 52 assertions
-│   └── codetrackr-vscode-2.3.0.vsix   Last packaged build (source is 2.4.0 — not yet packaged or published)
+│   └── *.vsix                    Gitignored — no package is committed. 2.4.0 is the published Marketplace version (2026-09-10)
 └── docs/
-    ├── ARCHITECTURE.md           Pre-existing architecture notes (verify against code)
-    ├── IMPROVEMENT_PLAN.md       finding register H-1…H-18 / M-1…M-21 / L-1…L-9, each marked ✅ FIXED or open
+    ├── ARCHITECTURE.md           Current architecture + data flow (rewritten 2026-10-03)
+    ├── DECISIONS.md              One entry per design decision: what, why, alternatives, trade-offs
+    ├── PROGRESS.md               Dated build/test/bug log
+    ├── INTERVIEW_PREP.md         Short interview Q&A + index into interview-preparation/
+    ├── IMPROVEMENT_PLAN.md       finding register H-1…H-22 / M-1…M-30 / L-1…L-11, each marked ✅ FIXED or open
     ├── AUDIT-2026-09-10.md       production-readiness audit: data-flow trace, raw-value meanings, bugs B1–B12, live-DB checks
     ├── INSIGHTS_METRICS.md       definition of record for every Insights formula (before/after + why)
     ├── RULES_ENGINE.md           threshold-rules layer over the metrics ("What stands out")
+    ├── ML_INTEGRATION_PLAN.md    work-type model → personas → group titles (+ .pdf) — redesigned 2026-09-17, NOT built
+    ├── ML_INTEGRATION_CHANGES.md file-by-file project changes the ML plan needs (leaderboard, groups, Insights, backend)
+    ├── ML_INTEGRATION_GUIDE.md   the ML plan and its changes explained simply, with worked examples (+ .pdf)
     ├── SESSION-LOG-2026-08-27.md Chronological engineering log
     ├── TRACKING_ROADMAP.md       Signals + derived-metrics design spec
-    ├── diagrams-src/             figure-1 architecture .. figure-5 class diagram (HTML)
+    ├── diagrams-src/             figure-1 architecture .. figure-7 ML label loop (HTML; PNGs in docs/images/)
     └── interview-preparation/    ← Interview_Preparation (+pdf), Interview_Guide_Condensed (+pdf), Interview_QA, Architecture, Interview_Cheat_Sheet, Quick_Wins, DB_Write_Reduction, Resume_Entry.tex
 ```
 
@@ -97,13 +126,13 @@ workspace; each is installed and deployed independently.
 | Layer | Stack |
 |---|---|
 | Extension | TypeScript 5, esbuild (CJS bundle, `--external:vscode`), `@vscode/vsce`, axios; `@types/vscode ^1.85` |
-| Backend | Node 18, Express **5**, Mongoose **8**, jsonwebtoken, passport + passport-google-oauth20, cookie-parser, cors, dotenv, node-cron, serverless-http. **`helmet` + `express-rate-limit` wired 2026-09-09** on `/auth` + `/api/extension` (M‑3). Ingest is bounds-checked by a pure `services/ingestValidation.js` (M‑4, 2026-09-09); `express-validator` remains installed-but-unused. `three`/`postprocessing` in backend deps are spurious. |
+| Backend | Node 18, Express **5**, Mongoose **8**, jsonwebtoken, passport + passport-google-oauth20, cookie-parser, cors, dotenv, node-cron, serverless-http. **`helmet` + `express-rate-limit` wired 2026-09-09** on `/auth` + `/api/extension` (M‑3), extended 2026-09-12 to `/api/analytics` and group `/join` (M-24). Ingest is bounds-checked by a pure `services/ingestValidation.js` (M‑4, 2026-09-09); `express-validator` remains installed-but-unused. `three`/`postprocessing` in backend deps are spurious. |
 | Database | MongoDB Atlas (connection via `MONGO_URI`) |
 | Frontend | React **19**, Vite **7**, TypeScript ~5.9, Tailwind **3**, react-router-dom **7**, chart.js 4 + react-chartjs-2 + chartjs-plugin-datalabels, lucide-react, gsap, three/ogl/postprocessing (decorative visuals). **`@tanstack/react-query` is a dependency but unused.** |
 | Auth | Google OAuth 2.0 → JWT in httpOnly cookie (web); random API key in `x-api-key` header (extension) |
-| ML/Insights | **None.** Pure deterministic JavaScript statistics (`metricsDerive.js`). No Python, no trained model, no LLM. |
+| ML/Insights | **None built.** Pure deterministic JavaScript statistics (`metricsDerive.js`) plus a 13-rule threshold engine. No Python, no trained model, no LLM. A work-type classifier (logistic regression over 18 session attributes, learned from one-tap user labels) feeding rule-based personas and group titles is designed in `docs/ML_INTEGRATION_PLAN.md` (redesigned 2026-09-17) and blocked on data. |
 | Deploy | Backend: Render (`codetrackr-backend-uckp.onrender.com`, per extension default) — also has a Vercel serverless config. Frontend: Vercel (`code-trackr-frontend.vercel.app`). DB: MongoDB Atlas. |
-| Testing | Plain `node:assert` scripts. **18 backend suites (292 assertions)**, 3 extension suites (52). No framework, no integration/e2e/DB tests, **zero frontend tests**. GitHub Actions CI runs backend + extension tests and the frontend build on every push (2026‑09‑09). |
+| Testing | Plain `node:assert` scripts: **23 backend suites (346 assertions)**, 6 extension suites (70). **35 integration tests** (`supertest` + `mongodb-memory-server`, real HTTP and real queries, incl. CORS preflight). **Zero frontend tests.** CI runs all of it, the frontend build and a Docker health check on every push. |
 
 ---
 
@@ -143,35 +172,42 @@ workspace; each is installed and deployed independently.
 
 ## 5. The unique-key / account-linking mechanism (CORE — expect deep interview questions)
 
-**Generation.** On first Google login, `config/passport.js` creates the `User`, then calls
-`user.generateApiKey()` → `crypto.randomBytes(32).toString('hex')` = **64 hex chars**. Stored
-**in plaintext** on `User.apiKey` (`unique: true, sparse: true`).
+**Since 2026-10-03 (roadmap item 3) keys are stored hashed.** The section below describes the
+current design; the old one is summarised at the end.
 
-**Delivery to the user.** Shown on the Onboarding page and the Profile page (fetched from
-`GET /api/user/profile`, which returns `apiKey` in the JSON body).
+**Format.** `ct_<id>_<secret>`: `id` = 16 hex chars (a lookup handle, stored in clear, unique
+index); `secret` = 32 random bytes in base64url. Only `SHA-256(secret)` is stored
+(`users.apiKeyHash`, `select:false`), plus `apiKeyLast4` and `apiKeyCreatedAt` for display.
+`services/apiKeys.js` (pure, unit-tested) generates, parses and verifies keys.
 
-**Delivery to the extension.** User runs `CodeTrackr: Setup API Key`, pastes it into an input
-box; it is saved with `vscode.workspace.getConfiguration('codetrackr').update('apiKey', key,
-ConfigurationTarget.Global)` → **plaintext in the user's global `settings.json`** (NOT VS Code
-SecretStorage).
+**Generation and delivery.** A new Google user gets **no key** at sign-up. The Onboarding page
+calls `POST /api/user/regenerate-api-key`, which runs `user.issueApiKey()` and returns the full
+key **once**. `GET /api/user/profile` never returns the key — only `hasApiKey`, `apiKeyHint`
+(`ct_<id>_…last4`) and `legacyApiKey`. Profile → Regenerate shows a new key once and revokes
+every older key.
 
-**Use.** Every flush: `axios.post('/api/extension/track', payload, { headers: { 'x-api-key': key }})`.
+**Delivery to the extension.** `CodeTrackr: Setup API Key` stores it in **VS Code
+SecretStorage** (OS keychain) from extension 2.5.0 (unreleased); a key left in `settings.json`
+by an older version is moved there on activation and the setting is cleared.
 
-**Verification (backend).** `middleware/auth.js → verifyApiKey`: `User.findOne({ apiKey })`
-(plaintext equality, backed by the unique index). Attaches `req.user`; ingest writes
-`Activity.userId = req.user._id.toString()`.
+**Verification.** `middleware/auth.js → findUserByApiKey`: a `ct_` key is looked up by `id`, then
+`SHA-256(secret)` is compared with `crypto.timingSafeEqual`. A legacy 64-hex key is looked up by
+its SHA-256 (`legacyApiKeyHash`); a row that still holds the old key in plaintext is accepted once
+and converted on the spot. `scripts/migrate-hash-api-keys.js` (dry run by default; `--apply` is an
+operator action) converts every remaining plaintext key at once.
 
-**Rotation.** `POST /api/user/regenerate-api-key` overwrites `apiKey` with a fresh random value.
-Old key stops working immediately; the extension must be re-configured (it surfaces the 401 as
-a prompt).
+**Why SHA-256, not scrypt/bcrypt:** a slow hash protects guessable secrets (passwords). A 256-bit
+random secret cannot be guessed, so a fast hash is enough and keeps every ingest request cheap —
+the same choice GitHub and Stripe make for API tokens.
 
-**What the key actually IS:** a **bearer credential** — simultaneously identifier *and*
-authenticator for the ingest API, with **no expiry, no scope, stored and compared in
-plaintext, transmitted on every request**. It is functionally an unscoped, non-expiring API
-token. This is the single biggest design-critique surface. See `docs/interview-preparation/`
-for the full "identifier vs credential" discussion and the recommended redesign (hash at rest,
-prefix + `keyId` lookup, rotation with grace window, per-device keys, short-lived signed
-ingest tokens, or OAuth device flow).
+**What the key still IS:** a bearer credential with full upload rights for one user and no
+expiry or scope. Stealing it lets someone upload fake activity for that user, not read their
+dashboard. A database leak no longer reveals usable keys. Still open: expiry, scopes, per-device
+keys (the device-code login, roadmap item 13, addresses these).
+
+*Before 2026-10-03:* 64 hex chars generated at first login, stored and compared in plaintext
+(`User.findOne({ apiKey })`), returned by `/api/user/profile` on every page load, and kept by the
+extension in plaintext `settings.json`.
 
 ---
 
@@ -254,12 +290,12 @@ everything into Node".
 | GET | `/api/leaderboard?days=` | `isAuthenticated` | Global. Aggregates the **entire** activities collection (optional `?days=` window, capped at 400) + **all** users, merges/sorts/scores in Node. No pagination, no cache (H-7 open). `commits` = real git commits (H-17). Returns name only — no email since 2026‑09‑12 (M-23). |
 | GET | `/api/metrics?days=&timezone=` | `isAuthenticated` | Derived Insights metrics, plus `insights` (rules-engine findings), session/archetype mix and 90-day baseline deltas. **Session identity only — no `:userId` param** (deliberate, closes the IDOR class). |
 | POST | `/api/groups/create` | `isAuthenticated` | Creator auto-added as member; private → scrypt-hash password. |
-| GET | `/api/groups/my-groups` \| `/discover` | `isAuthenticated` | Membership-scoped / inverse. `/discover?search=` is regex-escaped and capped at 100 results (H-16). |
+| GET | `/api/groups/my-groups` \| `/discover` | `isAuthenticated` | Membership-scoped / inverse. `/discover?search=` is regex-escaped and capped at 100 results (H-16). Both populate `createdBy` with `name email` (M-29, open). |
 | GET | `/api/groups/:groupId/details` | `isAuthenticated` + **membership check** | Members list + group leaderboard (all-time, no pagination): hours, lines, commits, failed commands and builds with rates (M-21). |
 | POST | `/api/groups/:groupId/join` \| `/leave` | `isAuthenticated` | Password check for private; last member leaving deletes the group. |
 | POST | `/api/goals/create` · GET `/api/goals` · GET `/api/goals/:goalId/progress` · PATCH `/:goalId/complete` \| `/reopen` | `isAuthenticated` (+ owner scope on progress, complete, reopen) | Progress = Σ activity seconds whose `language` **or** `projectName` matches `techStack` (case-insensitive, exact), from `createdAt` to `completedAt` (else `deadline`, else now), ÷ 3600 ÷ targetHours. Complete/reopen added 2026-09-10 (M-17). No edit/delete route. |
 | GET/PATCH/DELETE | `/api/notifications/*` | `isAuthenticated` | All correctly scoped by `req.user._id`. |
-| POST | `/api/teams/create` · GET `/api/teams` · GET `/api/teams/:teamId` · POST `/api/teams/:teamId/members` | `isAuthenticated` (+ membership / admin checks) | Backend only; no UI route. |
+| — | ~~`/api/teams/*`~~ | — | **Deleted 2026-10-03** with its model and the unrouted page (roadmap item 11). |
 | GET | `/auth/google` · `/auth/google/callback` · `/auth/current-user` · POST `/auth/logout` | — | OAuth + JWT cookie. |
 | POST | `/api/internal/run-notifications` \| `/run-rollup` | header `x-internal-secret` = `INTERNAL_CRON_SECRET` | External-cron trigger for the scheduler; **404** when the secret is unset or wrong (H-13). |
 | GET | `/health` · `/` | — | `/health` = readiness, 503 unless Mongo is connected (L-8); `/` = liveness. |
@@ -271,7 +307,7 @@ Legacy unauthenticated `POST /api/user-activity` / `GET /api/user-stats/:id` wer
 
 ## 9. VS Code extension — how it works
 
-*Source version: **2.4.0** (2026-09-10 — flush carry-forward + idle pause). Last packaged `.vsix`: **2.3.0**. 2.4.0 is **not** packaged or published yet; Marketplace publish is manual.*
+*Source version: **2.4.0** (2026-09-10 — flush carry-forward + idle pause), **published** on the Marketplace. `.vsix` files are gitignored, so the repo holds none; Marketplace publish is manual.*
 
 - **Activation:** `onStartupFinished`. `activate()` creates the five trackers, registers 7
   commands, then calls `start()`.
@@ -303,36 +339,35 @@ Legacy unauthenticated `POST /api/user-activity` / `GET /api/user-stats/:id` wer
     `onDidStart/EndTerminalShellExecution`; classifies command category, build/test/debug,
     git action; success/failure by exit code; repeated-failure detection.
   - `DebugTracker` — debug session count, folded into `terminalAnalytics.debuggingSessions`.
-- **Failure handling (2.4.0):** `axios` timeout 15 s. `sendActivity` returns a success boolean;
-  an unsent or signal-less payload is **held in memory** (`holdPayload`) and merged into the next
-  one (`mergeAnalytics`) instead of being discarded (H-14); a `400` is treated as permanent. While
-  idle-paused, `FocusTracker`/`EditorTracker` bank nothing (H-15); **there is no disk queue** — a VS Code restart loses
-  un-flushed time (a best-effort final flush runs on `deactivate()`). 401 → one-time
-  actionable prompt ("Set API Key" / "Open Dashboard").
+- **Failure handling (2.5.0, built 2026-10-03, unpublished):** every interval with signal gets a
+  `flushId` (UUID) and is saved to a persisted outbox (`src/outbox.ts`, `globalState`) *before*
+  the upload; the outbox is drained oldest first on every flush, on activation and after a key is
+  set. `sendActivity` returns `ok` / `drop` (400, or a duration outside 1–3600 s) / `retry`
+  (offline, 5xx, 429, no key). Items older than 23.5 h are pruned (the server refuses > 24 h); the
+  queue is capped at 500. Signal-less intervals are carried in memory and merged into the next
+  interval (earliest timestamp). The API key lives in SecretStorage. 401 → one-time prompt.
+  *2.4.0 (published) instead merged every unsent payload into the next one in memory (M-30).*
 - **Config keys:** `codetrackr.apiBase` (default `https://codetrackr-backend-uckp.onrender.com`),
   `codetrackr.apiKey`, `codetrackr.flushIntervalSeconds`, `codetrackr.minFlushMinutes`,
   `codetrackr.debug`.
 - **Build/publish:** esbuild bundle → `dist/extension.js`; `vsce package`. Publisher
   `CodeTrackr-ext`. Versioning saga: a `2.1.0` was uploaded in May 2025 *before* `2.0.x`, and
   the Marketplace serves the highest version *number*, so the `2.0.11` fixes never reached
-  users. `2.2.0` (2026‑08‑28) supersedes it. `codetrackr-vscode-2.2.0.vsix` is in the repo;
-  actual Marketplace publication of 2.2.0 is **not confirmed by anything in the repo** (session
-  log notes a publish was blocked on an expired Azure DevOps PAT).
+  users. `2.2.0` (2026‑08‑28) superseded it; 2.3.0 and 2.4.0 followed. 2.4.0 is the live Marketplace
+  version (confirmed on the Marketplace listing, 2026-09-12).
 
 ---
 
-> **⚠️ Read `docs/AUDIT-2026-09-10.md` before trusting any Insights figure from live data.**
-> Verified read-only against the production DB on 2026‑09‑10: **0 of 7034 activity documents
-> have `bucketStart`** (so the backend branch has never been deployed), and rich analytics
-> sub-documents exist in only **140 documents, all between 2026‑07‑15 and 2026‑08‑27**. The
-> newest stored document is `{ duration: 120, language: "latex" }` — nothing else. Every
-> focus-derived metric therefore has no live input; the confidence gating added 2026‑09‑10 makes
-> that visible as "—" instead of a fabricated 0. Formula definitions live in
-> `docs/INSIGHTS_METRICS.md`.
+> **Deployed and verified end to end on 2026-09-12.** Both tiers run `main`, and real ingest now
+> arrives bucketed with analytics sub-documents.
 >
-> **Re-confirmed 2026-09-11 from the endpoints:** Render `GET /health` → **404** (the route exists on
-> the branch since 2026-09-09) and the production Vercel bundle has no `/insights` route. Neither
-> tier runs this branch — see §15.
+> **A correction to `docs/AUDIT-2026-09-10.md`:** the 140 analytics-bearing documents it found were
+> **demo data** from `scripts/seed-demo-insights.js`, not extension output. Rich analytics first
+> reached production on 2026-09-12.
+>
+> **Data is still scarce.** On 2026-09-16 there were 4 bucketed documents from 1 user, none since
+> 2026-09-12, and 0 completed goals. Confidence gating shows that as "—" rather than a fabricated
+> number. Formula definitions live in `docs/INSIGHTS_METRICS.md`.
 
 ## 10. Insights / "ML" — WHAT IT ACTUALLY IS
 
@@ -413,7 +448,9 @@ scale (H-7, open — the fix is a `UserStats` running-total rollup). Group leade
   - `Goals.tsx` has a **Mark complete / Reopen** button (2026-09-10, M-17). To-dos are not persisted
     (Quick-Wins #14, open); there is no edit or delete UI. The `/:goalId/progress` endpoint is never called.
   - `npm run build` — ✅ **green as of 2026-09-09** (was 29 `tsc -b` errors, M-13). CI (`.github/workflows/ci.yml`) keeps it green.
-  - `NotificationPanel` polling `useEffect` closes over a stale `isOpen` (L‑1).
+  - ~~`NotificationPanel` polling `useEffect` closes over a stale `isOpen` (L-1)~~ — fixed 2026-09-12.
+  - **`Onboarding.tsx:157` links to a placeholder Marketplace URL** (`YOUR_PUBLISHER.codetrackr`) that
+    404s for every new user. The real identifier is `CodeTrackr-ext.codetrackr-vscode` (M-25, open).
 - **Themes:** 28 palettes in `ThemeContext.tsx`, persisted to `localStorage.selectedTheme`,
   applied as CSS custom properties + inline styles.
 
@@ -447,7 +484,7 @@ ownership (H‑1); legacy open write/read endpoints deleted (H‑2); group passw
 `/api/metrics` takes no `:userId` (IDOR-proof by construction).
 
 **Still open / by design:**
-- API key: **plaintext at rest and in transit**, no expiry, no scope, full ingest authority.
+- API key: **hashed at rest since 2026-10-03** (SHA-256 of a `ct_<id>_<secret>` secret; legacy keys converted on use or by `migrate-hash-api-keys.js`); still no expiry or scope, full ingest authority.
   Stealing it lets an attacker forge unlimited activity for that user (leaderboard fraud) —
   but not read the victim's dashboard (that needs the JWT).
 - `JWT_SECRET` was a hardcoded fallback — now required at boot (M‑9, ✅ fixed 2026-09-09).
@@ -456,7 +493,7 @@ ownership (H‑1); legacy open write/read endpoints deleted (H‑2); group passw
   still easy to inject with a valid key.
 - ~~Error responses echo `error.message`~~ — fixed (M-10).
 - ~~Leaderboard exposes every user's email~~ — ✅ fixed 2026‑09‑12 (M-23 / Quick-Wins #16).
-- Extension stores the key in `settings.json`, not SecretStorage.
+- Extension stores the key in SecretStorage from 2.5.0 (built 2026-10-03, not yet published); 2.4.0 still uses `settings.json`.
 - Ingest is still not idempotent, but a re-sent flush now `$inc`s the same bucket rather than
   creating a second document — a same-window replay double-counts within one bucket, not a new row.
 - Client supplies `timestamp` on ingest — bounded to `[now-24h, now+60s]` (M-4) but not server-set.
@@ -489,27 +526,30 @@ The schedule is driven externally via `POST /api/internal/run-{notifications,rol
 **CD:** none in the repo — no Dockerfile or Procfile; Vercel and Render build from their own Git
 integrations.
 
-### Live deployment state (verified 2026-09-11)
+### Live deployment state (verified 2026-09-16)
 
-| Tier | Actually serving | Evidence |
+| Tier | Serving | Evidence |
 |---|---|---|
-| Frontend — Vercel production (`code-trackr-frontend.vercel.app`) | `main` (`4c1ae25`) | bundle `index-UkW22d84.js` has no `/insights` route |
-| Frontend — Vercel preview | `feat/security-and-insights` (auto-built on push) | Vercel "Active Branches" |
-| Backend — Render (`codetrackr-backend-uckp.onrender.com`) | pre-2026-09-09 code | `GET /health` → 404; 0 activity docs carry `bucketStart` |
+| Frontend — Vercel (`code-trackr-frontend.vercel.app`) | `main` (`92b899b`) | bundle contains `/insights`, "What stands out", "Cmd fails" |
+| Backend — Render (`codetrackr-backend-uckp.onrender.com`) | `main` (`92b899b`) | `GET /health` → 200 `{status:"ok", db:true}` |
+| Scheduler — GitHub Actions (`.github/workflows/cron.yml`) | hourly notifications, daily rollup | manual run green; the rollup writes `dailysummaries` on schedule |
 
-- **`main` shares no history with the branch** (42 vs 65 commits, no merge base). A trial merge with
-  `--allow-unrelated-histories` produced **35 add/add conflicts**, so the GitHub PR cannot be merged
-  as-is. `main`'s only files missing from the branch are `extension/src/{syncService,logger,types}.ts`
-  — the dead sync pipeline deleted as H-12.
+- **How `main` got here (2026-09-12).** `main` shared no history with `feat/security-and-insights`
+  (a trial merge gave 35 add/add conflicts), so `main` was replaced by the branch with a force-push.
+  The old `main` is preserved as tag `backup-main-4c1ae25`; the feature branch on the remote is now
+  stale. `main`'s only unique files were the dead sync pipeline deleted as H-12.
+- **The Vercel rollback trap.** Production had been pinned by an Instant Rollback: new pushes built
+  successfully but never took the domain. The fix was Deployments → newest build → **Promote**, not a
+  rebuild. The rollback dialog only lists the immediately previous deployment, so it looks as though
+  no new build exists when one does.
+- **Render's free tier sleeps.** After ~15 idle minutes the first request takes ~22 s (measured
+  2026-09-16). A new visitor sees a frozen page (L-10).
 - **A Vercel preview cannot exercise the app.** CORS allows only `FRONTEND_URL` plus
-  `localhost:5173/5174`, and the OAuth callback redirects to `FRONTEND_URL`, so a preview origin is
-  rejected on every API call.
-- **Deploy order:** (1) Render backend → branch `feat/security-and-insights`, with the env vars above;
-  (2) Vercel production branch → the same branch (current Vercel UI: Settings → Environments →
-  Production), then redeploy; (3) `node backend/scripts/migrate-drop-date.js --apply`. Backend first:
-  the new frontend calls routes the old backend lacks (`PATCH /api/goals/:id/complete`, `insights`
-  on `/api/metrics`).
-- **Check it worked:** Render `GET /health` returns JSON, and the production nav shows **Insights**.
+  `localhost:5173/5174`, and the OAuth callback redirects to `FRONTEND_URL`.
+- **The scheduler secret** `INTERNAL_CRON_SECRET` must be identical in GitHub repository secrets and
+  in Render's environment; a mismatch returns 404 by design.
+- **Check the deploy:** Render `GET /health` returns JSON, and the production nav shows **Insights**.
+  Render's health-check path should point at `/health`, not `/`.
 
 ---
 
@@ -541,7 +581,10 @@ Plus, since 2026-09-10: `metrics` rewritten (37), `metricsService` (35), `sessio
 `insightsBaseline` (19), `textQuery` (13), `leaderboardScore` (11), `rulesEngine` (22); extension
 `flushSafety` (15).
 
-**Total: 292 backend assertions across 18 suites, plus 52 extension assertions across 3.** No test framework, **no
+Plus, since 2026-09-12: four more assertions in `metricsService` and `quickWins` (the cadence
+regression, the email projection, and the two new rate limiters).
+
+**Total (2026-10-03): 346 backend unit assertions across 23 suites, 35 backend integration tests, 70 extension assertions across 6.** *(The paragraph below describes the state before the integration suite existed.)* No test framework, **no
 integration/API/DB/e2e tests, no frontend tests.** Nothing has been run against a real
 database — the bucketing/rollup/wiring logic is proven at the pure-function / source-scan
 level only (a `supertest` + `mongodb-memory-server` integration test is the tracked next step,
@@ -551,22 +594,27 @@ Quick-Wins #24).
 
 ## 17. Known limitations (short list — full treatment in interview docs)
 
-1. API key = plaintext, non-expiring, unscoped bearer credential.
-2. Leaderboard / group leaderboard: unbounded full-collection scan, no cache, no pagination (H-7/H-8). Emails are no longer returned (M-23, 2026‑09‑12).
-3. Analytics aggregate in JS, not MongoDB; daily endpoint pulls 7 days to show 1 (M‑1).
+1. API key = non-expiring, unscoped bearer credential (hashed at rest since 2026-10-03).
+2. ~~Leaderboard / group leaderboard full scan (H-7/H-8)~~ — all-time boards read `userstats` since 2026-10-03; windowed boards still scan their window.
+3. ~~Analytics aggregate in JS (M-1)~~ — daily/weekly use a `$facet` pipeline since 2026-10-03; `/timeslot` (2-hour window) still sums in JS.
 4. `node-cron` on serverless — **fixed 2026-09-09 (H‑13)**: `require.main` guard + `POST /api/internal/run-{notifications,rollup}` behind `INTERNAL_CRON_SECRET`. Operator wires the external scheduler.
-5. Rate limits only on `/auth` + `/api/extension` (M‑3, 2026-09-09) — group `/join` and analytics routes still unlimited; ingest has a payload bounds-check (M‑4, 2026-09-09) but no per-key quota and `timestamp` is still client-supplied.
+5. Rate limits are per **IP** on `/auth`, `/api/analytics` and group `/join` — a whole campus on one NAT shares them (H-20, open). Ingest now has a per-key quota and the 600 s window cap (H-21 mitigated); `timestamp` is still client-supplied.
 6. ~~Frontend does not typecheck~~ ✅ fixed 2026-09-09 (M‑13) — `npm run build` green, enforced by CI.
-7. Dashboard "Repeated Failures" now shows real data (2026-09-09); Goals to-dos are non-persistent; Teams UI is orphaned.
-8. `userId` is String on `activities`, ObjectId elsewhere → coercion gymnastics, blocks `$lookup` (M‑6).
-9. Extension has no offline queue; un-flushed time is lost on restart.
-10. Ingest not idempotent — a same-window replay double-counts inside one bucket.
+7. Dashboard "Repeated Failures" shows real data (2026-09-09); the half-built Goals to-dos were removed; Teams was deleted (2026-10-03).
+8. `activities.userId` String → ObjectId is mid-migration (M-6): reads accept both; the live `--apply` and the contract step remain.
+9. ~~Extension has no offline queue~~ — extension 2.5.0 (built 2026-10-03, unpublished) persists every upload in a `globalState` outbox with its own `flushId` (M-30 fixed). 2.4.0, the published version, still loses unsent time on restart.
+17. The Dashboard's "today" window is the previous day from 00:00 to 05:30 IST (H-22).
+18. Group listings (`/discover`, `/my-groups`, `/details`) return emails — creators' to any signed-in user, members' to members (M-28, M-29).
+10. ~~Ingest not idempotent~~ — uploads with a `flushId` (extension 2.5.0) are applied once (2026-10-03); older extensions send none.
 11. Insights recomputed every request; only the 90-day baseline is cached.
 12. GitHub Actions CI added 2026-09-09 (backend+extension tests, frontend build); still no CD, no observability, no integration tests.
 13. **DB write-reduction (2026‑09‑08):** time-of-day precision is now the 10-minute grid;
     all-time reads (`/leaderboard`, `/summary`, `/metrics >90d`) still scan raw `activities`
     — not yet repointed at `dailysummaries`; the 400-day TTL is a safety net only.
-14. **Nothing on this branch is live**, and extension 2.4.0 is unpackaged — see §15.
+14. **Data is scarce.** 4 bucketed documents from 1 user as of 2026-09-16, none since 2026-09-12. No
+    insight, and no model, can be trusted until more people use the extension.
+15. Render's free tier cold-starts in ~22 s (L-10).
+16. The onboarding Marketplace link is a placeholder that 404s (M-25).
 
 *(Fixed 2026‑09‑08: the missing `{userId:1,timestamp:-1}` index; per-flush document
 explosion; the dead `date` field/index; idle < 2 min inflating totals.)*
@@ -591,16 +639,17 @@ adopt React Query for caching/dedup; migrate `activities.userId` to ObjectId wit
 window; extension offline queue (persist to `globalState`), idempotency key on ingest.
 
 **Long term:** ingest → queue (SQS/Kafka) → workers → time-series store / analytics warehouse;
-Redis cache for leaderboard + insights; the designed LLM narration layer with a
+Redis cache for leaderboard + insights; a work-type classifier with personas and group titles (designed in
+`docs/ML_INTEGRATION_PLAN.md`, blocked on data); the designed LLM narration layer with a
 numbers-must-be-grounded validator; anti-cheat / anomaly detection on ingest; per-device keys
 + short-lived signed ingest tokens or OAuth device flow; observability (structured logs,
-metrics, tracing); CI (typecheck + both test suites) + automated Marketplace publish.
+metrics, tracing); automated Marketplace publish (CI itself exists since 2026-09-09).
 
 ---
 
 ## 19. Current implementation status (as of analysis)
 
-- Branch: `feat/security-and-insights`. Security Batch 3 + Insights page **done**.
+- Branch: `main` (the `feat/security-and-insights` branch is stale since the 2026-09-12 force-push). Security Batch 3 + Insights page **done**.
   Data-accuracy Batch 1 + extension Batch 2 (2.0.11 / 2.2.0) **done**.
 - **DB write-reduction batch (2026‑09‑08) done:** 10-minute bucket-on-write (`$inc` upsert),
   skip signal-less flushes (extension 2.3.0), sparse analytics sub-docs, dropped the `date`
@@ -666,13 +715,38 @@ metrics, tracing); CI (typecheck + both test suites) + automated Marketplace pub
 - `H-7`, `H-8` (leaderboard scans) **still open** — this batch fixed the leaderboard's
   correctness, not its complexity; the fix is the deferred `UserStats` rollup. `H-13`
   (serverless cron) addressed by `#15`; most other `MEDIUM`/`LOW` items **open**.
-- ⚠️ **Nothing on this branch is deployed** — re-verified 2026-09-11 from the endpoints; see §15.
-- Extension source is `2.4.0`; the last packaged `.vsix` is `2.3.0`. **2.4.0 is not packaged or
-  published**, so the H-14/H-15 extension fixes reach no user yet.
-- Frontend build is ✅ green (`tsc -b && vite build`) as of 2026-09-09; CI runs it on every push.
-- No **writes** to the live database — read-only probes only. **Migrations to run on deploy:**
-  `node backend/scripts/migrate-drop-date.js --apply` then optionally
-  `node backend/scripts/rollup-daily.js --apply`.
+- **Small-fix batch (2026-09-12) done** — `92b899b`. M-22 `activeDaysRatio` could only ever return 1;
+  M-23 the leaderboard returned every user's email; M-24 rate limits on group `/join` and
+  `/api/analytics`; L-1 the NotificationPanel stale closure; the demo seeder now backdates goals so
+  `estimationCalibration` can be demonstrated. Backend **18 suites / 296 assertions**.
+- **Deployed and verified (2026-09-12).** Both tiers serve `main`; real ingest arrives bucketed with
+  analytics; the scheduler runs through GitHub Actions. See §15.
+- **Extension 2.4.0 is published** on the Marketplace (`CodeTrackr-ext.codetrackr-vscode`). The repo
+  holds only the 2.3.0 `.vsix`, which is misleading — do not infer the published version from it.
+- **Machine learning: designed, not built** (2026-09-16, redesigned 2026-09-17). `docs/ML_INTEGRATION_PLAN.md` —
+  ML answers one question per session: *what kind of coding was this* (DSA practice, project, debugging, learning,
+  setup). Logistic regression over 18 attributes, trained on one-tap user labels (20% asked blind), tested on
+  people it never saw, served as JSON in JavaScript, shipped only if it beats the rules. Personas ("DSA Warrior")
+  and weekly group titles are plain rules on top. Skill levels were rejected as unmeasurable. Phases 1-2 ship
+  without ML and collect the labels. File-by-file changes: `docs/ML_INTEGRATION_CHANGES.md`; simple explainer:
+  `docs/ML_INTEGRATION_GUIDE.md`. Blocked on data.
+- **Found 2026-09-17, open:** H-21 leaderboard hours can be inflated with a script (no 600 s cap per 10-minute
+  record); M-28 group details show every member's email.
+- **Found 2026-10-03 (full re-audit), open:** H-22 the Dashboard's "today" is the previous day from 00:00 to 05:30 IST;
+  M-29 `/api/groups/discover` returns group creators' emails to any signed-in user; M-30 held extension payloads
+  are dropped past 3600 s and filed under the newest project and time; L-11 no OAuth `state` check (login CSRF).
+  All tests re-run green the same day (backend 18/296, extension 3/52, frontend build).
+- **Open and user-facing:** M-25 (onboarding Marketplace link 404s) and L-10 (cold start). A public
+  landing page for sharing the site was designed 2026-09-12 and is not built.
+- ⚠️ **Not ready to share publicly (audited 2026-09-16, deferred).** H-19: login likely loops for Safari, iOS, Firefox,
+  Brave and incognito users, because the auth cookie is third-party across `vercel.app` / `onrender.com`. H-20: the
+  IP-keyed rate limits let only ~25 sign-ins and 10 group joins per 15 minutes for a whole campus on shared Wi-Fi.
+  M-26: cancelling Google sign-in shows an API 404. M-27: onboarding fails silently. Also unverified: whether the Google
+  OAuth consent screen is **In production** rather than **Testing**. Fix these before sharing the link.
+- Frontend build is ✅ green (`tsc -b && vite build`); CI runs it on every push.
+- **Writes to the live database so far:** `migrate-drop-date.js --apply` (2026-09-12 — the `date`
+  field and its index are gone from every activity document), and demo data seeded for verification
+  and then removed. Everything else has been read-only.
 
 ---
 
@@ -680,6 +754,8 @@ metrics, tracing); CI (typecheck + both test suites) + automated Marketplace pub
 
 - **Read before touching insights:** `docs/AUDIT-2026-09-10.md`, `docs/INSIGHTS_METRICS.md`,
   `docs/RULES_ENGINE.md`
+- **Machine-learning plan (designed, not built):** `docs/ML_INTEGRATION_PLAN.md` (+ `.pdf`), the changes it needs
+  in `docs/ML_INTEGRATION_CHANGES.md`, and the plain-language guide `docs/ML_INTEGRATION_GUIDE.md` (+ `.pdf`)
 - Backlog with status: `docs/IMPROVEMENT_PLAN.md`, `docs/interview-preparation/CodeTrackr_Quick_Wins.md`
 - Full interview prep: `docs/interview-preparation/CodeTrackr_Interview_Preparation.md` (+ `.pdf`),
   condensed: `CodeTrackr_Interview_Guide_Condensed.md` (+ `.pdf`)
@@ -689,5 +765,7 @@ metrics, tracing); CI (typecheck + both test suites) + automated Marketplace pub
 - DB write-reduction: `docs/interview-preparation/CodeTrackr_DB_Write_Reduction.md`,
   spec `docs/superpowers/specs/2026-09-08-db-write-reduction-design.md`,
   plan `docs/superpowers/plans/2026-09-08-db-write-reduction.md`
-- Pre-existing engineering docs: `docs/ARCHITECTURE.md`, `docs/IMPROVEMENT_PLAN.md`,
+- Standard project docs (kept current): `README.md`, `docs/ARCHITECTURE.md`, `docs/DECISIONS.md`,
+  `docs/PROGRESS.md`, `docs/INTERVIEW_PREP.md`
+- Other engineering docs: `docs/IMPROVEMENT_PLAN.md`,
   `docs/SESSION-LOG-2026-08-27.md`, `docs/TRACKING_ROADMAP.md`

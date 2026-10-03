@@ -1,0 +1,29 @@
+{
+  "date": "2026-10-03",
+  "rows": 1000000,
+  "users": 1000,
+  "seconds": 20,
+  "connections": 10,
+  "machine": "12 logical cores, 15.7 GB RAM, win32",
+  "scan": {
+    "requests": 25,
+    "rps": 1.3,
+    "p50ms": 6720,
+    "p90ms": 6922,
+    "p97_5ms": 7172,
+    "p99ms": 7172,
+    "maxMs": 7172,
+    "non2xx": 0
+  },
+  "userstats": {
+    "requests": 3113,
+    "rps": 155.7,
+    "p50ms": 62,
+    "p90ms": 82,
+    "p97_5ms": 96,
+    "p99ms": 111,
+    "maxMs": 140,
+    "non2xx": 0
+  },
+  "rebuildMs": 8678
+}

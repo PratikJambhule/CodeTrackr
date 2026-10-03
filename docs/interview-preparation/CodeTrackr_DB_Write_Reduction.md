@@ -1,5 +1,12 @@
 # CodeTrackr — Reducing Database Write Volume & Redundancy
 
+> **Measured 2026-10-03** (`docs/BENCHMARKS.md`, `backend/bench/ingest.bench.js`, local): replaying an
+> 8-hour day for 10 users, bucketing stores **4.9× fewer documents and 12.7× less data** at the
+> extension's 2-minute cadence (19.6× / 51× against the old 30-second cadence), with the same
+> request throughput. Any "~10×" below was an estimate made before this measurement — quote the
+> measured numbers instead. Since 2026-10-03 the bucket write also credits time through the
+> anti-cheat window cap and updates `userstats`.
+
 *How to cut the number (and size) of documents written to the `activities` collection.
 Ordered cheapest → most involved.*
 

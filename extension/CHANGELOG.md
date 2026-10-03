@@ -2,6 +2,36 @@
 
 All notable changes to the CodeTrackr VS Code extension will be documented in this file.
 
+## [2.5.0] - unreleased
+
+### Fixed — offline data
+
+- **Unsent uploads survive a restart.** Every finished interval is saved to a queue in VS Code's
+  `globalState` before the network call and sent oldest first, so going offline, a failed upload,
+  a missing API key or closing VS Code no longer loses time.
+- **Held time is no longer merged and misfiled.** 2.4.0 merged every unsent interval into the
+  next one: the result was re-stamped as "now minus the total", took the newest project and
+  language, and was dropped whole once it passed 3600 s. Queued uploads now keep their own
+  timestamp, project and language.
+- **Each upload carries a `flushId`**, so a retry after a timeout is counted once by the server.
+- Only signal-less intervals (reading without edits) are still merged into the next one, and the
+  merged interval now starts at the earlier timestamp.
+
+### Added
+
+- **CodeTrackr: Sign In** — connect without copying a key. VS Code shows a short code, you approve
+  it on the dashboard, and this install receives its own key (revocable from Profile → Connected
+  devices, valid for a year). "Setup API Key" still works.
+
+### Security
+
+- **The API key is kept in VS Code SecretStorage** (the OS keychain) instead of plaintext in
+  `settings.json`, where it could be synced or committed with a dotfiles repo. A key already in
+  settings is moved on activation and the setting is cleared; a key typed into settings later
+  is moved too. If no keychain is available the extension keeps working from settings.
+- Accepts the new `ct_<id>_<secret>` key format (the server now stores keys hashed). Old
+  64-character keys keep working until you generate a new one.
+
 ## [2.4.0] - 2026-09-10
 
 ### Fixed — data loss
