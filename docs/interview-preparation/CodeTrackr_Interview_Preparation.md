@@ -19,8 +19,9 @@
 > ## October 2026 update — read this first (added 2026-10-03)
 >
 > This document was written before the October 2026 roadmap (`docs/ROADMAP_2026-10.md`). That work
-> is **built and tested but not deployed yet**, and extension **2.5.0 is not published** — say "I
-> built", not "it's live". **Wherever the text below disagrees with this box, this box wins.**
+> is **deployed (2026-10-03, commit `11040c5`) and Google login works on the live site**. Not done
+> yet: the live data migrations (so the leaderboard still uses the old scan) and publishing extension
+> **2.5.0** (2.4.0 is live) — say "deployed", but "built" for the extension's new features. **Wherever the text below disagrees with this box, this box wins.**
 > Up-to-date short versions: `CodeTrackr_Interview_Cheat_Sheet.md` (rewritten) and
 > `docs/INTERVIEW_PREP.md`. Measured numbers: `docs/BENCHMARKS.md`.
 >
@@ -32,13 +33,14 @@
 > | Duplicates / offline | no idempotency; memory-only buffer, lost on restart | `flushId` receipts (applied once); persisted outbox in `globalState`, FIFO, survives restart (M-30 fixed) |
 > | Analytics | `find()` then JS reduce (M-1) | daily/weekly from one `$facet` pipeline, proven equal to the old code by an oracle test |
 > | Write reduction | "~10× fewer writes" | **measured**: 4.9× fewer documents, 12.7× less data at the 2-minute cadence (19.6× / 51× vs the old 30 s); same throughput |
-> | Tests | 18 suites / 296; nothing against a real DB | unit **23 suites / 346**, **35 integration tests** (supertest + in-memory MongoDB, incl. CORS preflight), extension **6 / 70**; no frontend tests |
+> | Tests | 18 suites / 296; nothing against a real DB | unit **26 suites / 369**, **36 integration tests** (supertest + in-memory MongoDB, incl. CORS preflight), extension **6 / 70**; no frontend tests |
 > | `userId` type | String on activities (M-6) | ObjectId migration in progress (reads accept both; script converts) |
 > | Teams | orphaned page + live API | deleted |
 > | Groups | no admin powers | creator can rename / remove members; ownership passes on when the creator leaves |
-> | Ops | no Docker, no CD, console logs | Dockerfile + CI health check; **`docker compose up` runs MongoDB + API + website locally** (verified); deploy-on-green (off until a secret), JSON logs with request ids, optional Sentry |
+> | Ops | no Docker, no CD, console logs | Dockerfile + CI health check; **`docker compose up` runs MongoDB + API + website locally** (verified); deploy-on-green (off until a secret), JSON logs with request ids, optional Sentry that receives **every** `log.error` (requests, route 500s, jobs, crashes) |
 > | Bugs found while building | — | **H-23** CORS lacked PATCH → goal completion and mark-as-read never worked in a browser; M-31 goal window; M-32 weekly window; H-22 IST "today"; email leaks M-28/M-29 |
-> | Still open | — | H-19 login fix built (Vercel forwards `/api` + `/auth`; deploy + Google/Render callback setting pending); client-chosen timestamps, no web refresh token. H-20 fixed (limits per user/session) |
+> | Web login / API address | SPA calls Render directly (`VITE_API_URL`); login cookie is cross-site (`SameSite=None`); rate limits per IP | **Vercel forwards `/api` + `/auth` to Render**; the production site calls its own address (`config.ts`: `API_URL = ''`), so the cookie is first-party (still `SameSite=None` during the switch); Google's callback goes through the website; browser-facing limits per user/session (`rateLimitKeys.js`). **Live 2026-10-03** |
+> | Still open | — | H-19 login fix **live** (Vercel forwards `/api` + `/auth`; Google login works on the deployed site; Safari/private-window check pending); a failed Google sign-in shows raw JSON (M-33); client-chosen timestamps, no web refresh token. H-20 fixed (limits per user/session) |
 
 ---
 
@@ -1809,13 +1811,16 @@ Each: **Decision → Reason → Alternative → Trade-off → When the alternati
 - ✅ Sparse analytics sub-docs; dropped the dead `date` field + index.
 - ✅ Added `{userId:1,timestamp:-1}`; `DailySummary` + nightly rollup + 400-day TTL.
 
-### Done 2026-10-03 (October roadmap — built and tested, not deployed)
+### Done 2026-10-03 (October roadmap — built, tested, deployed 2026-10-03; migrations + extension 2.5.0 pending)
 
 - ✅ Hashed API keys, device-code sign-in with per-device keys, SecretStorage.
 - ✅ `userstats` leaderboard + group boards; contest-week windows; group admin.
 - ✅ Idempotency key, anti-cheat crediting, per-key quota; persisted extension outbox.
 - ✅ `$facet` dashboard pipeline; `userId` → ObjectId expand step; React Query; Teams deleted.
 - ✅ Integration tests (35); benchmarks; JSON logs + request ids; Dockerfile + deploy-on-green.
+- ✅ `docker compose up` (MongoDB + API + website locally, demo data).
+- ✅ Login works in every browser: Vercel forwards `/api` + `/auth` (H-19, live 2026-10-03);
+  rate limits per user/session (H-20). Open: M-33 (failed sign-in shows JSON).
 - Remaining from the lists below: Redis, warehouse, LLM layer, anomaly detection, data
   export/delete, WebSockets — all still future.
 
@@ -2371,8 +2376,8 @@ from formal-language theory:
 ### 28.8 Software engineering
 
 - **Pure functions separated from I/O.** All the metric maths lives in `metricsDerive.js` with no
-  database access, so the 346 unit assertions run in seconds with no database. Since 2026-10-03,
-  35 integration tests also run the real app against an in-memory MongoDB, and one refactor was
+  database access, so the 369 unit assertions run in seconds with no database. Since 2026-10-03,
+  36 integration tests also run the real app against an in-memory MongoDB, and one refactor was
   proven by running the old code as an oracle next to the new one.
 - **Regression tests encode history.** Several tests exist only because a specific bug shipped —
   one asserts that `Math.max(...spread)` really does throw at 200k elements, so the reason for the

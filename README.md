@@ -54,7 +54,8 @@ cd frontend && npm install && npm run dev
 ```
 
 The dashboard opens on http://localhost:5173 and talks to http://localhost:5050 unless
-`VITE_API_URL` is set. For the extension, run `npm install && npm run build` in `extension/`, then
+`VITE_API_URL` is set (development only: the production build calls its own address and Vercel
+forwards `/api` and `/auth` to Render). For the extension, run `npm install && npm run build` in `extension/`, then
 either `npm run package` and install the `.vsix`, or open the folder in VS Code and start an
 Extension Development Host (there is no committed `launch.json`, so VS Code offers to create one).
 Then set `codetrackr.apiBase` to `http://localhost:5050` and paste the API key from the
@@ -131,8 +132,8 @@ cd extension && npm test
 cd frontend && npm run build
 ```
 
-Current results (2026-10-03): backend unit 23 suites / 346 assertions, backend integration
-35 tests (the real Express app over HTTP against an in-memory MongoDB), extension 6 suites /
+Current results (2026-10-04): backend unit 26 suites / 369 assertions, backend integration
+36 tests (the real Express app over HTTP against an in-memory MongoDB), extension 6 suites /
 70 assertions, frontend type-check + build green. Benchmarks: `docs/BENCHMARKS.md`. Unit tests are plain `node:assert` scripts;
 integration tests use `supertest` + `mongodb-memory-server`. There are no frontend tests yet.
 

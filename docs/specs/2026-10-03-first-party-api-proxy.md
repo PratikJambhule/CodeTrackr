@@ -1,6 +1,6 @@
 # Spec: serve the API through the website's own address (fixes H-19, H-20)
 
-_2026-10-03. User chose option A (keep Render, forward through Vercel). Status: built, not deployed._
+_2026-10-03. User chose option A (keep Render, forward through Vercel). Status: deployed 2026-10-03; Google login works live._
 
 ## Problem
 

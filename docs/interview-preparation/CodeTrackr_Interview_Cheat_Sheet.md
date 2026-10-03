@@ -9,9 +9,10 @@ changed). Short Q&A: `docs/INTERVIEW_PREP.md`. Numbers: `docs/BENCHMARKS.md`.*
 > page shows who actually put in the hours, commits — and who hit the most failed commands and
 > builds. Solo analytics, insights and goals grew out of that.
 
-> **Be precise about status.** Everything below is **built and tested**. The October work is
-> **not deployed yet** and extension **2.5.0 is not published** (2.4.0 is live). Say "I built",
-> not "it's in production", until `docs/RELEASE.md` is done.
+> **Be precise about status.** Everything below is **built and tested**. The October work was
+> **deployed on 2026-10-03** and Google login works on the live site. Still pending: the live data
+> migrations (until then the leaderboard uses the old scan) and publishing extension **2.5.0**
+> (2.4.0 is live) — so the extension's queue, sign-in command and keychain are "built", not live.
 
 > **Team:** 3 contributors. I owned the **extension and the backend**.
 
@@ -32,8 +33,9 @@ changed). Short Q&A: `docs/INTERVIEW_PREP.md`. Numbers: `docs/BENCHMARKS.md`.*
 7. Dashboard views are one **`$facet` pipeline** in MongoDB; Insights = **statistics + 13 rules,
    not ML**.
 8. Scheduler: GitHub Actions calls secret-protected internal routes (hourly sweep, nightly rollup).
-9. Deploy: Vercel (frontend) + Render (API) + Atlas; CI runs unit + integration tests, the build and
-   a Docker health check; deploy-on-green is ready but off until a secret is set.
+9. Deploy: Vercel (frontend) + Render (API) + Atlas. **Vercel forwards `/api` + `/auth` to Render**,
+   so the browser sees one site and the login cookie is first-party. CI runs unit + integration
+   tests, the build and a Docker health check; deploy-on-green is ready but off until a secret is set.
 10. Ops: JSON logs with a **request id** that also appears in error bodies; Sentry if `SENTRY_DSN`.
 
 ---
@@ -48,7 +50,7 @@ changed). Short Q&A: `docs/INTERVIEW_PREP.md`. Numbers: `docs/BENCHMARKS.md`.*
 | Frontend | **React 19**, Vite 7, TS, Tailwind, react-router 7, Chart.js, **React Query** | Dashboard, Leaderboard, Insights on `useQuery`; `/device` approval page |
 | "ML" | pure JS statistics + rules | no model, no LLM; ML work-type classifier is **designed, not built** |
 | Ops | GitHub Actions CI, `Dockerfile`, `docker-compose.yml`, `deploy.yml`, JSON logs, optional Sentry | `docker compose up` = Mongo + API + website locally; CD off until `RENDER_DEPLOY_HOOK_URL` |
-| Tests | `node:assert` + **supertest + mongodb-memory-server** | backend unit **23 suites / 346**, integration **35**, extension **6 / 70**; no frontend tests |
+| Tests | `node:assert` + **supertest + mongodb-memory-server** | backend unit **26 suites / 369**, integration **36**, extension **6 / 70**; no frontend tests |
 
 **Why MongoDB:** self-contained, schema-evolving activity documents; per-user time-window
 queries; no hot-path joins. **Where SQL wins:** groups/goals integrity and the leaderboard
@@ -134,9 +136,11 @@ group passwords (H-9), `AUTH_BYPASS` refused in prod (H-10), IDORs (H-11), regex
 leaderboard email leak (M-23), helmet + rate limits, `JWT_SECRET` required, central error handler.
 
 **Still open — say these yourself:**
-- **H-19 (fixed in code, not deployed):** the login cookie was third-party (`vercel.app` vs
-  `onrender.com`). Now Vercel forwards `/api` + `/auth` to Render so the browser sees one site.
-  Needs the Google redirect URI + Render callback setting changed, then a Safari test.
+- **H-19 (live):** the login cookie was third-party (`vercel.app` vs `onrender.com`). Now Vercel
+  forwards `/api` + `/auth` to Render so the browser sees one site. Deployed; Google login works
+  live. Safari/private-window check still to do.
+- **M-33:** a failed Google sign-in (e.g. a wrong client secret) shows raw JSON with an error id
+  instead of returning to the login page. Found during go-live.
 - **H-20 (fixed):** limits are per user / per session, not per IP (a campus shares one IP, and the
   Vercel proxy hides IPs anyway).
 - Ingest timestamps are still client-chosen (bounded to 24 h); a scripted client can still earn
@@ -151,7 +155,7 @@ leaderboard email leak (M-23), helmet + rate limits, `JWT_SECRET` required, cent
 |---|---|---|
 | Leaderboard at 1M rows | p50 **6.72 s → 62 ms**, p99 7.17 s → 111 ms, 1.3 → 156 req/s | `bench/leaderboard.bench.js` (local) |
 | Bucketing | **4.9× fewer docs, 12.7× less data** at the 2-min cadence (19.6× / 51× vs old 30 s); same throughput | `bench/ingest.bench.js` (local) |
-| Tests | unit 23 / 346, integration 35, extension 6 / 70 | 2026-10-03 runs |
+| Tests | unit 26 / 369, integration 36, extension 6 / 70 | 2026-10-04 runs |
 | Insights | 11 metrics, 13 rules | `metricsDerive.js`, `rulesEngine.js` |
 
 Never quote the old "~10× fewer writes": it was a guess. Always say "local benchmark".
@@ -185,23 +189,32 @@ Never quote the old "~10× fewer writes": it was a guess. Always say "local benc
     browser; API tests send no preflight. Found by using the feature; now a test sends preflights.
 15. **Testing?** → unit (pure functions + source scans), integration (real app + in-memory Mongo
     over HTTP), extension tests against the built bundle; all in CI. No frontend tests yet.
+15a. **Safari login?** → cookie was third-party (`vercel.app` vs `onrender.com`); Vercel now
+    forwards `/api` + `/auth`, site calls its own address → first-party. Separate Vercel project
+    wouldn't help (`vercel.app` is a public suffix). Limits moved to per-user (Vercel hides IPs).
+15c. **Production issue you debugged?** → go-live: `redirect_uri_mismatch` (new callback not
+    registered), then a 500 whose request id led to `invalid_client` in Render's logs (stale client
+    secret) → new secret, redeploy, works. Logged M-33 (failed sign-in shows JSON).
 15b. **Docker?** → production image (`backend/Dockerfile`, non-root, health check) built and
     checked in CI; `docker compose up` runs MongoDB + API + website locally with persistent data.
     Production on Render still runs Node directly.
-16. **Debug production?** → request id in the header and error body → grep the JSON logs; Sentry
-    if enabled; `/health` checks the DB.
+16. **Debug production?** → request id in the header and error body → grep the JSON logs; with
+    `SENTRY_DSN` every `log.error` (requests, route 500s, jobs, crashes) goes to Sentry from one
+    hook in the logger; `/health` checks the DB.
 17. **Is Insights ML?** → no: confidence-gated statistics + 13 rules. ML work-type classifier is
     designed, blocked on labelled data.
-18. **Biggest remaining weakness?** → cross-site cookie (H-19) and IP-keyed limits (H-20) before a
-    campus launch; client-chosen timestamps.
-19. **What would you do next?** → deploy + migrations, then fix H-19/H-20, per-day stats for
-    windowed boards, frontend tests.
+18. **Biggest remaining weakness?** → client-chosen timestamps (bounded, credited, but still
+    trusted), no web refresh token, Render cold starts behind the proxy, no frontend tests.
+19. **What would you do next?** → run the live migrations, publish extension 2.5.0, friendly
+    OAuth-failure page (M-33), per-day stats for windowed boards, frontend tests.
 
 ---
 
 ## Things NOT to claim / traps
 
-- Don't say "in production" for anything from October 2026 until it's deployed.
+- The backend + website changes are deployed (2026-10-03). Don't say extension 2.5.0 features
+  (outbox, Sign In, keychain) are live until it's published, or that the leaderboard reads
+  running totals live until `backfill-userstats` has run.
 - Don't call Insights AI/ML. Don't say the ML classifier exists.
 - Don't quote "~10×"; quote the measured 5×/13× with the cadence, and say "local benchmark".
 - Don't claim the leaderboard can't be gamed — it's bounded, not impossible.

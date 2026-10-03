@@ -187,7 +187,8 @@ async function main() {
       assert.match(me.apiKey, /^ct_[0-9a-f]{16}_/);
       const User = require('../../models/user');
       const raw = await User.collection.findOne({ _id: me.user._id });
-      assert.ok(!JSON.stringify(raw).includes(me.apiKey.split('_')[2]), 'secret stored in clear');
+      // The secret is base64url, so it can itself contain '_': take everything after ct_<id>_.
+      assert.ok(!JSON.stringify(raw).includes(me.apiKey.split('_').slice(2).join('_')), 'secret stored in clear');
       assert.strictEqual(raw.apiKey, undefined);
 
       const profile = await request(app).get('/api/user/profile').set('Cookie', me.cookie);
@@ -701,6 +702,39 @@ async function main() {
       const res = await request(app).get('/api/goals/not-an-id/progress').set('Cookie', me.cookie);
       assert.strictEqual(res.status, 400);
       assert.ok(res.body.id);
+    }],
+
+    ['error reporting: a route that catches its own 500 is still reported, with the request id; a 400 is not', async () => {
+      const reporter = require('../../services/errorReporter');
+      const User = require('../../models/user');
+      const sent = [];
+      reporter.setClient({
+        withScope(cb) { const scope = { tags: {}, setTag(k, v) { this.tags[k] = v; }, setExtra() {} }; cb(scope); sent.push(scope.tags); },
+        captureException() {}, captureMessage() {},
+      });
+      const origFindById = User.findById;
+      // Fail only the profile route's own lookup (it selects the legacy key
+      // fields), not the auth middleware's, so the route's catch block runs.
+      User.findById = function (...args) {
+        const q = origFindById.apply(this, args);
+        const select = q.select.bind(q);
+        q.select = (s) => (String(s).includes('+legacyApiKeyHash')
+          ? { then: (_ok, fail) => fail(new Error('db blip')) } : select(s));
+        return q;
+      };
+      try {
+        const me = await h.makeUser();
+        const res = await request(app).get('/api/user/profile').set('Cookie', me.cookie);
+        assert.strictEqual(res.status, 500);
+        assert.strictEqual(sent.length, 1, 'the route-level 500 must reach the reporter');
+        assert.strictEqual(sent[0].requestId, res.headers['x-request-id']);
+        const bad = await request(app).get('/api/goals/not-an-id/progress').set('Cookie', me.cookie);
+        assert.strictEqual(bad.status, 400);
+        assert.strictEqual(sent.length, 1, 'client errors are not reported');
+      } finally {
+        User.findById = origFindById;
+        reporter.setClient(null);
+      }
     }],
   ]);
 

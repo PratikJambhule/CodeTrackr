@@ -6,8 +6,9 @@ Where this contradicts the informal project description, the code is authoritati
 > ## October 2026 update — read this first (added 2026-10-03)
 >
 > This document was written before the October 2026 roadmap (`docs/ROADMAP_2026-10.md`). That work
-> is **built and tested but not deployed yet**, and extension **2.5.0 is not published** — say "I
-> built", not "it's live". **Wherever the text below disagrees with this box, this box wins.**
+> is **deployed (2026-10-03, commit `11040c5`) and Google login works on the live site**. Not done
+> yet: the live data migrations (so the leaderboard still uses the old scan) and publishing extension
+> **2.5.0** (2.4.0 is live) — say "deployed", but "built" for the extension's new features. **Wherever the text below disagrees with this box, this box wins.**
 > Up-to-date short versions: `CodeTrackr_Interview_Cheat_Sheet.md` (rewritten) and
 > `docs/INTERVIEW_PREP.md`. Measured numbers: `docs/BENCHMARKS.md`.
 >
@@ -19,13 +20,14 @@ Where this contradicts the informal project description, the code is authoritati
 > | Duplicates / offline | no idempotency; memory-only buffer, lost on restart | `flushId` receipts (applied once); persisted outbox in `globalState`, FIFO, survives restart (M-30 fixed) |
 > | Analytics | `find()` then JS reduce (M-1) | daily/weekly from one `$facet` pipeline, proven equal to the old code by an oracle test |
 > | Write reduction | "~10× fewer writes" | **measured**: 4.9× fewer documents, 12.7× less data at the 2-minute cadence (19.6× / 51× vs the old 30 s); same throughput |
-> | Tests | 18 suites / 296; nothing against a real DB | unit **23 suites / 346**, **35 integration tests** (supertest + in-memory MongoDB, incl. CORS preflight), extension **6 / 70**; no frontend tests |
+> | Tests | 18 suites / 296; nothing against a real DB | unit **26 suites / 369**, **36 integration tests** (supertest + in-memory MongoDB, incl. CORS preflight), extension **6 / 70**; no frontend tests |
 > | `userId` type | String on activities (M-6) | ObjectId migration in progress (reads accept both; script converts) |
 > | Teams | orphaned page + live API | deleted |
 > | Groups | no admin powers | creator can rename / remove members; ownership passes on when the creator leaves |
-> | Ops | no Docker, no CD, console logs | Dockerfile + CI health check; **`docker compose up` runs MongoDB + API + website locally** (verified); deploy-on-green (off until a secret), JSON logs with request ids, optional Sentry |
+> | Ops | no Docker, no CD, console logs | Dockerfile + CI health check; **`docker compose up` runs MongoDB + API + website locally** (verified); deploy-on-green (off until a secret), JSON logs with request ids, optional Sentry that receives **every** `log.error` (requests, route 500s, jobs, crashes) |
 > | Bugs found while building | — | **H-23** CORS lacked PATCH → goal completion and mark-as-read never worked in a browser; M-31 goal window; M-32 weekly window; H-22 IST "today"; email leaks M-28/M-29 |
-> | Still open | — | H-19 login fix built (Vercel forwards `/api` + `/auth`; deploy + Google/Render callback setting pending); client-chosen timestamps, no web refresh token. H-20 fixed (limits per user/session) |
+> | Web login / API address | SPA calls Render directly (`VITE_API_URL`); login cookie is cross-site (`SameSite=None`); rate limits per IP | **Vercel forwards `/api` + `/auth` to Render**; the production site calls its own address (`config.ts`: `API_URL = ''`), so the cookie is first-party (still `SameSite=None` during the switch); Google's callback goes through the website; browser-facing limits per user/session (`rateLimitKeys.js`). **Live 2026-10-03** |
+> | Still open | — | H-19 login fix **live** (Vercel forwards `/api` + `/auth`; Google login works on the deployed site; Safari/private-window check pending); a failed Google sign-in shows raw JSON (M-33); client-chosen timestamps, no web refresh token. H-20 fixed (limits per user/session) |
 
 > **Changed 2026‑09‑08:** the ingest write model. `POST /api/extension/track` no longer does
 > one `Activity.create` per flush — it **`$inc`-upserts a 10-minute `(userId, projectName,

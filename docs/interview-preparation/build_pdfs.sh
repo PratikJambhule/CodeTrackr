@@ -4,6 +4,8 @@
 set -euo pipefail
 CHROME="${CHROME:-C:/Program Files/Google/Chrome/Application/chrome.exe}"
 TMP="$(mktemp -d)"
+# Git Bash: turn /tmp/... into C:/... so Chrome can open the file:/// URL.
+command -v cygpath >/dev/null && TMP="$(cygpath -m "$TMP")"
 for n in CodeTrackr_Interview_Preparation CodeTrackr_Interview_Guide_Condensed; do
   pandoc "$n.md" -f gfm -t html5 --standalone --embed-resources \
     --resource-path=".:..:../images" --css pdf-print.css --metadata pagetitle="$n" -o "$TMP/$n.html"

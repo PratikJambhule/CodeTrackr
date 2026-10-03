@@ -12,17 +12,10 @@ const { requestId } = require('./middleware/requestId');
 const { sessionKey } = require('./services/rateLimitKeys');
 
 // Error reporting is optional (roadmap item 18): nothing is sent anywhere
-// unless SENTRY_DSN is set. Errors are always in the structured logs.
-let Sentry = null;
-if (process.env.SENTRY_DSN) {
-  try {
-    Sentry = require('@sentry/node');
-    Sentry.init({ dsn: process.env.SENTRY_DSN, environment: process.env.NODE_ENV || 'development', sendDefaultPii: false });
-  } catch (err) {
-    log.warn('SENTRY_DSN is set but @sentry/node could not start', { err });
-    Sentry = null;
-  }
-}
+// unless SENTRY_DSN is set. Once on, every log.error is reported (see
+// services/errorReporter.js). Errors are always in the structured logs.
+const errorReporter = require('./services/errorReporter');
+errorReporter.init();
 
 if (!process.env.JWT_SECRET) {
   throw new Error('JWT_SECRET is required — set it in the environment before starting the API.');
@@ -103,7 +96,7 @@ mongoose.connect(process.env.MONGO_URI, {
   tls: process.env.MONGO_TLS !== 'false',
 })
 .then(() => log.info('mongodb connected'))
-.catch((err) => log.error('mongodb connection failed', { err: err.message }));
+.catch((err) => log.error('mongodb connection failed', { err }));
 
 require('./config/passport');
 
@@ -153,8 +146,7 @@ app.use((err, req, res, next) => {
   }
 
   if (status >= 500) {
-    log.error('unhandled error', { requestId: id, method: req.method, path: req.baseUrl + req.path, err });
-    if (Sentry) Sentry.withScope((scope) => { scope.setTag('requestId', id); Sentry.captureException(err); });
+    log.error('unhandled error', { requestId: id, method: req.method, path: req.baseUrl + req.path, status, err });
   } else {
     log.warn('request failed', { requestId: id, status, err: err && err.message });
   }
@@ -173,6 +165,17 @@ const PORT = process.env.PORT || 5050;
 // effects: the schedule is driven externally via POST /api/internal/run-* with
 // the INTERNAL_CRON_SECRET header (see IMPROVEMENT_PLAN H-13).
 if (require.main === module) {
+  // Crashes outside any request (a forgotten await, a timer callback). Log and
+  // report them; after an uncaught exception the process state is unknown, so
+  // exit and let Render restart it.
+  process.on('unhandledRejection', (reason) => {
+    log.error('unhandled promise rejection', { err: reason instanceof Error ? reason : new Error(String(reason)) });
+  });
+  process.on('uncaughtException', (err) => {
+    log.error('uncaught exception', { err });
+    errorReporter.flush(2000).finally(() => process.exit(1));
+  });
+
   const { initScheduler } = require('./services/notificationScheduler');
   initScheduler();
   app.listen(PORT, () => {

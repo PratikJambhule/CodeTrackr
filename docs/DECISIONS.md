@@ -178,6 +178,23 @@ are when the decision was made.
 - **Trade-off:** synchronous `stdout.write` per line; fine at this traffic, the first thing to
   swap for pino if log volume grows.
 
+## D-30. Report every `log.error` to Sentry, from one place (2026-10-04)
+
+- **What:** `services/errorReporter.js` registers itself with the logger, so any `log.error` —
+  the central error handler, routes that catch their own errors, background jobs, and new
+  `unhandledRejection` / `uncaughtException` handlers in `app.js` — is sent to Sentry when
+  `SENTRY_DSN` is set. The per-request access line uses `log.access`, which is never reported.
+- **Why:** Sentry used to be called only from the central error handler. Four route-level 500s
+  (`routes/user.js` ×3, `routes/metrics.js`), the scheduler's job failures and process crashes
+  went only to the Render log, so a dashboard would have shown an incomplete picture.
+- **Rejected:** calling Sentry at each catch site (easy to forget at the next one); rewriting
+  every catch to `next(err)` (changes response bodies the frontend reads, and doesn't cover jobs);
+  Sentry's Express integration (needs the SDK loaded before Express and still misses jobs).
+- **Trade-offs:** "error" now means "worth a human looking", so a new `log.error` must be a real
+  problem, not noise. Only `method`, `path`, `status` and the request id are attached — no user
+  ids or emails go to a third party. After an uncaught exception the process exits (after up to
+  2 s to send the report) and Render restarts it, because its state is unknown.
+
 ## D-29. One site for the browser: forward the API through Vercel (2026-10-03)
 
 - **What:** `frontend/vercel.json` rewrites `/api/*` and `/auth/*` to Render; the production site

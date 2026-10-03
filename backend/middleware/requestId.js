@@ -23,7 +23,7 @@ function requestId(req, res, next) {
   res.on('finish', () => {
     const ms = Number(process.hrtime.bigint() - started) / 1e6;
     const level = res.statusCode >= 500 ? 'error' : res.statusCode >= 400 ? 'warn' : 'info';
-    log[level]('request', {
+    log.access(level, 'request', {
       requestId: req.id,
       method: req.method,
       path: req.baseUrl + req.path, // no query string: it can carry codes and ids

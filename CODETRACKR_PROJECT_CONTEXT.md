@@ -14,10 +14,11 @@
 ## 0. October 2026 roadmap — read this first
 
 Between 2026-10-03 and now, the 18-item plan in `docs/ROADMAP_2026-10.md` was built and tested
-(**not yet deployed** — steps in `docs/RELEASE.md`). Where a section below still describes the
+and **deployed on 2026-10-03** (commit `11040c5`; Google login verified live). Still pending: live
+data migrations and publishing extension 2.5.0 (`docs/RELEASE.md` §3–4). Where a section below still describes the
 earlier design, this list wins; the dated detail is in `docs/PROGRESS.md`.
 
-- Integration tests (`npm run test:int`, in-memory MongoDB) — 35 tests; unit 23 suites / 346;
+- Integration tests (`npm run test:int`, in-memory MongoDB) — 36 tests; unit 26 suites / 369;
   extension 6 suites / 70.
 - API keys hashed (`ct_<id>_<secret>`, SHA-256), shown once; per-device keys via **device-code
   sign-in**; extension keeps keys in SecretStorage.
@@ -27,8 +28,9 @@ earlier design, this list wins; the dated detail is in `docs/PROGRESS.md`.
   contest-week group boards (`?from=&to=`); group admin (rename, remove, ownership hand-off).
 - Dashboard daily/weekly views aggregate in MongoDB (`$facet`); `activities.userId` → ObjectId in
   an expand/contract migration; React Query; Teams deleted.
-- Login fix for Safari/Firefox (H-19) built: Vercel forwards `/api` + `/auth` to Render (deploy +
-  callback settings pending); H-20 fixed (rate limits per user/session).
+- Login fix for Safari/Firefox (H-19) live: Vercel forwards `/api` + `/auth` to Render; Google's
+  callback is `https://code-trackr-frontend.vercel.app/auth/google/callback`; H-20 fixed (rate
+  limits per user/session). Open: M-33 (failed sign-in shows raw JSON).
 - Fixed: H-7, H-8, H-21, H-22, H-23 (browsers blocked every PATCH), M-1, M-11, M-25–M-32, L-3,
   L-11, L-12. Ops: JSON logs + request ids, optional Sentry, Dockerfile, `docker-compose.yml` (local
   MongoDB + API + website, verified), deploy-on-green workflow.
@@ -80,7 +82,7 @@ CodeTrackr-main/
 ├── frontend/         React 19 + Vite 7 + TS + Tailwind 3 SPA
 │   └── src/
 │       ├── App.tsx               Router + auth gate + nav shell
-│       ├── config.ts             API_URL from VITE_API_URL
+│       ├── config.ts             API_URL: '' in production (same site, Vercel proxy); VITE_API_URL in dev
 │       ├── contexts/ThemeContext.tsx   28 themes, localStorage, CSS vars
 │       ├── pages/                Login, Onboarding, Dashboard, Insights, Leaderboard, Goals, Groups, Profile (Teams deleted 2026-10-03)
 │       └── components/           NotificationPanel, ThemeSelector, + decorative (Orb, Hyperspeed, LetterGlitch, TargetCursor, GradientText, TextType, ElectricBorder)
@@ -132,7 +134,7 @@ workspace; each is installed and deployed independently.
 | Auth | Google OAuth 2.0 → JWT in httpOnly cookie (web); random API key in `x-api-key` header (extension) |
 | ML/Insights | **None built.** Pure deterministic JavaScript statistics (`metricsDerive.js`) plus a 13-rule threshold engine. No Python, no trained model, no LLM. A work-type classifier (logistic regression over 18 session attributes, learned from one-tap user labels) feeding rule-based personas and group titles is designed in `docs/ML_INTEGRATION_PLAN.md` (redesigned 2026-09-17) and blocked on data. |
 | Deploy | Backend: Render (`codetrackr-backend-uckp.onrender.com`, per extension default) — also has a Vercel serverless config. Frontend: Vercel (`code-trackr-frontend.vercel.app`). DB: MongoDB Atlas. |
-| Testing | Plain `node:assert` scripts: **23 backend suites (346 assertions)**, 6 extension suites (70). **35 integration tests** (`supertest` + `mongodb-memory-server`, real HTTP and real queries, incl. CORS preflight). **Zero frontend tests.** CI runs all of it, the frontend build and a Docker health check on every push. |
+| Testing | Plain `node:assert` scripts: **26 backend suites (369 assertions)**, 6 extension suites (70). **36 integration tests** (`supertest` + `mongodb-memory-server`, real HTTP and real queries, incl. CORS preflight). **Zero frontend tests.** CI runs all of it, the frontend build and a Docker health check on every push. |
 
 ---
 
@@ -509,8 +511,9 @@ is now required at boot — fixed 2026-09-09), `GOOGLE_CLIENT_ID` / `GOOGLE_CLIE
 redirects), `PORT` (default 5050), `NODE_ENV`, `INTERNAL_CRON_SECRET` (enables `/api/internal/*`),
 `ACTIVITY_BUCKET_MS` (`0` = legacy per-flush inserts), `AUTH_BYPASS` (dev only).
 
-**Frontend env:** `VITE_API_URL` (falls back to `http://localhost:5050`). `frontend/vercel.json`
-is an SPA rewrite (`/(.*)` → `/index.html`).
+**Frontend env:** `VITE_API_URL` in development only (falls back to `http://localhost:5050`); the
+production build uses its own address. `frontend/vercel.json` forwards `/api/*` and `/auth/*` to
+Render (caching off), then the SPA rewrite (`/(.*)` → `/index.html`).
 
 **Backend deploy:** the extension's default `apiBase` points at **Render**
 (`codetrackr-backend-uckp.onrender.com`); `backend/vercel.json` also exists (serverless via
@@ -584,7 +587,7 @@ Plus, since 2026-09-10: `metrics` rewritten (37), `metricsService` (35), `sessio
 Plus, since 2026-09-12: four more assertions in `metricsService` and `quickWins` (the cadence
 regression, the email projection, and the two new rate limiters).
 
-**Total (2026-10-03): 346 backend unit assertions across 23 suites, 35 backend integration tests, 70 extension assertions across 6.** *(The paragraph below describes the state before the integration suite existed.)* No test framework, **no
+**Total (2026-10-04): 369 backend unit assertions across 26 suites, 36 backend integration tests, 70 extension assertions across 6.** *(The paragraph below describes the state before the integration suite existed.)* No test framework, **no
 integration/API/DB/e2e tests, no frontend tests.** Nothing has been run against a real
 database — the bucketing/rollup/wiring logic is proven at the pure-function / source-scan
 level only (a `supertest` + `mongodb-memory-server` integration test is the tracked next step,
@@ -738,7 +741,9 @@ metrics, tracing); automated Marketplace publish (CI itself exists since 2026-09
   All tests re-run green the same day (backend 18/296, extension 3/52, frontend build).
 - **Open and user-facing:** M-25 (onboarding Marketplace link 404s) and L-10 (cold start). A public
   landing page for sharing the site was designed 2026-09-12 and is not built.
-- ⚠️ **Not ready to share publicly (audited 2026-09-16, deferred).** H-19: login likely loops for Safari, iOS, Firefox,
+- ✅ **Update 2026-10-03:** H-19 (Vercel proxy, live), H-20 (per-user/session limits) and M-26 are
+  fixed; consent-screen status still to confirm; M-33 (failed sign-in shows JSON) is new.
+  *Original 2026-09-16 note:* ⚠️ **Not ready to share publicly.** H-19: login likely loops for Safari, iOS, Firefox,
   Brave and incognito users, because the auth cookie is third-party across `vercel.app` / `onrender.com`. H-20: the
   IP-keyed rate limits let only ~25 sign-ins and 10 group joins per 15 minutes for a whole campus on shared Wi-Fi.
   M-26: cancelling Google sign-in shows an API 404. M-27: onboarding fails silently. Also unverified: whether the Google

@@ -1,8 +1,9 @@
 # CodeTrackr — Interview Prep (short version)
 
 The questions an interviewer is most likely to ask, with answers you can say out loud in under a
-minute. Every claim here matches the code on 2026-10-03. The long versions are in
-`docs/interview-preparation/` (full guide, 1,270-line Q&A bank, cheat sheet).
+minute. Every claim here matches the code on 2026-10-04 (deployed 2026-10-03; extension 2.5.0 and
+the live data migrations still pending). The long versions are in `docs/interview-preparation/`
+(full guide, Q&A bank, cheat sheet).
 
 **Rule for every answer:** say what is built and verified, and say "designed, not built" for
 anything else. The ML plan in particular is **not built**.
@@ -29,8 +30,9 @@ tracing the data from the editor event to the chart and asking what each number 
 **Q: Why MongoDB?**
 The activity summary is a self-contained document whose shape keeps growing, and the main query
 is "one user's documents in a time window, then aggregate". I did not need joins on that path.
-The cost shows up in the relational parts: no foreign keys, and `userId` is a string on
-activities but an ObjectId elsewhere, so joins happen in Node. (`DECISIONS.md` D-01.)
+The cost shows up in the relational parts: no foreign keys, so integrity lives in code; and
+`userId` was a string on activities but an ObjectId elsewhere — I'm migrating it to ObjectId in
+expand/contract style (reads accept both until a script converts the old rows). (D-01, D-23.)
 
 **Q: Did bucketing actually help? By how much?**
 Measured, not guessed: replaying an 8-hour day for 10 users, the extension's 2-minute cadence
@@ -73,11 +75,11 @@ built**: it needs ~300 labelled sessions from 10+ people and today one person se
 ## Failure cases
 
 **Q: What happens when the user is offline?**
-The extension keeps the unsent summary in memory and merges it into the next upload, so short
-outages lose nothing. Known gaps: nothing is written to disk, so closing VS Code loses it; and
-the merge is lossy (M-30) — merged time takes the newest project and timestamp, and if it adds up
-to more than an hour the extension drops it as a suspected clock jump. The fix is a small
-persisted queue of separate payloads.
+Extension 2.5.0 writes every upload to a small outbox in VS Code's `globalState` before sending,
+sends oldest first, and retries with the same `flushId`, so the server applies it once. Closing VS
+Code loses nothing; items older than 24 h are pruned because the server would refuse them. The
+old version merged held uploads into one, which filed time under the wrong project and dropped
+anything over an hour (M-30). Honest status: 2.5.0 is built and tested, not yet published.
 
 **Q: Did you use Docker?**
 Yes, in two ways. `backend/Dockerfile` builds a small production image (Node 20 Alpine,
@@ -90,8 +92,11 @@ moving off Render.
 **Q: How would you debug a production error?**
 Every request gets an id, returned as `X-Request-Id` and printed in the error body the user sees.
 The server writes JSON log lines (one access line per request, plus the stack trace for a 5xx)
-tagged with that id, so "error id abc123" leads straight to the request. Sentry can be switched on
-with one environment variable. The image has a health check, and the deploy workflow waits for
+tagged with that id, so "error id abc123" leads straight to the request. With one environment
+variable, every `log.error` also goes to Sentry, grouped and alerting. I first wired Sentry into the
+error handler only, then noticed routes that send their own 500, background jobs and crashes
+outside a request never got there; now the logger is the single hook, so nothing is missed and
+the access line isn't double-reported. The image has a health check, and the deploy workflow waits for
 `/health` to report the database connected.
 
 **Q: What happens when MongoDB is down?**
@@ -125,8 +130,8 @@ user (H-7). I replaced that with a per-user running-totals row updated with `$in
 so the all-time board is three indexed reads (top N by time, plus the two maxima the scores divide
 by), and a rebuild script reconciles drift — a test proves the rebuild equals the live totals.
 Measured locally at 1M activity rows: median latency went from 6.7 s to 62 ms (p99 7.2 s → 111 ms),
-throughput from 1.3 to 156 requests a second. Second, the older analytics routes load documents into Node
-and sum them there (M-1); they should be pipelines like the metrics service.
+throughput from 1.3 to 156 requests a second. Next would be the windowed boards (`?days=`, contest
+weeks), which still aggregate activity rows; per-day stats rows would fix that.
 
 **Q: Login didn't work on Safari. Why, and how did you fix it?**
 The website and the API were on different sites (`vercel.app` and `onrender.com`), so the login
@@ -136,30 +141,40 @@ address. Moving the backend to its own Vercel project wouldn't have helped — e
 is a separate site because `vercel.app` is a public suffix. A side effect I caught in the docs:
 Vercel hides visitors' IPs from the backend, so I moved rate limits from per-IP to per-user.
 
+**Q: Did anything go wrong when you deployed it?**
+Two config errors on the live Google login. First `redirect_uri_mismatch`: the callback moved to the
+website's address, and Google only accepts addresses registered on the OAuth client. Then a 500:
+the error page showed a request id, the same id was on a Render log line saying `invalid_client`
+— the client secret on Render was stale. I created a new secret, redeployed, and it worked. I also
+logged that a failed sign-in should land on the login page, not show JSON (M-33).
+
 **Q: And with a whole college on the same Wi-Fi?**
-All rate limits are per IP, so a campus behind one NAT shares one budget: about 25 sign-ins per
-15 minutes and 10 group joins (H-20). Join should be limited per user after authentication.
-Separately, the login cookie is third-party because the frontend and API are on different
-domains, which Safari and Firefox block (H-19); the fix is to proxy the API through the frontend's
-domain.
+That used to break: every limit was per IP, so a campus behind one NAT shared about 25 sign-ins
+per 15 minutes and 10 group joins (H-20). Now group join authenticates first and is limited per
+user, analytics per login session, and `/auth` has only a high flood cap. The extension and
+device-sign-in routes still see real IPs because the extension calls Render directly.
 
 ## Testing and process
 
 **Q: How did you test it?**
-296 backend assertions in 18 plain `node:assert` suites and 52 for the extension, run in GitHub
-Actions with the frontend build on every push. Most logic was refactored into pure functions so
-it tests without a database. The honest gap: no frontend tests and nothing runs against a real
-database or over HTTP; `supertest` plus an in-memory MongoDB is the next step.
+Three layers, all in GitHub Actions on every push: 369 backend unit assertions in 26 plain
+`node:assert` suites (logic refactored into pure functions), 36 integration tests that run the
+real Express app over HTTP against an in-memory MongoDB (including real CORS preflights), and 70
+extension assertions against the built bundle; plus the frontend build and a Docker health check.
+The honest gap: no frontend tests. The integration suite paid off on its first run — it found the
+goal-window bug (M-31).
 
 **Q: What would you improve next?**
-In order: fix H-22 and M-29 (small, user-visible), cap bucket duration (H-21), make login work on
-every browser (H-19, H-20), hash the API key, then the leaderboard running totals.
+Run the live migrations and publish extension 2.5.0; make a failed sign-in land on the login page
+(M-33); confirm Safari login and the cold start behind the proxy; per-day stats for the windowed
+boards; frontend tests. Everything from my earlier list (H-19 to H-23, hashed keys, running
+totals) is built.
 
 ## Numbers to know (and where they come from)
 
 | Number | Source |
 |---|---|
-| unit 23 suites / 346; integration 35; extension 6 / 70 | `npm test`, `npm run test:int`, 2026-10-03 |
+| unit 26 suites / 369; integration 36; extension 6 / 70 | `npm test`, `npm run test:int`, 2026-10-04 |
 | leaderboard 6.72 s → 62 ms p50 at 1M rows | `bench/leaderboard.bench.js` (local) |
 | ingest 4.9× fewer docs, 12.7× less data | `bench/ingest.bench.js` (local) |
 | 10-minute buckets, 400-day TTL | `services/activityBucket.js`, `models/Activity.js` |

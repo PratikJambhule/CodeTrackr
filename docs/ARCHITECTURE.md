@@ -9,7 +9,7 @@ unauthenticated analytics, all of which are gone. For line-level detail see
 
 | Component | Where | What it does |
 |---|---|---|
-| VS Code extension 2.4.0 | `extension/src/*.ts` → `dist/extension.js` | Five trackers collect counters; a 30 s timer decides when to upload one summary. |
+| VS Code extension (2.4.0 live, 2.5.0 built) | `extension/src/*.ts` → `dist/extension.js` | Five trackers collect counters; a 30 s timer decides when to upload one summary. |
 | Express API | `backend/app.js`, `routes/`, `services/`, `models/` | One process (a modular monolith). Feature routers, a thin service layer for ingest and insights, a central error handler. |
 | MongoDB Atlas | 13 collections | `activities` is the only high-volume one. |
 | React SPA | `frontend/src/` | Pages: Login, Onboarding, Dashboard, Insights, Leaderboard, Goals, Groups, Profile, Device (approve a VS Code sign-in). Reads use React Query (`src/api.ts`). |
@@ -93,14 +93,17 @@ can stop scanning raw activities (the planned `UserStats` step).
 | Extension | `ct_<id>_<secret>` key — either the profile key or a per-device key from **Sign In** (device-code flow, `devicetokens`, 1-year expiry); server stores only SHA-256(secret); extension 2.5.0 keeps it in SecretStorage | `verifyApiKey`: look up the id in `users` then `devicetokens`, constant-time compare of the hash (legacy keys by their hash) |
 | Scheduler | `INTERNAL_CRON_SECRET` header | constant-time compare; 404 when wrong or unset |
 
-Cross-cutting: `helmet`, CORS allow-list (`FRONTEND_URL` + localhost), per-IP rate limits on
-`/auth` (50 / 15 min), `/api/extension` and `/api/analytics` (120 / min), group join
-(10 / 15 min); group passwords hashed with scrypt; `AUTH_BYPASS` refused in production; a central
+Cross-cutting: `helmet`, CORS allow-list (`FRONTEND_URL` + localhost), rate limits —
+`/api/extension` 120 / min per IP plus 60 / min per key, `/api/analytics` 120 / min per login session,
+group join 10 / 15 min per user (after authentication), `/auth` 1000 / 15 min as a flood brake
+(browser traffic arrives through Vercel, which hides visitor IPs — `services/rateLimitKeys.js`); group passwords hashed with scrypt; `AUTH_BYPASS` refused in production; a central
 error handler that returns `{ error, id }` and maps `CastError`/`ValidationError` to 400.
 
-Open weaknesses that sit in this layer: non-expiring, unscoped API key; the auth cookie is
-third-party between `vercel.app` and `onrender.com` (H-19); IP-keyed limits punish a shared
-campus network (H-20); H-21, M-28/29 and L-11 were fixed on 2026-10-03.
+Open weaknesses that sit in this layer: no refresh token or server-side revocation for the web
+JWT; the cookie is still `SameSite=None` (can tighten to `Lax` now that the browser sees one
+site); a thrown OAuth error shows raw JSON (M-33). Fixed 2026-10-03: hashed, per-device,
+expiring keys; the cross-site cookie (H-19, Vercel proxy, live); per-IP limits (H-20); H-21,
+M-28/29, L-11.
 
 ## 5. Data model
 
@@ -139,7 +142,9 @@ ObjectIds, reads match both forms through `services/activityUser.js`, and
   and waits for `/health` — inert until `RENDER_DEPLOY_HOOK_URL` is set (see `docs/RELEASE.md`).
 - **Observability:** every request gets an id (`X-Request-Id`, also in error bodies); the server
   writes JSON lines — one access line per request, stack traces for 5xx — via
-  `services/logger.js`; Sentry reporting switches on with `SENTRY_DSN`.
+  `services/logger.js`. With `SENTRY_DSN` set, every `log.error` is also sent to Sentry
+  (`services/errorReporter.js`): request errors, route-level 500s, scheduler jobs, unhandled
+  rejections and uncaught exceptions, tagged with the request id; no user ids or emails.
 - **Local with Docker:** `docker compose up --build` starts three containers — `mongo` (MongoDB 7,
   data in a named volume, published on 27018), `backend` (the production `Dockerfile`, run with
   `NODE_ENV=development` + `AUTH_BYPASS`, `scripts/seed-local.js` seeds demo data once) and

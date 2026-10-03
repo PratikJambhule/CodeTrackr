@@ -16,8 +16,9 @@
 > ## October 2026 update — read this first (added 2026-10-03)
 >
 > This document was written before the October 2026 roadmap (`docs/ROADMAP_2026-10.md`). That work
-> is **built and tested but not deployed yet**, and extension **2.5.0 is not published** — say "I
-> built", not "it's live". **Wherever the text below disagrees with this box, this box wins.**
+> is **deployed (2026-10-03, commit `11040c5`) and Google login works on the live site**. Not done
+> yet: the live data migrations (so the leaderboard still uses the old scan) and publishing extension
+> **2.5.0** (2.4.0 is live) — say "deployed", but "built" for the extension's new features. **Wherever the text below disagrees with this box, this box wins.**
 > Up-to-date short versions: `CodeTrackr_Interview_Cheat_Sheet.md` (rewritten) and
 > `docs/INTERVIEW_PREP.md`. Measured numbers: `docs/BENCHMARKS.md`.
 >
@@ -29,13 +30,14 @@
 > | Duplicates / offline | no idempotency; memory-only buffer, lost on restart | `flushId` receipts (applied once); persisted outbox in `globalState`, FIFO, survives restart (M-30 fixed) |
 > | Analytics | `find()` then JS reduce (M-1) | daily/weekly from one `$facet` pipeline, proven equal to the old code by an oracle test |
 > | Write reduction | "~10× fewer writes" | **measured**: 4.9× fewer documents, 12.7× less data at the 2-minute cadence (19.6× / 51× vs the old 30 s); same throughput |
-> | Tests | 18 suites / 296; nothing against a real DB | unit **23 suites / 346**, **35 integration tests** (supertest + in-memory MongoDB, incl. CORS preflight), extension **6 / 70**; no frontend tests |
+> | Tests | 18 suites / 296; nothing against a real DB | unit **26 suites / 369**, **36 integration tests** (supertest + in-memory MongoDB, incl. CORS preflight), extension **6 / 70**; no frontend tests |
 > | `userId` type | String on activities (M-6) | ObjectId migration in progress (reads accept both; script converts) |
 > | Teams | orphaned page + live API | deleted |
 > | Groups | no admin powers | creator can rename / remove members; ownership passes on when the creator leaves |
-> | Ops | no Docker, no CD, console logs | Dockerfile + CI health check; **`docker compose up` runs MongoDB + API + website locally** (verified); deploy-on-green (off until a secret), JSON logs with request ids, optional Sentry |
+> | Ops | no Docker, no CD, console logs | Dockerfile + CI health check; **`docker compose up` runs MongoDB + API + website locally** (verified); deploy-on-green (off until a secret), JSON logs with request ids, optional Sentry that receives **every** `log.error` (requests, route 500s, jobs, crashes) |
 > | Bugs found while building | — | **H-23** CORS lacked PATCH → goal completion and mark-as-read never worked in a browser; M-31 goal window; M-32 weekly window; H-22 IST "today"; email leaks M-28/M-29 |
-> | Still open | — | H-19 login fix built (Vercel forwards `/api` + `/auth`; deploy + Google/Render callback setting pending); client-chosen timestamps, no web refresh token. H-20 fixed (limits per user/session) |
+> | Web login / API address | SPA calls Render directly (`VITE_API_URL`); login cookie is cross-site (`SameSite=None`); rate limits per IP | **Vercel forwards `/api` + `/auth` to Render**; the production site calls its own address (`config.ts`: `API_URL = ''`), so the cookie is first-party (still `SameSite=None` during the switch); Google's callback goes through the website; browser-facing limits per user/session (`rateLimitKeys.js`). **Live 2026-10-03** |
+> | Still open | — | H-19 login fix **live** (Vercel forwards `/api` + `/auth`; Google login works on the deployed site; Safari/private-window check pending); a failed Google sign-in shows raw JSON (M-33); client-chosen timestamps, no web refresh token. H-20 fixed (limits per user/session) |
 
 ---
 
@@ -1289,13 +1291,24 @@
 > static scan that fails if an auth-protected route loses its middleware.
 
 **P9. What are you weakest at in this project?**
-> *(Updated 2026-10-03.)* Frontend testing — the backend now has 35 integration tests against a
+> *(Updated 2026-10-03.)* Frontend testing — the backend now has 36 integration tests against a
 > real (in-memory) database, but the React app has none. And deployment: the October work is built
 > and tested but still waiting on the live migrations.
 
 ---
 
-## Q. The October 2026 work (added 2026-10-03 — built and tested, not yet deployed)
+## Q. The October 2026 work (added 2026-10-03 — deployed 2026-10-03; migrations + extension 2.5.0 pending)
+
+**Q0. Tell me about a production issue you debugged.**
+Going live with the login fix. First Google refused with `redirect_uri_mismatch`: the callback
+address had moved to the website (so the login cookie is first-party), and Google only accepts
+addresses listed on the OAuth client — I added the new one and set Render's `GOOGLE_CALLBACK_URL`.
+Then the callback returned a 500. The browser showed an error id; the same id was on a JSON log
+line in Render, which said `TokenError: invalid_client` — the client secret on Render no longer
+matched the Google client (the last four characters differed). Google only shows a secret once, so
+I created a new secret, put it on Render, redeployed, and login worked. What I took away: the
+request id in error bodies made it a two-minute search, and a failed sign-in should send the user
+back to the login page instead of showing JSON (logged as M-33).
 
 **Q1. You said the API key was your biggest weakness. What did you do about it?**
 > `[ACTUAL]` Keys are now `ct_<id>_<secret>`. The database keeps the id and a SHA-256 of the
@@ -1359,5 +1372,29 @@
 **Q12. How would you debug a production error now?**
 > `[ACTUAL]` Every request has an id, in the `X-Request-Id` header and in error bodies. Logs are
 > JSON lines tagged with that id, so the id a user reports finds the request and its stack trace.
-> Sentry switches on with one environment variable.
+> With `SENTRY_DSN` set, every `log.error` also goes to Sentry — one hook in the logger, so
+> route-level 500s, background jobs and process crashes are covered, not just the error handler.
+> **Follow-up — what did you get wrong first?** I wired Sentry only into the error handler; four
+> routes that answer 500 themselves, the scheduler and crashes would never have shown up. Found by
+> auditing every `log.error`, fixed by hooking the logger, tested with a fake client and the real
+> SDK against a local stand-in server.
+
+**Q13. Login didn't work on Safari. Why, and how did you fix it?**
+> `[ACTUAL]` The website (`vercel.app`) and the API (`onrender.com`) were different sites, so the
+> login cookie was third-party — Safari, Firefox, Brave and private windows block those. I made
+> the browser see one site: `frontend/vercel.json` forwards `/api/*` and `/auth/*` to Render and
+> the production site calls its own address, so the cookie is first-party. Moving the API to its
+> own Vercel project would not have helped: `vercel.app` is a public suffix, so every
+> `*.vercel.app` is its own site. Side effect: Vercel hides visitors' IPs from Render, so I moved
+> the browser-facing rate limits from per-IP to per-user / per-session (which also fixed a whole
+> campus sharing one limit, H-20). Live since 2026-10-03.
+> **Follow-up — what does the proxy cost?** Render's ~22 s cold start now sits behind Vercel's
+> proxy; whether Vercel waits that long is the next thing I check.
+
+**Q14. Did you use Docker?**
+> `[ACTUAL]` Two ways. `backend/Dockerfile` builds a small production image (Node 20 Alpine,
+> production dependencies, non-root, `/health` check) that CI builds and health-checks against a
+> throwaway MongoDB. `docker compose up` starts MongoDB, the API and the website with demo data
+> for development. Production on Render still runs Node directly — I'd switch to the image only
+> with a reason, like moving off Render.
 

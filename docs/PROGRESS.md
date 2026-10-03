@@ -6,6 +6,69 @@ engineering narrative for August–September is in `docs/SESSION-LOG-2026-08-27.
 
 ---
 
+## 2026-10-04 — Error reporting covers every error (L-13)
+
+**Why:** while explaining Sentry to the user I found it was only called from the central error
+handler. Four routes answer 500 themselves (`routes/user.js` ×3, `routes/metrics.js`), the
+in-process scheduler logs its job failures, and nothing caught crashes outside a request — all of
+those reached only the Render log.
+
+**Built (test first):** `services/errorReporter.js` hooks into the logger, so every `log.error`
+is reported when `SENTRY_DSN` is set (D-30); only method, path, status and the request id are
+attached. `app.js` handles `unhandledRejection` and `uncaughtException` (log, report, flush up to
+2 s, exit). The access line moved to `log.access` so a 5xx isn't reported twice — the first
+integration run caught that duplicate. The MongoDB connection error now logs the full error, not
+just its message.
+
+**Also fixed:** a flaky integration test — it split the API key on `_`, which base64url secrets can
+contain; it failed once in this run.
+
+**Tested:** new `errorReporter` suite (9); integration test: a route-level 500 is reported with the
+same request id the client saw, a 400 is not. Real `@sentry/node` 11.4 sent one event to a local
+stand-in server: error, request id and path present, user id absent. Unit 26 suites / 369,
+integration 36 / 36 (three runs), extension 6 / 70, frontend build green. Sentry stays off until the
+user adds `SENTRY_DSN` on Render (`docs/RELEASE.md` §5).
+
+---
+
+## 2026-10-04 — Doc audit after go-live
+
+Re-ran everything: backend unit **25 suites / 360**, integration **35**, extension **6 / 70**,
+frontend build green. Then searched every doc for facts the October work made stale and fixed
+them: test counts (many still said 23 / 346), `docs/INTERVIEW_PREP.md` answers that still
+described the old offline merge, per-IP limits, the cross-site cookie, the old test suite and the
+old "next steps"; `docs/ARCHITECTURE.md` §4 (rate limits, open weaknesses); README and
+PROJECT_CONTEXT (`VITE_API_URL` is dev-only now). Interview prep: a "Web login / API address" row
+in all four update boxes, Q13 (Safari login) and Q14 (Docker) in the Q&A bank, two quick answers
+in the cheat sheet; PDFs rebuilt.
+
+---
+
+## 2026-10-03 (evening) — Go-live of the October work
+
+**Deployed.** The user pushed commit `11040c5` to `main`; Render and Vercel deployed it (Render log:
+"mongodb connected", "Your service is live"; one `/health` 503 during boot, before MongoDB had
+connected, is expected).
+
+**Live login, two config errors, both fixed by the user:**
+1. Google showed `Error 400: redirect_uri_mismatch`. The login callback now goes through the
+   website (H-19), so `https://code-trackr-frontend.vercel.app/auth/google/callback` had to be added
+   to the OAuth client's redirect URIs and set as Render's `GOOGLE_CALLBACK_URL`.
+2. The callback then returned 500 `{"error":"Internal server error","id":"3a75b10b5100"}`. The id
+   matched a Render log line: `TokenError: The provided client secret is invalid` (`invalid_client`)
+   during the code-for-token exchange. Render's `GOOGLE_CLIENT_SECRET` was not the client's current
+   secret (last 4 characters differed). Google shows a secret only once, so the user added a new
+   secret, set it on Render and redeployed. **Login works on the live site.**
+
+**What this showed:** the request id in error bodies (added this month) turned a vague 500 into one
+log search. New finding **M-33**: a thrown OAuth error shows raw JSON instead of the login page.
+`docs/RELEASE.md` §1b now lists the secret check and the error→cause table.
+
+**Not done yet:** Safari/private-window login check, cold-start check, live migrations, extension
+2.5.0 publish.
+
+---
+
 ## 2026-10-03 — Roadmap started (`docs/ROADMAP_2026-10.md`)
 
 **Step 0 — docs consistent.** Fixed the contradictions the external review found in the

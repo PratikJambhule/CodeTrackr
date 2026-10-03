@@ -1,7 +1,8 @@
 # Release checklist
 
-Everything in the October 2026 roadmap is built and tested but **not deployed**. These are the
-steps only the account owner can do, in order. Every script has a dry run (no flag) — run that
+**Status 2026-10-03:** §1, §1b and §2 are done (deployed, Google login works live). Still to do:
+§1b Safari/cold-start check, §3 migrations, §4 extension publish. These are the steps only the
+account owner can do, in order. Every script has a dry run (no flag) — run that
 first and read its counts.
 
 > `backend/.env` points at the **live** database. The scripts below read it. Run them from
@@ -32,6 +33,14 @@ website's address.
    (production builds no longer read it).
 4. While in Google Cloud: OAuth consent screen → Publishing status must be **In production**,
    otherwise only listed test users can sign in.
+5. Check that Render's `GOOGLE_CLIENT_SECRET` belongs to the **same** OAuth client as
+   `GOOGLE_CLIENT_ID` (compare the last 4 characters Google shows). Google shows a secret in full
+   only once: if they differ, **Add secret**, copy it from the popup, paste it into Render, then
+   disable the old one after login works. Changing a Render variable needs a redeploy.
+
+Errors seen at go-live and what they meant: `redirect_uri_mismatch` (Google page) → step 1 or 2
+missing; a 500 on `/auth/google/callback` with `TokenError: invalid_client` in Render's log → step 5.
+The `id` in the browser's error body is the `requestId` on the matching Render log line.
 
 After deploying, sign in from **Safari or a private/incognito window**. Also try the first visit
 after the backend has been idle ~15 minutes: if Vercel gives up before Render wakes (~22 s), the
@@ -86,7 +95,7 @@ cd extension && npm ci && npm test && npx vsce package
 | What | How | Off until |
 |---|---|---|
 | Continuous deployment | GitHub secret `RENDER_DEPLOY_HOOK_URL` (Render → Settings → Deploy Hook); then turn off Render auto-deploy so only green CI deploys | the secret exists |
-| Error reporting | Render env `SENTRY_DSN` (free Sentry project). Errors are sent with the request id; no user PII | the variable exists |
+| Error reporting | sentry.io → new **Node.js** project → copy the DSN → Render env `SENTRY_DSN` → save and redeploy. Every server error (requests, background jobs, crashes) then appears under Issues, grouped, with the request id; no user ids or emails. Turn on email alerts for new issues | the variable exists |
 | Log verbosity | Render env `LOG_LEVEL=debug` / `warn` (default `info`) | — |
 
 ## 6. Numbers for the resume

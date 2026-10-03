@@ -24,7 +24,15 @@ function serializeError(err) {
   return { name: err.name, message: err.message, code: err.code, stack: err.stack };
 }
 
-function write(level, msg, fields) {
+// services/errorReporter.js registers here, so every log.error can also go to
+// Sentry without the logger depending on it. A failing sink never breaks logging.
+let errorSink = null;
+function setErrorSink(fn) { errorSink = fn; }
+
+function write(level, msg, fields, report = true) {
+  if (report && level === 'error' && errorSink) {
+    try { errorSink(msg, fields); } catch { /* reporting must never break the caller */ }
+  }
   if (LEVELS[level] < minLevel()) return;
   const line = { ts: new Date().toISOString(), level, msg };
   for (const [k, v] of Object.entries(fields || {})) {
@@ -39,6 +47,9 @@ const log = {
   info: (msg, fields) => write('info', msg, fields),
   warn: (msg, fields) => write('warn', msg, fields),
   error: (msg, fields) => write('error', msg, fields),
+  // Per-request access line: logged at its level but never reported, because the
+  // error that caused a 5xx is already reported by whoever logged it.
+  access: (level, msg, fields) => write(level, msg, fields, false),
 };
 
-module.exports = { log, LEVELS };
+module.exports = { log, LEVELS, setErrorSink };

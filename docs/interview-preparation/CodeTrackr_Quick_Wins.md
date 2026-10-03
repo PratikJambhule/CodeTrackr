@@ -1,7 +1,8 @@
 # CodeTrackr — Quick Wins for Interview Impact
 
-> **2026-10-03:** items 9, 10, 13 and 24 are now built too (October roadmap, not yet deployed).
-> What is built and measured is summarised in `docs/ROADMAP_2026-10.md` and `docs/BENCHMARKS.md`.
+> **2026-10-03:** items 9, 10, 13 and 24 are now built too (October roadmap, deployed 2026-10-03; extension 2.5.0 not yet published).
+> Since 2026-10-03 the per-IP limits in item 3 are per user / per session (H-20). What is built
+> and measured is summarised in `docs/ROADMAP_2026-10.md` and `docs/BENCHMARKS.md`.
 
 *A curated shortlist of changes that are **cheap to implement** but **signal strong
 engineering judgement** and **add real value**. Everything here is verified against the
@@ -430,7 +431,7 @@ you spotted a per-iteration unindexed query.
 | 21 | **`docker-compose.yml` for local dev** | 🟡 | "`docker compose up` gives you Mongo + API + frontend — one command to run the whole thing." |
 | 22 | **Delete dead code** (`server.js.old`, `extension.js` v1, orphaned `Teams.tsx`, `newest.java`) | 🟢 | "Removed ~1k lines of superseded code so the repo reflects what actually ships." |
 | 23 | **ESLint + Prettier on the backend** (frontend already has eslint) | 🟢 | "Added lint to the backend and to CI so style isn't a review conversation." |
-| 24 | **One integration test** (`supertest` + `mongodb-memory-server`) — ✅ BUILT 2026-10-03: 35 tests | 🟠 | "The gap was that nothing hit a real database — I added an in-memory Mongo test proving ingest + the ownership check work end-to-end." |
+| 24 | **One integration test** (`supertest` + `mongodb-memory-server`) — ✅ BUILT 2026-10-03: 36 tests | 🟠 | "The gap was that nothing hit a real database — I added an in-memory Mongo test proving ingest + the ownership check work end-to-end." |
 | 25 | **README with architecture diagram + run steps** | 🟡 | "A reviewer can understand and run the project in two minutes." |
 
 ---
