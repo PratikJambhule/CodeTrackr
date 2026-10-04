@@ -20,8 +20,8 @@
 >
 > This document was written before the October 2026 roadmap (`docs/ROADMAP_2026-10.md`). That work
 > is **deployed (2026-10-03, commit `11040c5`) and Google login works on the live site**. Not done
-> yet: the live data migrations (so the leaderboard still uses the old scan) and publishing extension
-> **2.5.0** (2.4.0 is live) — say "deployed", but "built" for the extension's new features. **Wherever the text below disagrees with this box, this box wins.**
+> yet: the live data migrations (so the leaderboard still uses the old scan). Extension **2.5.0** is
+> **live on the Marketplace since 2026-10-04** (Sign In, offline queue, keychain), so "live" is right for those too. **Wherever the text below disagrees with this box, this box wins.**
 > Up-to-date short versions: `CodeTrackr_Interview_Cheat_Sheet.md` (rewritten) and
 > `docs/INTERVIEW_PREP.md`. Measured numbers: `docs/BENCHMARKS.md`.
 >
@@ -33,14 +33,15 @@
 > | Duplicates / offline | no idempotency; memory-only buffer, lost on restart | `flushId` receipts (applied once); persisted outbox in `globalState`, FIFO, survives restart (M-30 fixed) |
 > | Analytics | `find()` then JS reduce (M-1) | daily/weekly from one `$facet` pipeline, proven equal to the old code by an oracle test |
 > | Write reduction | "~10× fewer writes" | **measured**: 4.9× fewer documents, 12.7× less data at the 2-minute cadence (19.6× / 51× vs the old 30 s); same throughput |
-> | Tests | 18 suites / 296; nothing against a real DB | unit **26 suites / 369**, **36 integration tests** (supertest + in-memory MongoDB, incl. CORS preflight), extension **6 / 70**; no frontend tests |
+> | Tests | 18 suites / 296; nothing against a real DB | unit **27 suites / 375**, **39 integration tests** (supertest + in-memory MongoDB, incl. CORS preflight), extension **6 / 70**, **frontend 51** (Vitest + Testing Library, run in IST) |
 > | `userId` type | String on activities (M-6) | ObjectId migration in progress (reads accept both; script converts) |
 > | Teams | orphaned page + live API | deleted |
 > | Groups | no admin powers | creator can rename / remove members; ownership passes on when the creator leaves |
 > | Ops | no Docker, no CD, console logs | Dockerfile + CI health check; **`docker compose up` runs MongoDB + API + website locally** (verified); deploy-on-green (off until a secret), JSON logs with request ids, optional Sentry that receives **every** `log.error` (requests, route 500s, jobs, crashes) |
 > | Bugs found while building | — | **H-23** CORS lacked PATCH → goal completion and mark-as-read never worked in a browser; M-31 goal window; M-32 weekly window; H-22 IST "today"; email leaks M-28/M-29 |
 > | Web login / API address | SPA calls Render directly (`VITE_API_URL`); login cookie is cross-site (`SameSite=None`); rate limits per IP | **Vercel forwards `/api` + `/auth` to Render**; the production site calls its own address (`config.ts`: `API_URL = ''`), so the cookie is first-party (still `SameSite=None` during the switch); Google's callback goes through the website; browser-facing limits per user/session (`rateLimitKeys.js`). **Live 2026-10-03** |
-> | Still open | — | H-19 login fix **live** (Vercel forwards `/api` + `/auth`; Google login works on the deployed site; Safari/private-window check pending); a failed Google sign-in shows raw JSON (M-33); client-chosen timestamps, no web refresh token. H-20 fixed (limits per user/session) |
+> | Website (redesigned 2026-10-04, **built, not deployed**) | 3D background, glitch text, custom cursor, 28 themes; 1,150-line Dashboard; Chart.js; no public page; no frontend tests | "The weekly race": an F1-style **standings tower** (position, one cell per day, gap), race chart, landing + guide + privacy pages, invite links `/join/:id`, dark + light themes as CSS variables; hand-made SVG charts (no chart library); every page lazy-loaded: landing first visit **748 → 359 kB (232 → 114 kB gzip)**; 51 Vitest tests; found + fixed: goals saved a day early in India (M-34); sign-out landed on the sign-in page (D-37). Spec `docs/specs/2026-10-04-frontend-redesign.md`, D-31..D-36 |
+> | Still open | — | H-19 login fix **live** (Vercel forwards `/api` + `/auth`; Google login works on the deployed site; Safari/private-window check pending); a failed Google sign-in shows raw JSON (M-33); goal progress misses the deadline day (M-35); no self-serve data deletion (L-14); client-chosen timestamps, no web refresh token; the API still runs end-of-life Node 20 (L-15). H-20 fixed (limits per user/session) |
 
 ---
 
@@ -421,6 +422,8 @@ For each: **what / where in CodeTrackr / why / alternative / why the choice hold
   jobs, or Atlas Triggers hitting the internal routes.
 
 ### Chart.js 4 + react-chartjs-2 + chartjs-plugin-datalabels
+
+*(Replaced 2026-10-04 by small hand-made SVG/HTML chart components; see D-32 and the update box.)*
 
 - **Where:** `Dashboard.tsx` — Line (hourly/daily hours), Pie (language breakdown), Bar
   (terminal success/failure, command usage, build/git trends).
@@ -1780,7 +1783,7 @@ Each: **Decision → Reason → Alternative → Trade-off → When the alternati
 | 10 | ~~Teams UI orphaned~~ ✅ deleted 2026-10-03 | — | — | page, route and model removed |
 | 11 | Idle < 2 min counts as active | totals skew high | inflated hours | count only intervals with a real edit event (L-7) |
 | 12 | `activities.userId` String vs ObjectId (M-6) — 🟡 migrating | — | — | expand step built 2026-10-03: ObjectId writes, dual reads, migration script; live `--apply` + contract pending |
-| 13 | ~~No offline queue~~ ✅ built 2026-10-03 (extension 2.5.0, unpublished) | — | — | persisted FIFO outbox in `globalState` |
+| 13 | ~~No offline queue~~ ✅ built 2026-10-03 (extension 2.5.0, live since 2026-10-04) | — | — | persisted FIFO outbox in `globalState` |
 | 14 | ~~No idempotency~~ ✅ built 2026-10-03 | — | — | `flushId` + unique receipts, 48 h TTL |
 | 15 | Insights recomputed every request | 4 aggregations per page load | slow page, DB load | cache per (user, window) |
 | 16 | ~~Errors echo `err.message`~~ ✅ fixed 2026-09-09 | was a recon aid | — | central error middleware + correlation id |
@@ -1811,7 +1814,7 @@ Each: **Decision → Reason → Alternative → Trade-off → When the alternati
 - ✅ Sparse analytics sub-docs; dropped the dead `date` field + index.
 - ✅ Added `{userId:1,timestamp:-1}`; `DailySummary` + nightly rollup + 400-day TTL.
 
-### Done 2026-10-03 (October roadmap — built, tested, deployed 2026-10-03; migrations + extension 2.5.0 pending)
+### Done 2026-10-03 (October roadmap — built, tested, deployed 2026-10-03; extension 2.5.0 live 2026-10-04; migrations pending)
 
 - ✅ Hashed API keys, device-code sign-in with per-device keys, SecretStorage.
 - ✅ `userstats` leaderboard + group boards; contest-week windows; group admin.
@@ -2376,8 +2379,9 @@ from formal-language theory:
 ### 28.8 Software engineering
 
 - **Pure functions separated from I/O.** All the metric maths lives in `metricsDerive.js` with no
-  database access, so the 369 unit assertions run in seconds with no database. Since 2026-10-03,
-  36 integration tests also run the real app against an in-memory MongoDB, and one refactor was
+  database access, so the 375 unit assertions run in seconds with no database. Since 2026-10-03,
+  39 integration tests also run the real app against an in-memory MongoDB, since 2026-10-04 51
+  frontend tests run in Vitest, and one refactor was
   proven by running the old code as an oracle next to the new one.
 - **Regression tests encode history.** Several tests exist only because a specific bug shipped —
   one asserts that `Math.max(...spread)` really does throw at 200k elements, so the reason for the

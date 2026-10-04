@@ -1,1150 +1,247 @@
-import { useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
-import { apiGet } from '../api';
-import { BarChart3, Clock, Code, TrendingUp, ArrowLeft, Terminal, CheckCircle, XCircle, Hammer, GitBranch, Timer } from 'lucide-react';
-import { Chart as ChartJS, CategoryScale, LinearScale, BarElement, LineElement, PointElement, Title, Tooltip, Legend, ArcElement } from 'chart.js';
-import ChartDataLabels from 'chartjs-plugin-datalabels';
-import { Line, Pie, Bar } from 'react-chartjs-2';
-import { useTheme } from '../contexts/ThemeContext';
-import GradientText from '../components/GradientText';
-import TextType from '../components/TextType';
+import { useMemo, useState } from 'react';
+import { Plug } from 'lucide-react';
+import { errorText } from '../api';
+import { useDayView, useHistory, useWeekView } from '../hooks/queries';
+import { Bars, RankedBars } from '../components/charts/Bars';
+import { HourStrip } from '../components/charts/HourStrip';
+import { YearHeatmap } from '../components/charts/YearHeatmap';
+import { ButtonLink, Card, CardTitle, ErrorBox, PageHeader, Segmented, Skeleton } from '../components/ui';
+import { addDays, hm, hmCompact, hoursHm, localDateKey, plural } from '../lib/format';
+import { streaks } from '../lib/calendar';
+import { readStored, writeStored } from '../lib/storage';
+import type { Me } from '../types';
+import { RaceStrip } from './dashboard/RaceStrip';
+import { BuildHealth, GoalsMini, InsightTeaser, StatTile } from './dashboard/cards';
+import { TimeSlotDialog } from './dashboard/TimeSlotDialog';
 
-ChartJS.register(CategoryScale, LinearScale, BarElement, LineElement, PointElement, Title, Tooltip, Legend, ArcElement, ChartDataLabels);
+const TARGET_KEY = 'codetrackr.dailyTarget';
+const TARGETS = [1, 2, 3, 4, 6];
 
-export default function Dashboard({ user }: { user: any }) {
-  const { theme } = useTheme();
-  const [viewMode, setViewMode] = useState<'daily' | 'weekly'>('daily');
-  const [selectedTimeSlot, setSelectedTimeSlot] = useState<{ start: number, end: number } | null>(null);
-
-  // React Query (roadmap item 11). One request per view, cached for 30 s, so
-  // toggling Daily/Weekly re-uses data instead of refetching. The old pair of
-  // effects fired three requests on every mount, one a duplicate (M-11).
-  // Timezone offset in minutes, negative east of UTC (IST = -330).
-  const tz = new Date().getTimezoneOffset();
-  const daily = useQuery({
-    queryKey: ['analytics', 'daily', user.id, tz],
-    queryFn: () => apiGet(`/api/analytics/${user.id}?timezone=${tz}`),
+export default function Dashboard({ user }: { user: Me }) {
+  const [period, setPeriod] = useState<'today' | 'week'>('week');
+  const [slot, setSlot] = useState<{ start: number; end: number } | null>(null);
+  const [target, setTarget] = useState(() => {
+    const v = Number(readStored(TARGET_KEY));
+    return TARGETS.includes(v) ? v : 2;
   });
-  const weekly = useQuery({
-    queryKey: ['analytics', 'weekly', user.id, tz],
-    queryFn: () => apiGet(`/api/analytics/weekly/${user.id}?timezone=${tz}`),
-  });
-  const timeSlot = useQuery({
-    queryKey: ['analytics', 'timeslot', user.id, tz, selectedTimeSlot?.start, selectedTimeSlot?.end],
-    queryFn: () => apiGet(`/api/analytics/timeslot/${user.id}?start=${selectedTimeSlot!.start}&end=${selectedTimeSlot!.end}&timezone=${tz}`),
-    enabled: selectedTimeSlot !== null,
-  });
+  const day = useDayView(user.id);
+  const week = useWeekView(user.id);
+  const history = useHistory(user.id);
+  const today = useMemo(() => new Date(), []);
+  const view = period === 'today' ? day : week;
 
-  const analytics: any = daily.data ?? null;
-  const weeklyAnalytics: any = weekly.data ?? null;
-  const loading = daily.isPending;
-  const timeSlotData: any = selectedTimeSlot ? timeSlot.data ?? null : null;
+  const derived = useMemo(() => {
+    const days = history.data?.days ?? [];
+    const byDate = new Map(days.map((d) => [d.date, d.seconds]));
+    const sumRange = (fromAgo: number, toAgo: number) => {
+      let s = 0;
+      for (let i = fromAgo; i <= toAgo; i++) s += byDate.get(localDateKey(addDays(today, -i))) ?? 0;
+      return s;
+    };
+    const lastWeek = sumRange(7, 13);
+    const year = days.filter((d) => d.seconds > 0);
+    return { lastWeek, streak: streaks(year.map((d) => d.date), today), yearDays: year.length };
+  }, [history.data, today]);
 
-  const handleTimeSlotClick = (startHour: number, endHour: number) => {
-    setSelectedTimeSlot({ start: startHour, end: endHour });
-  };
+  const dateLine = today.toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long' });
 
-  const handleBackToOverview = () => {
-    setSelectedTimeSlot(null);
-  };
-
-  if (loading) {
+  if (day.isError && week.isError) {
     return (
-      <div 
-        className="flex items-center justify-center min-h-screen transition-colors duration-300"
-        style={{ backgroundColor: theme.colors.background }}
-      >
-        <div className="text-xl" style={{ color: theme.colors.text }}>
-          Loading analytics...
-        </div>
-      </div>
+      <>
+        <PageHeader eyebrow={dateLine} title="Dashboard" />
+        <ErrorBox message={errorText(day.error)} onRetry={() => { void day.refetch(); void week.refetch(); void history.refetch(); }} />
+      </>
     );
   }
 
-  // Always show dashboard, even with no data
-  if (!analytics) {
-    return (
-      <div 
-        className="flex items-center justify-center min-h-screen transition-colors duration-300"
-        style={{ backgroundColor: theme.colors.background }}
-      >
-        <div className="text-xl" style={{ color: theme.colors.text }}>
-          Error loading analytics. Please try again.
-        </div>
-      </div>
-    );
-  }
-
-  const stats = [
-    { label: 'Total Hours', value: analytics?.totalHours?.toFixed(1) || '0', icon: <Clock className="w-6 h-6" />, color: 'from-blue-500 to-cyan-500' },
-    { label: 'Projects', value: analytics?.projectCount || '0', icon: <Code className="w-6 h-6" />, color: 'from-purple-500 to-pink-500' },
-    { label: 'Lines of Code', value: analytics?.totalLinesAdded || '0', icon: <BarChart3 className="w-6 h-6" />, color: 'from-green-500 to-emerald-500' },
-    { label: 'Streak Days', value: analytics?.streakDays || '0', icon: <TrendingUp className="w-6 h-6" />, color: 'from-orange-500 to-red-500' },
-  ];
-
-  const currentData = viewMode === 'weekly' ? weeklyAnalytics : analytics;
-
-  const terminalSummary = currentData?.terminalSummary || {
-    totalCommands: 0,
-    terminalErrorCount: 0,
-    successfulCommands: 0,
-    failedCommands: 0,
-    successRate: 0,
-    buildRuns: 0,
-    testRuns: 0,
-    successfulBuilds: 0,
-    failedBuilds: 0,
-    buildSuccessRate: 0,
-    debuggingSessions: 0,
-    commandUsage: {
-      git: 0,
-      npm: 0,
-      node: 0,
-      python: 0,
-      docker: 0,
-      gcc: 0,
-      java: 0,
-      pip: 0,
-      misc: 0,
-    },
-    gitActivity: {
-      commits: 0,
-      pushes: 0,
-      pulls: 0,
-      checkouts: 0,
-      merges: 0,
-      clones: 0,
-    },
-    repeatedFailedCommands: []
-  };
-
-  const terminalTimeline = currentData?.terminalTimeline || [];
-
-  const commandUsageEntries = Object.entries(terminalSummary.commandUsage || {})
-    .map(([label, value]) => ({ label, value: Number(value) || 0 }))
-    .sort((a, b) => b.value - a.value)
-    .slice(0, 8);
-
-  const terminalStats = [
-    { label: 'Total Commands', value: terminalSummary.totalCommands || 0, icon: <Terminal className="w-6 h-6" />, color: 'from-teal-500 to-cyan-500' },
-    { label: 'Terminal Errors', value: terminalSummary.terminalErrorCount || 0, icon: <XCircle className="w-6 h-6" />, color: 'from-rose-500 to-orange-500' },
-    { label: 'Success Rate', value: `${terminalSummary.successRate || 0}%`, icon: <CheckCircle className="w-6 h-6" />, color: 'from-emerald-500 to-lime-500' },
-    { label: 'Build Runs', value: terminalSummary.buildRuns || 0, icon: <Hammer className="w-6 h-6" />, color: 'from-amber-500 to-yellow-500' },
-    { label: 'Build Success', value: `${terminalSummary.buildSuccessRate || 0}%`, icon: <TrendingUp className="w-6 h-6" />, color: 'from-amber-500 to-lime-500' },
-    { label: 'Test Runs', value: terminalSummary.testRuns || 0, icon: <BarChart3 className="w-6 h-6" />, color: 'from-indigo-500 to-sky-500' },
-    { label: 'Git Commits', value: terminalSummary.gitActivity?.commits || 0, icon: <GitBranch className="w-6 h-6" />, color: 'from-purple-500 to-pink-500' },
-    { label: 'Debug Sessions', value: terminalSummary.debuggingSessions || 0, icon: <Timer className="w-6 h-6" />, color: 'from-slate-500 to-zinc-500' },
-  ];
-
-  const repeatedFailures = (currentData?.terminalSummary?.repeatedFailedCommands ?? []) as Array<{
-    command: string;
-    count: number;
-  }>;
-
-  const dailyData = {
-    labels: currentData?.dailyActivity?.map((d: any) => d.day) || [],
-    datasets: [{
-      label: 'Hours Coded',
-      data: currentData?.dailyActivity?.map((d: any) => d.hours) || [],
-      backgroundColor: `${theme.colors.primary}20`,
-      borderColor: theme.colors.primary,
-      borderWidth: 2,
-      fill: true,
-      tension: 0.4,
-      pointRadius: 4,
-      pointHoverRadius: 6,
-      pointBackgroundColor: theme.colors.primary,
-    }]
-  };
-
-  const languageData = {
-    labels: currentData?.languageBreakdown?.map((l: any) => l._id) || [],
-    datasets: [{
-      data: currentData?.languageBreakdown?.map((l: any) => l.hours) || [],
-      backgroundColor: [
-        `${theme.colors.primary}cc`,
-        `${theme.colors.accent}cc`,
-        `${theme.colors.secondary}cc`,
-        `${theme.colors.primary}99`,
-        `${theme.colors.accent}99`,
-        `${theme.colors.secondary}99`,
-        `${theme.colors.primary}66`,
-      ],
-      borderColor: [
-        theme.colors.primary,
-        theme.colors.accent,
-        theme.colors.secondary,
-        theme.colors.primary,
-        theme.colors.accent,
-        theme.colors.secondary,
-        theme.colors.primary,
-      ],
-      borderWidth: 3,
-    }]
-  };
-
-  const terminalSuccessFailureData = {
-    labels: terminalTimeline.map((t: any) => t.hour || t.day),
-    datasets: [
-      {
-        label: 'Success',
-        data: terminalTimeline.map((t: any) => t.success || 0),
-        backgroundColor: `${theme.colors.primary}aa`,
-        borderColor: theme.colors.primary,
-        borderWidth: 1,
-      },
-      {
-        label: 'Failed',
-        data: terminalTimeline.map((t: any) => t.failed || 0),
-        backgroundColor: `${theme.colors.accent}aa`,
-        borderColor: theme.colors.accent,
-        borderWidth: 1,
-      }
-    ]
-  };
-
-  const commandUsageData = {
-    labels: commandUsageEntries.map((entry) => entry.label),
-    datasets: [
-      {
-        label: 'Commands',
-        data: commandUsageEntries.map((entry) => entry.value),
-        backgroundColor: `${theme.colors.primary}99`,
-        borderColor: theme.colors.primary,
-        borderWidth: 1,
-        borderRadius: 8,
-      }
-    ]
-  };
-
-  const buildTimeline = currentData?.buildTimeline || [];
-  const gitTimeline = currentData?.gitTimeline || [];
-
-  const buildTrendData = {
-    labels: buildTimeline.map((t: any) => t.hour || t.day),
-    datasets: [
-      {
-        label: 'Successful Builds',
-        data: buildTimeline.map((t: any) => t.success || 0),
-        backgroundColor: `${theme.colors.primary}aa`,
-        borderColor: theme.colors.primary,
-        borderWidth: 1,
-      },
-      {
-        label: 'Failed Builds',
-        data: buildTimeline.map((t: any) => t.failed || 0),
-        backgroundColor: `${theme.colors.accent}aa`,
-        borderColor: theme.colors.accent,
-        borderWidth: 1,
-      }
-    ]
-  };
-
-  const gitTrendData = {
-    labels: gitTimeline.map((t: any) => t.hour || t.day),
-    datasets: [
-      {
-        label: 'Commits',
-        data: gitTimeline.map((t: any) => t.commits || 0),
-        backgroundColor: `${theme.colors.primary}aa`,
-        borderColor: theme.colors.primary,
-        borderWidth: 1,
-      },
-      {
-        label: 'Pushes',
-        data: gitTimeline.map((t: any) => t.pushes || 0),
-        backgroundColor: `${theme.colors.accent}aa`,
-        borderColor: theme.colors.accent,
-        borderWidth: 1,
-      },
-      {
-        label: 'Pulls',
-        data: gitTimeline.map((t: any) => t.pulls || 0),
-        backgroundColor: `${theme.colors.secondary}aa`,
-        borderColor: theme.colors.secondary,
-        borderWidth: 1,
-      }
-    ]
-  };
-
-  const lineChartOptions = {
-    responsive: true,
-    maintainAspectRatio: false,
-    plugins: {
-      legend: {
-        labels: { 
-          color: theme.colors.text,
-          font: { size: 14 }
-        }
-      },
-      tooltip: {
-        backgroundColor: `${theme.colors.surface}ee`,
-        titleColor: theme.colors.text,
-        bodyColor: theme.colors.text,
-        borderColor: theme.colors.primary,
-        borderWidth: 1,
-        padding: 12,
-        displayColors: false,
-        callbacks: {
-          label: function(context: any) {
-            return `${context.parsed.y.toFixed(2)} hours`;
-          }
-        }
-      },
-      datalabels: {
-        display: false
-      }
-    },
-    scales: {
-      x: {
-        grid: {
-          color: `${theme.colors.border}40`,
-        },
-        ticks: {
-          color: theme.colors.textSecondary,
-          font: { size: 12 }
-        }
-      },
-      y: {
-        grid: {
-          color: `${theme.colors.border}40`,
-        },
-        ticks: {
-          color: theme.colors.textSecondary,
-          font: { size: 12 },
-          callback: function(value: any) {
-            return value.toFixed(1) + 'h';
-          }
-        }
-      }
-    }
-  };
-
-  const terminalBarOptions = {
-    responsive: true,
-    maintainAspectRatio: false,
-    plugins: {
-      legend: {
-        labels: {
-          color: theme.colors.text,
-          font: { size: 12 }
-        }
-      },
-      tooltip: {
-        backgroundColor: `${theme.colors.surface}ee`,
-        titleColor: theme.colors.text,
-        bodyColor: theme.colors.text,
-        borderColor: theme.colors.primary,
-        borderWidth: 1,
-        padding: 12,
-        displayColors: true,
-      },
-      datalabels: { display: false }
-    },
-    scales: {
-      x: {
-        grid: { color: `${theme.colors.border}30` },
-        ticks: { color: theme.colors.textSecondary, font: { size: 11 } }
-      },
-      y: {
-        grid: { color: `${theme.colors.border}30` },
-        ticks: { color: theme.colors.textSecondary, font: { size: 11 } }
-      }
-    }
-  };
-
-  const commandUsageOptions = {
-    ...terminalBarOptions,
-    indexAxis: 'y' as const
-  };
-
-  const pieChartOptions = {
-    responsive: true,
-    maintainAspectRatio: false,
-    plugins: {
-      legend: {
-        position: 'right' as const,
-        labels: {
-          color: '#ffffff', // Always use white for maximum visibility
-          font: { 
-            size: 16, 
-            weight: 'bold' as const
-          },
-          padding: 15,
-          boxWidth: 22,
-          boxHeight: 22,
-          generateLabels: function(chart: any) {
-            const data = chart.data;
-            if (data.labels.length && data.datasets.length) {
-              return data.labels.map((label: string, i: number) => {
-                const value = data.datasets[0].data[i];
-                return {
-                  text: `${label}: ${value.toFixed(2)}h`,
-                  fillStyle: data.datasets[0].backgroundColor[i],
-                  strokeStyle: data.datasets[0].borderColor[i],
-                  lineWidth: 2,
-                  hidden: false,
-                  index: i
-                };
-              });
-            }
-            return [];
-          }
-        }
-      },
-      tooltip: {
-        backgroundColor: `${theme.colors.surface}ee`,
-        titleColor: theme.colors.text,
-        bodyColor: theme.colors.text,
-        borderColor: theme.colors.primary,
-        borderWidth: 2,
-        padding: 12,
-        titleFont: { 
-          size: 14, 
-          weight: 'bold' as const
-        },
-        bodyFont: { size: 13 },
-        callbacks: {
-          label: function(context: any) {
-            const label = context.label || '';
-            const value = context.parsed;
-            const total = context.dataset.data.reduce((a: number, b: number) => a + b, 0);
-            const percentage = ((value / total) * 100).toFixed(1);
-            return `${label}: ${value.toFixed(2)}h (${percentage}%)`;
-          }
-        }
-      },
-      datalabels: {
-        color: '#FFFFFF', // Always use white for maximum contrast on colored pie slices
-        font: {
-          size: 16,
-          weight: 'bold' as const
-        },
-        formatter: (value: number, context: any) => {
-          const total = context.dataset.data.reduce((a: number, b: number) => a + b, 0);
-          const percentage = ((value / total) * 100);
-          return percentage > 5 ? `${percentage.toFixed(1)}%` : '';
-        },
-        textStrokeColor: '#000000', // Black stroke for white text
-        textStrokeWidth: 3,
-        textShadowColor: 'rgba(0, 0, 0, 0.8)',
-        textShadowBlur: 4
-      }
-    }
-  };
+  const nothingYet = history.data && history.data.days.length === 0 && week.data && week.data.totalHours === 0;
+  const weekSeconds = (week.data?.totalHours ?? 0) * 3600;
+  const todaySeconds = (day.data?.totalHours ?? 0) * 3600;
+  const weekChange = weekSeconds - derived.lastWeek;
+  const hourly = day.data?.dailyActivity ?? [];
+  const nowHour = today.getHours();
+  let running = 0;
+  const todaySpark = hourly.slice(0, nowHour + 1).map((h) => (running += h.hours));
+  const t = week.data?.terminalSummary;
 
   return (
-    <div 
-      className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 transition-colors duration-300"
-      style={{ backgroundColor: theme.colors.background }}
-    >
-      {/* Time Slot Detail View */}
-      {selectedTimeSlot && timeSlotData ? (
-        <div>
-          {/* Back Button */}
-          <button
-            onClick={handleBackToOverview}
-            className="cursor-target mb-6 flex items-center gap-2 px-4 py-2 rounded-lg transition-all duration-200 hover:scale-105"
-            style={{
-              backgroundColor: `${theme.colors.surface}80`,
-              borderColor: theme.colors.primary,
-              color: theme.colors.text,
-              border: `2px solid ${theme.colors.primary}`,
-            }}
-          >
-            <ArrowLeft className="w-5 h-5" />
-            <span className="font-medium">Back to Overview</span>
-          </button>
+    <>
+      <PageHeader
+        eyebrow={dateLine}
+        title="Dashboard"
+        actions={
+          <Segmented
+            label="Period"
+            value={period}
+            onChange={setPeriod}
+            options={[
+              { value: 'today', label: 'Today' },
+              { value: 'week', label: 'This week' },
+            ]}
+          />
+        }
+      />
 
-          {/* Time Slot Header */}
-          <div className="mb-8">
-            <h1 className="text-4xl font-bold mb-2">
-              <GradientText animationSpeed={6}>
-                {`${selectedTimeSlot.start}:00 - ${selectedTimeSlot.end}:00 Detailed Analysis`}
-              </GradientText>
-            </h1>
-            <p style={{ color: theme.colors.textSecondary }}>
-              Detailed breakdown of your coding activity during this 2-hour window
+      {nothingYet && (
+        <section className="card mb-6 flex flex-wrap items-center gap-5 border-accent p-6">
+          <Plug className="h-9 w-9 flex-none text-accent" aria-hidden="true" />
+          <div className="min-w-[240px] flex-1">
+            <h2 className="text-xl font-semibold">No coding recorded yet</h2>
+            <p className="mt-1 text-muted">
+              Install the extension and run <span className="font-mono text-[13px] text-ink">CodeTrackr: Sign In</span> in VS Code. Your first summary arrives after about two
+              minutes of coding.
             </p>
           </div>
-
-          {/* Time Slot Stats */}
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
-            <div 
-              className="backdrop-blur-lg rounded-xl p-6 border transition-all duration-300"
-              style={{
-                backgroundColor: `${theme.colors.surface}80`,
-                borderColor: theme.colors.border,
-              }}
-            >
-              <div 
-                className="inline-flex p-3 rounded-lg mb-4"
-                style={{
-                  background: `linear-gradient(to right, ${theme.colors.primary}, ${theme.colors.accent})`,
-                }}
-              >
-                <Clock className="w-6 h-6" />
-              </div>
-              <div className="text-3xl font-bold mb-1">
-                <GradientText animationSpeed={5}>
-                  {timeSlotData.totalMinutes}m
-                </GradientText>
-              </div>
-              <div className="text-sm" style={{ color: theme.colors.textSecondary }}>
-                Active Time
-              </div>
-            </div>
-
-            <div 
-              className="backdrop-blur-lg rounded-xl p-6 border transition-all duration-300"
-              style={{
-                backgroundColor: `${theme.colors.surface}80`,
-                borderColor: theme.colors.border,
-              }}
-            >
-              <div 
-                className="inline-flex p-3 rounded-lg mb-4"
-                style={{
-                  background: `linear-gradient(to right, ${theme.colors.primary}, ${theme.colors.accent})`,
-                }}
-              >
-                <Code className="w-6 h-6" />
-              </div>
-              <div className="text-3xl font-bold mb-1">
-                <GradientText animationSpeed={5}>
-                  {timeSlotData.totalLines}
-                </GradientText>
-              </div>
-              <div className="text-sm" style={{ color: theme.colors.textSecondary }}>
-                Lines Changed
-              </div>
-            </div>
-
-            <div 
-              className="backdrop-blur-lg rounded-xl p-6 border transition-all duration-300"
-              style={{
-                backgroundColor: `${theme.colors.surface}80`,
-                borderColor: theme.colors.border,
-              }}
-            >
-              <div 
-                className="inline-flex p-3 rounded-lg mb-4"
-                style={{
-                  background: `linear-gradient(to right, ${theme.colors.primary}, ${theme.colors.accent})`,
-                }}
-              >
-                <BarChart3 className="w-6 h-6" />
-              </div>
-              <div className="text-3xl font-bold mb-1">
-                <GradientText animationSpeed={5}>
-                  {timeSlotData.fileCount}
-                </GradientText>
-              </div>
-              <div className="text-sm" style={{ color: theme.colors.textSecondary }}>
-                Files Edited
-              </div>
-            </div>
-
-            <div 
-              className="backdrop-blur-lg rounded-xl p-6 border transition-all duration-300"
-              style={{
-                backgroundColor: `${theme.colors.surface}80`,
-                borderColor: theme.colors.border,
-              }}
-            >
-              <div 
-                className="inline-flex p-3 rounded-lg mb-4"
-                style={{
-                  background: `linear-gradient(to right, ${theme.colors.primary}, ${theme.colors.accent})`,
-                }}
-              >
-                <TrendingUp className="w-6 h-6" />
-              </div>
-              <div className="text-3xl font-bold mb-1">
-                <GradientText animationSpeed={5}>
-                  {timeSlotData.productivity}%
-                </GradientText>
-              </div>
-              <div className="text-sm" style={{ color: theme.colors.textSecondary }}>
-                Productivity
-              </div>
-            </div>
-          </div>
-
-          {/* Time Slot Terminal Snapshot */}
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
-            {[
-              { label: 'Commands', value: timeSlotData?.terminalSummary?.totalCommands || 0, icon: <Terminal className="w-5 h-5" /> },
-              { label: 'Failures', value: timeSlotData?.terminalSummary?.failedCommands || 0, icon: <XCircle className="w-5 h-5" /> },
-              { label: 'Success Rate', value: `${timeSlotData?.terminalSummary?.successRate || 0}%`, icon: <CheckCircle className="w-5 h-5" /> },
-              { label: 'Build Success', value: `${timeSlotData?.terminalSummary?.buildSuccessRate || 0}%`, icon: <Hammer className="w-5 h-5" /> }
-            ].map((item, idx) => (
-              <div
-                key={idx}
-                className="backdrop-blur-lg rounded-xl p-5 border transition-all duration-300"
-                style={{
-                  backgroundColor: `${theme.colors.surface}80`,
-                  borderColor: theme.colors.border,
-                }}
-              >
-                <div className="inline-flex p-2 rounded-lg mb-3" style={{
-                  background: `linear-gradient(to right, ${theme.colors.primary}, ${theme.colors.accent})`
-                }}>
-                  {item.icon}
-                </div>
-                <div className="text-2xl font-bold mb-1">
-                  <GradientText animationSpeed={5}>
-                    {item.value}
-                  </GradientText>
-                </div>
-                <div className="text-xs" style={{ color: theme.colors.textSecondary }}>
-                  {item.label}
-                </div>
-              </div>
-            ))}
-          </div>
-
-          {/* Time Slot Charts */}
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            {/* Minute-by-minute activity line chart */}
-            <div 
-              className="backdrop-blur-lg rounded-xl p-6 border transition-all duration-300"
-              style={{
-                backgroundColor: `${theme.colors.surface}80`,
-                borderColor: theme.colors.border,
-              }}
-            >
-              <h2 className="text-xl font-bold mb-4">
-                <GradientText animationSpeed={7}>
-                  Activity Timeline
-                </GradientText>
-              </h2>
-              <div style={{ height: '300px' }}>
-                <Line 
-                  data={{
-                    labels: timeSlotData.tenMinuteSlots?.map((t: any) => t.label) || [],
-                    datasets: [{
-                      label: 'Lines Changed',
-                      data: timeSlotData.tenMinuteSlots?.map((t: any) => t.lines) || [],
-                      backgroundColor: `${theme.colors.primary}20`,
-                      borderColor: theme.colors.primary,
-                      borderWidth: 2,
-                      fill: true,
-                      tension: 0.4,
-                      pointRadius: 4,
-                      pointHoverRadius: 6,
-                      pointBackgroundColor: theme.colors.primary,
-                    }]
-                  }} 
-                  options={{
-                    ...lineChartOptions,
-                    plugins: {
-                      ...lineChartOptions.plugins,
-                      tooltip: {
-                        ...lineChartOptions.plugins?.tooltip,
-                        callbacks: {
-                          label: function(context: any) {
-                            return `${context.parsed.y} lines`;
-                          }
-                        }
-                      }
-                    }
-                  }} 
-                />
-              </div>
-            </div>
-
-            {/* Language breakdown pie chart */}
-            <div 
-              className="backdrop-blur-lg rounded-xl p-6 border transition-all duration-300"
-              style={{
-                backgroundColor: `${theme.colors.surface}80`,
-                borderColor: theme.colors.border,
-              }}
-            >
-              <h2 className="text-xl font-bold mb-4">
-                <GradientText animationSpeed={7}>
-                  Languages Used
-                </GradientText>
-              </h2>
-              <div style={{ height: '300px' }}>
-                <Pie 
-                  data={{
-                    labels: timeSlotData.languages?.map((l: any) => l._id) || [],
-                    datasets: [{
-                      data: timeSlotData.languages?.map((l: any) => l.minutes) || [],
-                      backgroundColor: [
-                        `${theme.colors.primary}cc`,
-                        `${theme.colors.accent}cc`,
-                        `${theme.colors.secondary}cc`,
-                        `${theme.colors.primary}99`,
-                        `${theme.colors.accent}99`,
-                      ],
-                      borderColor: [
-                        theme.colors.primary,
-                        theme.colors.accent,
-                        theme.colors.secondary,
-                        theme.colors.primary,
-                        theme.colors.accent,
-                      ],
-                      borderWidth: 3,
-                    }]
-                  }} 
-                  options={{
-                    ...pieChartOptions,
-                    plugins: {
-                      ...pieChartOptions.plugins,
-                      legend: {
-                        ...pieChartOptions.plugins?.legend,
-                        labels: {
-                          ...pieChartOptions.plugins?.legend?.labels,
-                          generateLabels: function(chart: any) {
-                            const data = chart.data;
-                            if (data.labels.length && data.datasets.length) {
-                              return data.labels.map((label: string, i: number) => {
-                                const value = data.datasets[0].data[i];
-                                return {
-                                  text: `${label}: ${value.toFixed(1)}min`,
-                                  fillStyle: data.datasets[0].backgroundColor[i],
-                                  strokeStyle: data.datasets[0].borderColor[i],
-                                  lineWidth: 2,
-                                  hidden: false,
-                                  index: i
-                                };
-                              });
-                            }
-                            return [];
-                          }
-                        }
-                      },
-                      tooltip: {
-                        ...pieChartOptions.plugins?.tooltip,
-                        callbacks: {
-                          label: function(context: any) {
-                            const label = context.label || '';
-                            const value = context.parsed;
-                            const total = context.dataset.data.reduce((a: number, b: number) => a + b, 0);
-                            const percentage = ((value / total) * 100).toFixed(1);
-                            return `${label}: ${value.toFixed(1)}min (${percentage}%)`;
-                          }
-                        }
-                      }
-                    }
-                  }} 
-                />
-              </div>
-            </div>
-          </div>
-        </div>
-      ) : (
-        /* Main Dashboard View */
-        <div>
-      <div className="mb-8">
-        <h1 className="text-4xl font-bold mb-2">
-          <TextType
-            text={[`Welcome back, ${user.name}!`]}
-            typingSpeed={75}
-            pauseDuration={1500}
-            showCursor={true}
-            cursorCharacter="|"
-            loop={false}
-            textColors={[theme.colors.primary]}
-            className="inline-block"
-          />
-        </h1>
-        <p style={{ color: theme.colors.textSecondary }}>
-          Here's your coding activity overview
-        </p>
-      </div>
-
-      {/* Stats Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
-        {stats.map((stat, index) => (
-          <div 
-            key={index} 
-            className="backdrop-blur-lg rounded-xl p-6 hover:scale-105 transition-all duration-300 border"
-            style={{
-              backgroundColor: `${theme.colors.surface}80`,
-              borderColor: theme.colors.border,
-            }}
-          >
-            <div 
-              className={`inline-flex p-3 rounded-lg mb-4`}
-              style={{
-                background: `linear-gradient(to right, ${theme.colors.primary}, ${theme.colors.accent})`,
-              }}
-            >
-              {stat.icon}
-            </div>
-            <div className="text-3xl font-bold mb-1">
-              <GradientText animationSpeed={5}>
-                {stat.value}
-              </GradientText>
-            </div>
-            <div className="text-sm" style={{ color: theme.colors.textSecondary }}>
-              {stat.label}
-            </div>
-          </div>
-        ))}
-      </div>
-
-      {/* Weekly Summary Stats (only show in weekly mode) */}
-      {viewMode === 'weekly' && weeklyAnalytics && (
-        <div 
-          className="mb-8 backdrop-blur-lg rounded-xl p-6 border transition-all duration-300"
-          style={{
-            background: `linear-gradient(to right, ${theme.colors.primary}10, ${theme.colors.accent}10)`,
-            borderColor: `${theme.colors.primary}50`,
-          }}
-        >
-          <h3 className="text-xl font-bold mb-4 flex items-center gap-2">
-            <TrendingUp className="w-6 h-6" style={{ color: theme.colors.primary }} />
-            <GradientText animationSpeed={6}>
-              This Week's Summary
-            </GradientText>
-          </h3>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div 
-              className="rounded-lg p-4"
-              style={{ backgroundColor: `${theme.colors.surface}80` }}
-            >
-              <div className="text-sm mb-1" style={{ color: theme.colors.textSecondary }}>
-                Total Hours This Week
-              </div>
-              <div className="text-2xl font-bold">
-                <GradientText animationSpeed={6}>
-                  {weeklyAnalytics.totalHours || 0}h
-                </GradientText>
-              </div>
-            </div>
-            <div 
-              className="rounded-lg p-4"
-              style={{ backgroundColor: `${theme.colors.surface}80` }}
-            >
-              <div className="text-sm mb-1" style={{ color: theme.colors.textSecondary }}>
-                Most Used Language
-              </div>
-              <div className="text-2xl font-bold" style={{ color: theme.colors.accent }}>
-                <GradientText animationSpeed={7}>
-                  {weeklyAnalytics.languageBreakdown && weeklyAnalytics.languageBreakdown.length > 0
-                    ? weeklyAnalytics.languageBreakdown[0]._id
-                    : 'N/A'}
-                </GradientText>
-              </div>
-            </div>
-            <div 
-              className="rounded-lg p-4"
-              style={{ backgroundColor: `${theme.colors.surface}80` }}
-            >
-              <div className="text-sm mb-1" style={{ color: theme.colors.textSecondary }}>
-                Active Days
-              </div>
-              <div className="text-2xl font-bold" style={{ color: theme.colors.secondary }}>
-                <GradientText animationSpeed={5}>
-                  {weeklyAnalytics.dailyActivity 
-                    ? weeklyAnalytics.dailyActivity.filter((d: any) => d.hours > 0).length
-                    : 0} / 7
-                </GradientText>
-              </div>
-            </div>
-          </div>
-        </div>
+          <ButtonLink to="/onboarding" variant="primary">
+            Set up VS Code
+          </ButtonLink>
+        </section>
       )}
 
-      {/* View Mode Toggle */}
-      <div className="mb-8 flex justify-center">
-        <div 
-          className="inline-flex rounded-lg backdrop-blur-lg border p-1"
-          style={{
-            backgroundColor: `${theme.colors.surface}80`,
-            borderColor: `${theme.colors.primary}33`,
-          }}
-        >
-          <button
-            onClick={() => setViewMode('daily')}
-            className={`cursor-target px-6 py-2 rounded-md font-medium transition-all duration-200`}
-            style={{
-              backgroundColor: viewMode === 'daily' ? theme.colors.primary : 'transparent',
-              color: viewMode === 'daily' ? '#ffffff' : theme.colors.textSecondary,
-            }}
-            onMouseEnter={(e) => {
-              if (viewMode !== 'daily') {
-                e.currentTarget.style.color = theme.colors.text;
-              }
-            }}
-            onMouseLeave={(e) => {
-              if (viewMode !== 'daily') {
-                e.currentTarget.style.color = theme.colors.textSecondary;
-              }
-            }}
-          >
-            Daily View
-          </button>
-          <button
-            onClick={() => setViewMode('weekly')}
-            className={`cursor-target px-6 py-2 rounded-md font-medium transition-all duration-200`}
-            style={{
-              backgroundColor: viewMode === 'weekly' ? theme.colors.primary : 'transparent',
-              color: viewMode === 'weekly' ? '#ffffff' : theme.colors.textSecondary,
-            }}
-            onMouseEnter={(e) => {
-              if (viewMode !== 'weekly') {
-                e.currentTarget.style.color = theme.colors.text;
-              }
-            }}
-            onMouseLeave={(e) => {
-              if (viewMode !== 'weekly') {
-                e.currentTarget.style.color = theme.colors.textSecondary;
-              }
-            }}
-          >
-            Weekly View
-          </button>
-        </div>
-      </div>
+      <RaceStrip user={user} />
 
-      {/* Charts */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
-        <div 
-          className="backdrop-blur-lg rounded-xl p-6 border transition-all duration-300"
-          style={{
-            backgroundColor: `${theme.colors.surface}80`,
-            borderColor: theme.colors.border,
-          }}
-        >
-          <h2 className="text-xl font-bold mb-4">
-            <GradientText animationSpeed={7}>
-              {viewMode === 'daily' ? 'Hourly Activity (Last 7 Days)' : 'Daily Activity (Last 7 Days)'}
-            </GradientText>
-          </h2>
-          <div style={{ height: '300px' }}>
-            <Line data={dailyData} options={lineChartOptions} />
-          </div>
-        </div>
+      <section aria-label="Your numbers" className="mb-6 grid gap-4 [grid-template-columns:repeat(auto-fit,minmax(min(180px,100%),1fr))]">
+        {day.isPending || week.isPending || history.isPending ? (
+          Array.from({ length: 5 }, (_, i) => <Skeleton key={i} className="h-[150px]" />)
+        ) : (
+          <>
+            <StatTile
+              label="Today"
+              value={hm(todaySeconds)}
+              spark={todaySpark}
+              note={todaySeconds >= target * 3600 ? `target ${target}h · done` : `target ${target}h · ${hm(target * 3600 - todaySeconds)} to go`}
+              noteTone={todaySeconds >= target * 3600 ? 'good' : 'muted'}
+            />
+            <StatTile
+              label="This week"
+              value={hm(weekSeconds)}
+              spark={(week.data?.dailyActivity ?? []).map((d) => d.hours)}
+              note={derived.lastWeek || weekSeconds ? `${weekChange >= 0 ? '▲' : '▼'} ${hm(Math.abs(weekChange))} vs the week before` : 'no coding yet'}
+              noteTone={weekChange > 0 ? 'good' : weekChange < 0 ? 'bad' : 'muted'}
+            />
+            <StatTile label="Streak" value={plural(day.data?.streakDays ?? derived.streak.current, 'day')} note={`best ${plural(derived.streak.longest, 'day')}`} />
+            <StatTile label="Commits" value={String(history.data?.commits7d ?? 0)} note="last 7 days" />
+            <StatTile
+              label="Failed builds"
+              value={String(t?.failedBuilds ?? 0)}
+              note={t?.buildRuns ? `${Math.round(((t.failedBuilds || 0) / t.buildRuns) * 100)}% of ${plural(t.buildRuns, 'build')}` : 'no builds this week'}
+              noteTone={t?.failedBuilds ? 'bad' : 'muted'}
+            />
+          </>
+        )}
+      </section>
 
-        <div 
-          className="backdrop-blur-lg rounded-xl p-6 border transition-all duration-300"
-          style={{
-            backgroundColor: `${theme.colors.surface}80`,
-            borderColor: theme.colors.border,
-          }}
-        >
-          <h2 className="text-xl font-bold mb-4">
-            <GradientText animationSpeed={7}>
-              {viewMode === 'daily' ? 'Tech Stack Today' : 'Tech Stack This Week'}
-            </GradientText>
-          </h2>
-          <div style={{ height: '300px' }}>
-            <Pie data={languageData} options={pieChartOptions} />
-          </div>
-        </div>
-      </div>
-
-      {/* Terminal Analytics */}
-      <div className="mb-8">
-        <h2 className="text-2xl font-bold mb-4">
-          <GradientText animationSpeed={7}>
-            Terminal Analytics
-          </GradientText>
-        </h2>
-
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 mb-6">
-          {terminalStats.map((stat, index) => (
-            <div
-              key={index}
-              className="backdrop-blur-lg rounded-xl p-5 hover:scale-105 transition-all duration-300 border"
-              style={{
-                backgroundColor: `${theme.colors.surface}80`,
-                borderColor: theme.colors.border,
-              }}
-            >
-              <div
-                className="inline-flex p-3 rounded-lg mb-4"
-                style={{
-                  background: `linear-gradient(to right, ${theme.colors.primary}, ${theme.colors.accent})`,
-                }}
+      <div className="mb-6 flex flex-wrap gap-4">
+        <Card className="min-w-0 flex-[2_1_440px] p-5">
+          {period === 'week' ? (
+            <>
+              <CardTitle
+                aside={
+                  <label className="flex items-center gap-2">
+                    <span>daily target</span>
+                    <select
+                      value={target}
+                      onChange={(e) => {
+                        setTarget(Number(e.target.value));
+                        writeStored(TARGET_KEY, e.target.value);
+                      }}
+                      className="rounded-md border border-line bg-surface px-1.5 py-1 font-mono text-xs text-ink"
+                    >
+                      {TARGETS.map((h) => (
+                        <option key={h} value={h}>
+                          {h}h
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                }
               >
-                {stat.icon}
-              </div>
-              <div className="text-2xl font-bold mb-1">
-                <GradientText animationSpeed={5}>
-                  {stat.value}
-                </GradientText>
-              </div>
-              <div className="text-sm" style={{ color: theme.colors.textSecondary }}>
-                {stat.label}
-              </div>
-            </div>
-          ))}
-        </div>
-
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
-          <div
-            className="backdrop-blur-lg rounded-xl p-6 border transition-all duration-300"
-            style={{
-              backgroundColor: `${theme.colors.surface}80`,
-              borderColor: theme.colors.border,
-            }}
-          >
-            <h3 className="text-xl font-bold mb-4">
-              <GradientText animationSpeed={7}>
-                Success vs Failure
-              </GradientText>
-            </h3>
-            <div style={{ height: '300px' }}>
-              <Bar data={terminalSuccessFailureData} options={terminalBarOptions} />
-            </div>
-          </div>
-
-          <div
-            className="backdrop-blur-lg rounded-xl p-6 border transition-all duration-300"
-            style={{
-              backgroundColor: `${theme.colors.surface}80`,
-              borderColor: theme.colors.border,
-            }}
-          >
-            <h3 className="text-xl font-bold mb-4">
-              <GradientText animationSpeed={7}>
-                Most Used Commands
-              </GradientText>
-            </h3>
-            <div style={{ height: '300px' }}>
-              <Bar data={commandUsageData} options={commandUsageOptions} />
-            </div>
-          </div>
-        </div>
-
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          <div
-            className="backdrop-blur-lg rounded-xl p-6 border transition-all duration-300"
-            style={{
-              backgroundColor: `${theme.colors.surface}80`,
-              borderColor: theme.colors.border,
-            }}
-          >
-            <h3 className="text-xl font-bold mb-4">
-              <GradientText animationSpeed={7}>
-                Build Trends
-              </GradientText>
-            </h3>
-            <div style={{ height: '300px' }}>
-              <Bar data={buildTrendData} options={terminalBarOptions} />
-            </div>
-          </div>
-
-          <div
-            className="backdrop-blur-lg rounded-xl p-6 border transition-all duration-300"
-            style={{
-              backgroundColor: `${theme.colors.surface}80`,
-              borderColor: theme.colors.border,
-            }}
-          >
-            <h3 className="text-xl font-bold mb-4">
-              <GradientText animationSpeed={7}>
-                Git Activity Trends
-              </GradientText>
-            </h3>
-            <div style={{ height: '300px' }}>
-              <Bar data={gitTrendData} options={terminalBarOptions} />
-            </div>
-          </div>
-        </div>
-
-        <div className="mt-6">
-          <div
-            className="backdrop-blur-lg rounded-xl p-6 border transition-all duration-300"
-            style={{
-              backgroundColor: `${theme.colors.surface}80`,
-              borderColor: theme.colors.border,
-            }}
-          >
-            <h3 className="text-xl font-bold mb-4">
-              <GradientText animationSpeed={7}>
-                Repeated Failures
-              </GradientText>
-            </h3>
-            <div className="space-y-3">
-              {repeatedFailures.length === 0 && (
-                <div className="text-sm" style={{ color: theme.colors.textSecondary }}>
-                  No repeated command failures in this period.
-                </div>
+                Last 7 days
+              </CardTitle>
+              {week.isPending ? (
+                <Skeleton className="h-[220px]" />
+              ) : (
+                <Bars
+                  label="Hours coded on each of the last 7 days"
+                  height={240}
+                  goal={{ value: target * 3600, label: `target ${target}h` }}
+                  items={(week.data?.dailyActivity ?? []).map((d, i, all) => ({
+                    key: d.day,
+                    label: d.day.slice(0, 3),
+                    value: d.hours * 3600,
+                    display: hmCompact(d.hours * 3600),
+                    title: `${d.day}: ${hoursHm(d.hours)}`,
+                    highlight: i === all.length - 1,
+                  }))}
+                />
               )}
-              {repeatedFailures.map((entry, idx) => (
-                <div
-                  key={`${entry.command}-${idx}`}
-                  className="rounded-lg px-4 py-3 border"
-                  style={{
-                    backgroundColor: `${theme.colors.surface}70`,
-                    borderColor: `${theme.colors.accent}55`,
-                  }}
-                >
-                  <div className="text-sm font-semibold" style={{ color: theme.colors.text }}>
-                    {entry.command}
-                  </div>
-                  <div className="text-xs" style={{ color: theme.colors.textSecondary }}>
-                    Failed {entry.count} {entry.count === 1 ? 'time' : 'times'}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
+            </>
+          ) : (
+            <>
+              <CardTitle aside="click an hour for detail">Today, hour by hour</CardTitle>
+              {day.isPending ? (
+                <Skeleton className="h-[220px]" />
+              ) : (
+                <Bars
+                  label="Minutes coded in each hour today"
+                  height={200}
+                  onSelect={(i) => setSlot({ start: Math.floor(i / 2) * 2, end: Math.floor(i / 2) * 2 + 2 })}
+                  selected={slot ? slot.start : null}
+                  items={hourly.map((h, i) => ({
+                    key: h.day,
+                    label: String(i).padStart(2, '0'),
+                    value: h.hours * 3600,
+                    display: hmCompact(h.hours * 3600),
+                    title: `${String(i).padStart(2, '0')}:00, ${h.hours ? hoursHm(h.hours) : 'no coding'}. Open ${String(Math.floor(i / 2) * 2).padStart(2, '0')}:00 to ${String(Math.floor(i / 2) * 2 + 2).padStart(2, '0')}:00`,
+                    highlight: i === nowHour,
+                  }))}
+                />
+              )}
+            </>
+          )}
+        </Card>
+
+        <Card className="min-w-0 flex-[1_1_300px] p-5">
+          <CardTitle aside={period === 'today' ? 'today' : 'last 7 days'}>Languages</CardTitle>
+          {view.isPending ? (
+            <Skeleton className="h-32" />
+          ) : (
+            <RankedBars
+              empty={period === 'today' ? 'No coding yet today.' : 'No coding in the last 7 days.'}
+              items={(view.data?.languageBreakdown ?? []).slice(0, 6).map((l) => ({ label: l._id, value: l.hours, display: hoursHm(l.hours) }))}
+            />
+          )}
+          <h2 className="mb-4 mt-7 text-lg font-semibold">Projects</h2>
+          {history.isPending ? (
+            <Skeleton className="h-24" />
+          ) : (
+            <RankedBars empty="No projects in the last 7 days." items={(history.data?.projects ?? []).slice(0, 5).map((p) => ({ label: p.name, value: p.seconds, display: hm(p.seconds) }))} />
+          )}
+        </Card>
       </div>
 
-      {/* Time Slot Selection (Daily View Only) */}
-      {viewMode === 'daily' && (
-        <div 
-          className="backdrop-blur-lg rounded-xl p-6 border transition-all duration-300"
-          style={{
-            backgroundColor: `${theme.colors.surface}80`,
-            borderColor: theme.colors.border,
-          }}
-        >
-          <h2 className="text-xl font-bold mb-4">
-            <GradientText animationSpeed={7}>
-              Drill Down: Select a 2-Hour Time Slot
-            </GradientText>
-          </h2>
-          <p className="mb-4 text-sm" style={{ color: theme.colors.textSecondary }}>
-            Click on any time slot below to see detailed analysis of your activity during that period
-          </p>
-          <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-3">
-            {[0, 2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 22].map((hour) => (
-              <button
-                key={hour}
-                onClick={() => handleTimeSlotClick(hour, hour + 2)}
-                className="cursor-target px-4 py-3 rounded-lg border-2 transition-all duration-200 hover:scale-105 hover:shadow-lg"
-                style={{
-                  backgroundColor: `${theme.colors.surface}60`,
-                  borderColor: `${theme.colors.primary}60`,
-                  color: theme.colors.text,
-                }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.backgroundColor = `${theme.colors.primary}20`;
-                  e.currentTarget.style.borderColor = theme.colors.primary;
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.backgroundColor = `${theme.colors.surface}60`;
-                  e.currentTarget.style.borderColor = `${theme.colors.primary}60`;
-                }}
-              >
-                <div className="text-center">
-                  <div className="text-xs font-medium mb-1" style={{ color: theme.colors.textSecondary }}>
-                    {hour.toString().padStart(2, '0')}:00 - {(hour + 2).toString().padStart(2, '0')}:00
-                  </div>
-                  <div className="text-lg font-bold">
-                    <GradientText animationSpeed={6}>
-                      <Clock className="w-5 h-5 mx-auto" />
-                    </GradientText>
-                  </div>
-                </div>
-              </button>
-            ))}
-          </div>
+      <Card className="mb-6 p-5">
+        <CardTitle aside={`${derived.yearDays} days coded`}>Your year</CardTitle>
+        {history.isPending ? (
+          <Skeleton className="h-[150px]" />
+        ) : (
+          <YearHeatmap days={history.data?.days ?? []} today={today} summary={`${plural(derived.yearDays, 'day')} coded in the last year · longest streak ${plural(derived.streak.longest, 'day')}`} />
+        )}
+      </Card>
+
+      <div className="grid items-start gap-4 [grid-template-columns:repeat(auto-fit,minmax(min(300px,100%),1fr))]">
+        <div className="flex flex-col gap-4">
+          <Card className="min-w-0 p-5">
+            <CardTitle aside="last 7 days">When you code</CardTitle>
+            {history.isPending ? <Skeleton className="h-24" /> : <HourStrip hours={history.data?.hourOfDay ?? new Array(24).fill(0)} />}
+          </Card>
+          <InsightTeaser />
         </div>
-      )}
-        </div>
-      )}
-    </div>
+        {view.data ? <BuildHealth view={view.data} period={period} /> : <Skeleton className="h-80" />}
+        <GoalsMini />
+      </div>
+
+      <TimeSlotDialog userId={user.id} slot={slot} onClose={() => setSlot(null)} />
+    </>
   );
 }

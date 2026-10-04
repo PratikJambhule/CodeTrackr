@@ -1,260 +1,101 @@
-import { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { CheckCircle, Copy, ExternalLink, Download, Key, ArrowRight } from 'lucide-react';
-import { API_URL } from '../config';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { Link, useNavigate } from 'react-router-dom';
+import { Check, Circle } from 'lucide-react';
+import type { ReactNode } from 'react';
+import { apiGet, apiSend } from '../api';
+import { useMyGroups } from '../hooks/queries';
+import { MARKETPLACE_URL } from '../components/layout/PublicLayout';
+import { Button, ButtonLink, Card, PageHeader } from '../components/ui';
+import { tzOffset } from '../lib/format';
+import type { DeviceToken, Me, PeriodView } from '../types';
 
-const Onboarding = () => {
-    const [apiKey, setApiKey] = useState('');
-    const [userName, setUserName] = useState('');
-    const [copied, setCopied] = useState(false);
-    const [keyHint, setKeyHint] = useState<string | null>(null);
-    const [loadError, setLoadError] = useState('');
-    const [loading, setLoading] = useState(true);
-    const navigate = useNavigate();
+function Step({ done, n, title, children, active }: { done: boolean; n: number; title: string; children: ReactNode; active: boolean }) {
+  return (
+    <li className={`card flex gap-4 p-5 ${active ? 'border-accent' : ''}`}>
+      <span
+        aria-hidden="true"
+        className={`flex h-9 w-9 flex-none items-center justify-center rounded-full ${done ? 'bg-good text-white' : active ? 'bg-accent-soft text-accent-ink' : 'bg-surface-2 text-muted'}`}
+      >
+        {done ? <Check className="h-5 w-5" /> : <span className="font-mono text-sm">{n}</span>}
+      </span>
+      <div className="min-w-0 flex-1">
+        <h2 className="flex items-center gap-2 text-lg font-semibold">
+          {title}
+          <span className="sr-only">{done ? '(done)' : '(to do)'}</span>
+        </h2>
+        {!done && <div className="mt-2 text-[15px] text-muted">{children}</div>}
+      </div>
+      {!done && !active && <Circle className="h-5 w-5 flex-none text-faint" aria-hidden="true" />}
+    </li>
+  );
+}
 
-    useEffect(() => {
-        fetchUserProfile();
-    }, []);
+/**
+ * A checklist that ticks itself as each step is finished: it watches for a
+ * connected device, the first upload, and a group (spec §5).
+ */
+export default function Onboarding({ user }: { user: Me }) {
+  const navigate = useNavigate();
+  const qc = useQueryClient();
+  const devices = useQuery({ queryKey: ['devices'], queryFn: () => apiGet<DeviceToken[]>('/api/device/tokens'), refetchInterval: (q) => (q.state.data?.length ? false : 5000) });
+  const week = useQuery({
+    queryKey: ['analytics', 'week', user.id, tzOffset()],
+    queryFn: () => apiGet<PeriodView>(`/api/analytics/weekly/${user.id}?timezone=${tzOffset()}`),
+    refetchInterval: (q) => ((q.state.data?.totalHours ?? 0) > 0 ? false : 10000),
+  });
+  const groups = useMyGroups();
 
-    /** Create a key and show it once (the server keeps only a hash). */
-    const createApiKey = async () => {
-        const response = await fetch(`${API_URL}/api/user/regenerate-api-key`, {
-            method: 'POST',
-            credentials: 'include'
-        });
-        const data = await response.json();
-        if (!response.ok || !data.success) throw new Error('Could not create your API key');
-        setApiKey(data.apiKey);
-        setKeyHint(data.apiKeyHint);
-    };
+  const coded = (week.data?.totalHours ?? 0) > 0;
+  const connected = (devices.data?.length ?? 0) > 0 || coded;
+  const installed = connected;
+  const grouped = (groups.data?.length ?? 0) > 0;
+  const doneCount = [installed, connected, coded, grouped].filter(Boolean).length;
+  const active = !installed ? 1 : !connected ? 2 : !coded ? 3 : !grouped ? 4 : 0;
 
-    // A failed load used to render an empty key box with no message (M-27).
-    const fetchUserProfile = async () => {
-        setLoading(true);
-        setLoadError('');
-        try {
-            const response = await fetch(`${API_URL}/api/user/profile`, {
-                credentials: 'include'
-            });
-            const data = await response.json();
-            if (!response.ok || !data.success) throw new Error('Could not load your profile');
-            setUserName(data.user.name);
-            if (data.user.hasApiKey) {
-                setKeyHint(data.user.apiKeyHint);
-            } else {
-                await createApiKey();
-            }
-        } catch (error) {
-            console.error('Onboarding failed to load:', error);
-            setLoadError('We could not load your account. If you use Safari, Firefox or a private window, allow cookies for this site, then try again.');
-        } finally {
-            setLoading(false);
-        }
-    };
+  const finish = async () => {
+    await apiSend('POST', '/api/user/complete-onboarding').catch(() => {});
+    await qc.invalidateQueries({ queryKey: ['me'] });
+    navigate('/dashboard');
+  };
 
-    const copyApiKey = () => {
-        navigator.clipboard.writeText(apiKey);
-        setCopied(true);
-        setTimeout(() => setCopied(false), 2000);
-    };
-
-    const completeOnboarding = async () => {
-        try {
-            await fetch(`${API_URL}/api/user/complete-onboarding`, {
-                method: 'POST',
-                credentials: 'include'
-            });
-            navigate('/dashboard');
-        } catch (error) {
-            console.error('Failed to complete onboarding:', error);
-        }
-    };
-
-    if (loading) {
-        return (
-            <div className="min-h-screen bg-gradient-to-br from-[#0a0a0f] via-[#1a1a2e] to-[#16213e] flex items-center justify-center">
-                <div className="text-white text-xl">Loading...</div>
-            </div>
-        );
-    }
-
-    if (loadError) {
-        return (
-            <div className="min-h-screen bg-gradient-to-br from-[#0a0a0f] via-[#1a1a2e] to-[#16213e] flex items-center justify-center p-4">
-                <div role="alert" className="max-w-md text-center text-white">
-                    <p className="mb-6 text-gray-300">{loadError}</p>
-                    <button onClick={fetchUserProfile} className="px-6 py-3 bg-blue-600 hover:bg-blue-700 rounded-lg">
-                        Try again
-                    </button>
-                </div>
-            </div>
-        );
-    }
-
-    return (
-        <div className="min-h-screen bg-gradient-to-br from-[#0a0a0f] via-[#1a1a2e] to-[#16213e] py-12 px-4">
-            <div className="max-w-4xl mx-auto">
-                {/* Welcome Header */}
-                <div className="text-center mb-12">
-                    <div className="inline-flex items-center justify-center w-20 h-20 rounded-full bg-gradient-to-r from-blue-500 to-purple-600 mb-6">
-                        <Key className="w-10 h-10 text-white" />
-                    </div>
-                    <h1 className="text-4xl font-bold text-white mb-4">
-                        Welcome to CodeTrackr, {userName}! 🎉
-                    </h1>
-                    <p className="text-gray-300 text-lg">
-                        Let's get your VS Code extension connected
-                    </p>
-                </div>
-
-                {/* API Key Section */}
-                <div className="bg-white/5 backdrop-blur-lg rounded-2xl p-8 mb-8 border border-white/10">
-                    <div className="flex items-start gap-4 mb-6">
-                        <div className="flex-shrink-0 w-10 h-10 rounded-full bg-blue-500/20 flex items-center justify-center">
-                            <span className="text-blue-400 font-bold">1</span>
-                        </div>
-                        <div className="flex-1">
-                            <h2 className="text-2xl font-bold text-white mb-2">Your API Key</h2>
-                            <p className="text-gray-400">
-                                This unique key connects your VS Code extension to your CodeTrackr account.
-                                Keep it secure and never share it publicly.
-                            </p>
-                        </div>
-                    </div>
-
-                    <div className="bg-black/30 rounded-lg p-6 border border-white/10">
-                        <div className="flex items-center gap-4">
-                            <div className="flex-1 font-mono text-white bg-black/40 px-4 py-3 rounded-lg overflow-x-auto">
-                                {apiKey || keyHint}
-                            </div>
-                            <button
-                                onClick={apiKey ? copyApiKey : () => createApiKey().catch(() => setLoadError('Could not create a new key.'))}
-                                className="flex-shrink-0 px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors flex items-center gap-2"
-                            >
-                                {!apiKey ? (
-                                    <>New key</>
-                                ) : copied ? (
-                                    <>
-                                        <CheckCircle className="w-5 h-5" />
-                                        Copied!
-                                    </>
-                                ) : (
-                                    <>
-                                        <Copy className="w-5 h-5" />
-                                        Copy
-                                    </>
-                                )}
-                            </button>
-                        </div>
-                        <p className="mt-3 text-sm text-gray-400">
-                            {apiKey
-                                ? 'Copy it now: the key is stored hashed and will not be shown again.'
-                                : 'You already have a key. "New key" replaces it; the old one stops working.'}
-                        </p>
-                    </div>
-                </div>
-
-                {/* Installation Steps */}
-                <div className="bg-white/5 backdrop-blur-lg rounded-2xl p-8 mb-8 border border-white/10">
-                    <div className="flex items-start gap-4 mb-6">
-                        <div className="flex-shrink-0 w-10 h-10 rounded-full bg-purple-500/20 flex items-center justify-center">
-                            <span className="text-purple-400 font-bold">2</span>
-                        </div>
-                        <div className="flex-1">
-                            <h2 className="text-2xl font-bold text-white mb-2">Install Extension</h2>
-                            <p className="text-gray-400">
-                                Install the CodeTrackr extension from VS Code Marketplace
-                            </p>
-                        </div>
-                    </div>
-
-                    <div className="space-y-4">
-                        <div className="bg-black/30 rounded-lg p-6 border border-white/10">
-                            <h3 className="text-white font-semibold mb-3">Option 1: Install from VS Code</h3>
-                            <ol className="space-y-2 text-gray-300">
-                                <li className="flex items-start gap-2">
-                                    <span className="text-blue-400 font-bold">•</span>
-                                    Open VS Code
-                                </li>
-                                <li className="flex items-start gap-2">
-                                    <span className="text-blue-400 font-bold">•</span>
-                                    Press <code className="bg-black/40 px-2 py-1 rounded text-sm">Ctrl+Shift+X</code> (or <code className="bg-black/40 px-2 py-1 rounded text-sm">Cmd+Shift+X</code> on Mac)
-                                </li>
-                                <li className="flex items-start gap-2">
-                                    <span className="text-blue-400 font-bold">•</span>
-                                    Search for "CodeTrackr"
-                                </li>
-                                <li className="flex items-start gap-2">
-                                    <span className="text-blue-400 font-bold">•</span>
-                                    Click "Install"
-                                </li>
-                            </ol>
-                        </div>
-
-                        <div className="bg-black/30 rounded-lg p-6 border border-white/10">
-                            <h3 className="text-white font-semibold mb-3">Option 2: Install from Marketplace</h3>
-                            <a
-                                href="https://marketplace.visualstudio.com/items?itemName=CodeTrackr-ext.codetrackr-vscode"
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="inline-flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white rounded-lg transition-all"
-                            >
-                                <Download className="w-5 h-5" />
-                                Open Marketplace
-                                <ExternalLink className="w-4 h-4" />
-                            </a>
-                        </div>
-                    </div>
-                </div>
-
-                {/* Configuration Steps */}
-                <div className="bg-white/5 backdrop-blur-lg rounded-2xl p-8 mb-8 border border-white/10">
-                    <div className="flex items-start gap-4 mb-6">
-                        <div className="flex-shrink-0 w-10 h-10 rounded-full bg-green-500/20 flex items-center justify-center">
-                            <span className="text-green-400 font-bold">3</span>
-                        </div>
-                        <div className="flex-1">
-                            <h2 className="text-2xl font-bold text-white mb-2">Configure Extension</h2>
-                            <p className="text-gray-400">
-                                Enter your API key when prompted by the extension
-                            </p>
-                        </div>
-                    </div>
-
-                    <div className="bg-black/30 rounded-lg p-6 border border-white/10">
-                        <ol className="space-y-3 text-gray-300">
-                            <li className="flex items-start gap-3">
-                                <span className="flex-shrink-0 w-6 h-6 rounded-full bg-green-500/20 flex items-center justify-center text-green-400 text-sm">1</span>
-                                <span>After installation, the extension will prompt you for an API key</span>
-                            </li>
-                            <li className="flex items-start gap-3">
-                                <span className="flex-shrink-0 w-6 h-6 rounded-full bg-green-500/20 flex items-center justify-center text-green-400 text-sm">2</span>
-                                <span>Paste your API key (copied above) into the input field</span>
-                            </li>
-                            <li className="flex items-start gap-3">
-                                <span className="flex-shrink-0 w-6 h-6 rounded-full bg-green-500/20 flex items-center justify-center text-green-400 text-sm">3</span>
-                                <span>Start coding! Your activity will be automatically tracked</span>
-                            </li>
-                        </ol>
-                    </div>
-                </div>
-
-                {/* Complete Button */}
-                <div className="text-center">
-                    <button
-                        onClick={completeOnboarding}
-                        className="px-8 py-4 bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white rounded-xl text-lg font-semibold transition-all inline-flex items-center gap-3 shadow-lg shadow-blue-500/25"
-                    >
-                        Continue to Dashboard
-                        <ArrowRight className="w-6 h-6" />
-                    </button>
-                    <p className="text-gray-400 mt-4 text-sm">
-                        You can always find your API key in your profile settings
-                    </p>
-                </div>
-            </div>
-        </div>
-    );
-};
-
-export default Onboarding;
+  return (
+    <div className="mx-auto max-w-[760px]">
+      <PageHeader eyebrow={`${doneCount} of 4 done`} title={`Welcome, ${user.name.split(' ')[0]}`}>
+        Four steps and you are on the scoreboard. This page ticks them off as they happen.
+      </PageHeader>
+      <ol className="flex flex-col gap-3" aria-live="polite">
+        <Step n={1} done={installed} active={active === 1} title="Install the extension">
+          <p>
+            In VS Code, open Extensions (<span className="font-mono text-ink">Ctrl+Shift+X</span>), search <strong className="text-ink">CodeTrackr</strong> and click Install.
+          </p>
+          <ButtonLink to={MARKETPLACE_URL} external className="mt-3">
+            Open the Marketplace page
+          </ButtonLink>
+        </Step>
+        <Step n={2} done={connected} active={active === 2} title="Sign in from VS Code">
+          <p>
+            Press <span className="font-mono text-ink">Ctrl+Shift+P</span>, run <strong className="text-ink">CodeTrackr: Sign In</strong>, and approve the code on the page that
+            opens. This step ticks itself within a few seconds.
+          </p>
+        </Step>
+        <Step n={3} done={coded} active={active === 3} title="Code for two minutes">
+          <p>Write some code as usual. After about two minutes of activity your first summary arrives and this step ticks.</p>
+        </Step>
+        <Step n={4} done={grouped} active={active === 4} title="Join or create a group">
+          <p>The fun part: a weekly race with your friends. Create a group and send them the invite link, or join theirs.</p>
+          <ButtonLink to="/groups" variant="primary" className="mt-3">
+            Go to Groups
+          </ButtonLink>
+        </Step>
+      </ol>
+      <Card className="mt-6 flex flex-wrap items-center justify-between gap-4 p-5">
+        <p className="text-sm text-muted">
+          Cannot use Sign In? <Link to="/profile">Connect with an API key</Link> instead.
+        </p>
+        <Button variant={doneCount === 4 ? 'primary' : 'secondary'} onClick={finish}>
+          {doneCount === 4 ? 'Go to the dashboard' : 'Skip for now'}
+        </Button>
+      </Card>
+    </div>
+  );
+}

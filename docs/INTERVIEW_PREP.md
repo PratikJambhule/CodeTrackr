@@ -1,8 +1,8 @@
 # CodeTrackr — Interview Prep (short version)
 
 The questions an interviewer is most likely to ask, with answers you can say out loud in under a
-minute. Every claim here matches the code on 2026-10-04 (deployed 2026-10-03; extension 2.5.0 and
-the live data migrations still pending). The long versions are in `docs/interview-preparation/`
+minute. Every claim here matches the code on 2026-10-04 (backend deployed 2026-10-03; the redesigned
+website is built and tested but not deployed; extension 2.5.0 live since 2026-10-04; live migrations pending). The long versions are in `docs/interview-preparation/`
 (full guide, Q&A bank, cheat sheet).
 
 **Rule for every answer:** say what is built and verified, and say "designed, not built" for
@@ -79,7 +79,7 @@ Extension 2.5.0 writes every upload to a small outbox in VS Code's `globalState`
 sends oldest first, and retries with the same `flushId`, so the server applies it once. Closing VS
 Code loses nothing; items older than 24 h are pruned because the server would refuse them. The
 old version merged held uploads into one, which filed time under the wrong project and dropped
-anything over an hour (M-30). Honest status: 2.5.0 is built and tested, not yet published.
+anything over an hour (M-30). This is extension 2.5.0, live on the Marketplace since 2026-10-04.
 
 **Q: Did you use Docker?**
 Yes, in two ways. `backend/Dockerfile` builds a small production image (Node 20 Alpine,
@@ -157,24 +157,67 @@ device-sign-in routes still see real IPs because the extension calls Render dire
 ## Testing and process
 
 **Q: How did you test it?**
-Three layers, all in GitHub Actions on every push: 369 backend unit assertions in 26 plain
-`node:assert` suites (logic refactored into pure functions), 36 integration tests that run the
-real Express app over HTTP against an in-memory MongoDB (including real CORS preflights), and 70
-extension assertions against the built bundle; plus the frontend build and a Docker health check.
-The honest gap: no frontend tests. The integration suite paid off on its first run — it found the
-goal-window bug (M-31).
+Four layers, all in GitHub Actions on every push: 375 backend unit assertions in 27 plain
+`node:assert` suites (logic refactored into pure functions), 39 integration tests that run the
+real Express app over HTTP against an in-memory MongoDB (including real CORS preflights), 70
+extension assertions against the built bundle, and 51 frontend tests in Vitest; plus the frontend
+build and a Docker health check. The frontend tests run in India's time zone on purpose, because
+both date bugs in this project only happen east of UTC. What I still check by hand: layout at
+phone width and the animation, which jsdom cannot see. The integration suite paid off on its first
+run: it found the goal-window bug (M-31).
 
 **Q: What would you improve next?**
-Run the live migrations and publish extension 2.5.0; make a failed sign-in land on the login page
-(M-33); confirm Safari login and the cold start behind the proxy; per-day stats for the windowed
-boards; frontend tests. Everything from my earlier list (H-19 to H-23, hashed keys, running
-totals) is built.
+Deploy the redesigned website; run the live migrations; make a failed sign-in land on the login
+page (M-33); count the whole deadline day in goal progress (M-35); a Delete account button (L-14);
+Playwright tests for the main flows; per-day stats for the windowed boards; move the API off
+end-of-life Node 20 (L-15). Everything from my
+earlier list (H-19 to H-23, hashed keys, running totals, frontend tests) is built.
+
+## The website
+
+**Q: Why did you redesign the frontend, and how did you decide what it should look like?**
+The old site had a 3D background, glitch text, a custom cursor and 28 themes, a 1,150-line
+dashboard, and no page explaining what the product is. The product exists for friendly competition,
+so I designed around one idea, "the weekly race", and borrowed the standings tower from Formula 1
+timing: position, name, one cell per day (purple for the best in the group that day, green for a
+personal best), and the gap to the leader. I put a proposal with mockups in front of the user before
+writing code. One bold element, everything else calm.
+
+**Q: Why no chart library?**
+Every chart here is bars, lines or a grid. Small SVG components read the theme's CSS variables
+directly, render in jsdom so I can test them, let me put labels on the data instead of a legend,
+and carry text summaries for screen readers. Chart.js draws on a canvas, which none of that can
+see, and it was one of the biggest dependencies. The cost: I own tooltips and axes (about 600 lines).
+
+**Q: How did you make the site faster?**
+Measured first. The old site was one 712 kB JavaScript file for every visitor. I removed the 3D and
+animation libraries and the chart library, and loaded each page as its own chunk. A first visit to
+the landing page is now 359 kB, 114 kB gzipped, about half of before. Public pages also no longer
+wait for the API, which matters because the free server takes about 20 seconds to wake.
+
+**Q: Tell me about a bug you found while redesigning.**
+The Goals calendar created goals a day early in India. It built the date with
+`new Date(y, m, d).toISOString()`, and local midnight in India is 18:30 the previous day in UTC, so
+clicking 10 October saved 9 October. I now send the date exactly as picked, as a local
+`YYYY-MM-DD`, and the test suite runs in `Asia/Kolkata` and checks both the old and new behaviour.
+Checking in the browser I also found that a wrong group password said "your session has ended",
+because I treated every 401 as signed out; now the server's own message is shown. Signing out had
+a race: clearing the signed-in user redrew the page I was on as "signed out" before the move home,
+so it went to the sign-in page and remembered that page for the next person. Sign-out now ends the
+session and reloads the home page (a test covers it).
+
+**Q: How does the tower animate without hurting accessibility?**
+It is a real ordered list in rank order, so a screen reader hears "2nd, Soham, you, 30 minutes
+behind". When the order changes I measure each row's old and new position and play a short slide
+with the Web Animations API (the FLIP technique). People who ask their system for reduced motion
+see no movement, and nothing scrolls sideways even at 320 px.
 
 ## Numbers to know (and where they come from)
 
 | Number | Source |
 |---|---|
-| unit 26 suites / 369; integration 36; extension 6 / 70 | `npm test`, `npm run test:int`, 2026-10-04 |
+| unit 27 suites / 375; integration 39; extension 6 / 70; frontend 51 | `npm test`, `npm run test:int`, 2026-10-04 |
+| landing page first visit 359 kB (114 kB gzip), was 748 kB (232 kB) | `npm run build`, measured 2026-10-04 |
 | leaderboard 6.72 s → 62 ms p50 at 1M rows | `bench/leaderboard.bench.js` (local) |
 | ingest 4.9× fewer docs, 12.7× less data | `bench/ingest.bench.js` (local) |
 | 10-minute buckets, 400-day TTL | `services/activityBucket.js`, `models/Activity.js` |

@@ -11,8 +11,10 @@ changed). Short Q&A: `docs/INTERVIEW_PREP.md`. Numbers: `docs/BENCHMARKS.md`.*
 
 > **Be precise about status.** Everything below is **built and tested**. The October work was
 > **deployed on 2026-10-03** and Google login works on the live site. Still pending: the live data
-> migrations (until then the leaderboard uses the old scan) and publishing extension **2.5.0**
-> (2.4.0 is live) — so the extension's queue, sign-in command and keychain are "built", not live.
+> migrations (until then the leaderboard uses the old scan). Extension **2.5.0** is **live on the
+> Marketplace since 2026-10-04**, so its queue, sign-in command and keychain are live too.
+> The **website redesign** (2026-10-04) is built and tested but **not deployed**: say "I redesigned
+> and built", not "it's live", until it ships.
 
 > **Team:** 3 contributors. I owned the **extension and the backend**.
 
@@ -33,7 +35,8 @@ changed). Short Q&A: `docs/INTERVIEW_PREP.md`. Numbers: `docs/BENCHMARKS.md`.*
 7. Dashboard views are one **`$facet` pipeline** in MongoDB; Insights = **statistics + 13 rules,
    not ML**.
 8. Scheduler: GitHub Actions calls secret-protected internal routes (hourly sweep, nightly rollup).
-9. Deploy: Vercel (frontend) + Render (API) + Atlas. **Vercel forwards `/api` + `/auth` to Render**,
+9. Deploy: Vercel (website: lazy-loaded pages, typed React Query hooks, hand-made SVG charts) +
+   Render (API) + Atlas. **Vercel forwards `/api` + `/auth` to Render**,
    so the browser sees one site and the login cookie is first-party. CI runs unit + integration
    tests, the build and a Docker health check; deploy-on-green is ready but off until a secret is set.
 10. Ops: JSON logs with a **request id** that also appears in error bodies; Sentry if `SENTRY_DSN`.
@@ -47,10 +50,10 @@ changed). Short Q&A: `docs/INTERVIEW_PREP.md`. Numbers: `docs/BENCHMARKS.md`.*
 | Extension | TypeScript, esbuild, axios, VS Code API | 5 trackers; outbox in `globalState`; key in **SecretStorage**; `CodeTrackr: Sign In` |
 | Backend | Node 20, **Express 5**, **Mongoose 8**, passport-google-oauth20, jsonwebtoken, helmet, express-rate-limit | services: `apiKeys`, `ingestCredit`, `userStats`, `analyticsViews`, `activityUser`, `logger` |
 | DB | MongoDB Atlas | 13 collections; `activities` is the big one, bucketed |
-| Frontend | **React 19**, Vite 7, TS, Tailwind, react-router 7, Chart.js, **React Query** | Dashboard, Leaderboard, Insights on `useQuery`; `/device` approval page |
+| Frontend | **React 19**, Vite 7, TS, Tailwind (CSS-variable tokens, dark + light), react-router 7, **React Query**, hand-made SVG charts | every read through typed hooks; pages lazy-loaded; landing, guide, privacy, `/join/:id`, `/device` |
 | "ML" | pure JS statistics + rules | no model, no LLM; ML work-type classifier is **designed, not built** |
 | Ops | GitHub Actions CI, `Dockerfile`, `docker-compose.yml`, `deploy.yml`, JSON logs, optional Sentry | `docker compose up` = Mongo + API + website locally; CD off until `RENDER_DEPLOY_HOOK_URL` |
-| Tests | `node:assert` + **supertest + mongodb-memory-server** | backend unit **26 suites / 369**, integration **36**, extension **6 / 70**; no frontend tests |
+| Tests | `node:assert` + **supertest + mongodb-memory-server** + **Vitest** | backend unit **27 suites / 375**, integration **39**, extension **6 / 70**, frontend **51** (run in IST) |
 
 **Why MongoDB:** self-contained, schema-evolving activity documents; per-user time-window
 queries; no hot-path joins. **Where SQL wins:** groups/goals integrity and the leaderboard
@@ -80,7 +83,7 @@ restart; items older than 24 h are pruned (the server would refuse them).
 ```
 useQuery → GET /api/analytics/:id?timezone=… (cookie JWT) → ownership check (403) →
   ONE $facet pipeline over today (or the last 7 local days): timeline, languages, terminal summary,
-  top repeated failures → laid out on a 24-hour / 7-day grid → Chart.js
+  top repeated failures → laid out on a 24-hour / 7-day grid → small SVG/HTML charts
 ```
 
 **Leaderboard**
@@ -101,8 +104,8 @@ userstats.find().sort({totalSeconds:-1}).limit(N) + two indexed maxima → score
   approve → stores the per-device key in SecretStorage. `Setup API Key` still works.
 - **Offline:** every upload is persisted before sending; FIFO; same `flushId` on retry.
 - **Version story:** 2.1.0 was uploaded before 2.0.x, so the Marketplace served stale code for
-  months; 2.4.0 fixed silent data loss; 2.5.0 (built, unpublished) adds the outbox, keychain and
-  sign-in.
+  months; 2.4.0 fixed silent data loss; 2.5.0 (live since 2026-10-04) adds the outbox, keychain
+  and sign-in.
 
 ---
 
@@ -155,7 +158,8 @@ leaderboard email leak (M-23), helmet + rate limits, `JWT_SECRET` required, cent
 |---|---|---|
 | Leaderboard at 1M rows | p50 **6.72 s → 62 ms**, p99 7.17 s → 111 ms, 1.3 → 156 req/s | `bench/leaderboard.bench.js` (local) |
 | Bucketing | **4.9× fewer docs, 12.7× less data** at the 2-min cadence (19.6× / 51× vs old 30 s); same throughput | `bench/ingest.bench.js` (local) |
-| Tests | unit 26 / 369, integration 36, extension 6 / 70 | 2026-10-04 runs |
+| Tests | unit 27 / 375, integration 39, extension 6 / 70, frontend 51 | 2026-10-04 runs |
+| Website size | landing first visit **748 → 359 kB** (232 → 114 kB gzip), about half | `npm run build`, 2026-10-04 |
 | Insights | 11 metrics, 13 rules | `metricsDerive.js`, `rulesEngine.js` |
 
 Never quote the old "~10× fewer writes": it was a guess. Always say "local benchmark".
@@ -188,7 +192,17 @@ Never quote the old "~10× fewer writes": it was a guess. Always say "local benc
 14. **Bug your tests missed?** → **H-23**: no PATCH in CORS → goal completion never worked in a
     browser; API tests send no preflight. Found by using the feature; now a test sends preflights.
 15. **Testing?** → unit (pure functions + source scans), integration (real app + in-memory Mongo
-    over HTTP), extension tests against the built bundle; all in CI. No frontend tests yet.
+    over HTTP), extension tests against the built bundle, frontend Vitest tests run in India's time
+    zone (both date bugs only happen east of UTC); all in CI. No end-to-end browser tests yet.
+15d. **Why redesign the website?** → flashy, confusing, no page explaining the product. One idea:
+    "the weekly race", an F1-style standings tower (one cell per day, gap to the leader). Proposal
+    approved before code. One animated moment; everything else calm.
+15e. **No chart library?** → bars, lines and grids only; SVG reads CSS-variable themes, renders in
+    jsdom (testable), labels sit on the data, screen readers get summaries. Chart.js is canvas.
+15f. **Bug found while redesigning?** → goals saved a day early in India: `new Date(y,m,d)
+    .toISOString()` is the previous UTC day before 05:30 IST. Now local `YYYY-MM-DD` keys + a test
+    pinned to `Asia/Kolkata`. Also a sign-out race: clearing the user redrew the current page as
+    signed out → `/login`, remembering the page; now sign-out reloads `/` (D-37, test added).
 15a. **Safari login?** → cookie was third-party (`vercel.app` vs `onrender.com`); Vercel now
     forwards `/api` + `/auth`, site calls its own address → first-party. Separate Vercel project
     wouldn't help (`vercel.app` is a public suffix). Limits moved to per-user (Vercel hides IPs).
@@ -204,21 +218,23 @@ Never quote the old "~10× fewer writes": it was a guess. Always say "local benc
 17. **Is Insights ML?** → no: confidence-gated statistics + 13 rules. ML work-type classifier is
     designed, blocked on labelled data.
 18. **Biggest remaining weakness?** → client-chosen timestamps (bounded, credited, but still
-    trusted), no web refresh token, Render cold starts behind the proxy, no frontend tests.
-19. **What would you do next?** → run the live migrations, publish extension 2.5.0, friendly
-    OAuth-failure page (M-33), per-day stats for windowed boards, frontend tests.
+    trusted), no web refresh token, Render cold starts behind the proxy, no end-to-end tests.
+19. **What would you do next?** → deploy the redesign, run the live migrations, friendly
+    OAuth-failure page (M-33), count the deadline day in goals (M-35), Delete account (L-14),
+    Playwright tests, per-day stats for windowed boards, move the API off Node 20 (L-15).
 
 ---
 
 ## Things NOT to claim / traps
 
-- The backend + website changes are deployed (2026-10-03). Don't say extension 2.5.0 features
-  (outbox, Sign In, keychain) are live until it's published, or that the leaderboard reads
-  running totals live until `backfill-userstats` has run.
+- The October roadmap (backend + website changes) is deployed (2026-10-03) and extension 2.5.0 is
+  live (2026-10-04). Don't say the leaderboard reads running totals live until
+  `backfill-userstats` has run.
 - Don't call Insights AI/ML. Don't say the ML classifier exists.
 - Don't quote "~10×"; quote the measured 5×/13× with the cadence, and say "local benchmark".
 - Don't claim the leaderboard can't be gamed — it's bounded, not impossible.
-- Don't claim frontend tests.
+- Frontend tests exist (51, Vitest); end-to-end browser tests do not. Don't say the redesigned
+  site is live until it's deployed.
 - Don't claim solo authorship — 3 contributors; you owned extension + backend.
 
 ---

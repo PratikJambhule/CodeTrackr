@@ -1,236 +1,107 @@
-import { useQuery } from '@tanstack/react-query';
-import { Trophy, Users } from 'lucide-react';
-import { useTheme } from '../contexts/ThemeContext';
-import GradientText from '../components/GradientText';
-import { apiGet } from '../api';
+import { useState } from 'react';
+import { Trophy } from 'lucide-react';
+import { errorText } from '../api';
+import { useLeaderboard } from '../hooks/queries';
+import { StandingsTower, type TowerRow } from '../components/charts/StandingsTower';
+import { Avatar, Card, CardTitle, EmptyState, ErrorBox, PageHeader, Segmented, Skeleton } from '../components/ui';
+import { hoursHm, int, plural } from '../lib/format';
+import { ordinal } from '../lib/standings';
+import type { LeaderRow, Me } from '../types';
 
-interface LeaderboardEntry {
-  rank: number;
-  userId: string;
-  name: string;
-  totalHours: number;
-  totalLinesAdded: number;
-  totalLinesRemoved: number;
-  codeChanges: number;
-  netCodeChanges: number;
-  projectCount: number;
-  commits: number;
-  commitScore: number;
-  speed: number;
-  quality: number;
-  engagement: number;
-  impact: number;
-  overall: number;
+const PODIUM = ['var(--gold)', 'var(--silver)', 'var(--bronze)'];
+
+function Podium({ rows, meId }: { rows: LeaderRow[]; meId: string }) {
+  return (
+    <ol aria-label="Top three" className="mb-6 grid gap-4 [grid-template-columns:repeat(auto-fit,minmax(min(200px,100%),1fr))]">
+      {rows.slice(0, 3).map((r, i) => (
+        <Card as="li" key={r.userId} className={`flex items-center gap-4 p-5 ${r.userId === meId ? 'bg-me' : ''}`}>
+          <span className="display text-balance w-10 text-[56px]" style={{ color: PODIUM[i] }} aria-hidden="true">
+            {i + 1}
+          </span>
+          <Avatar name={r.name} src={r.profilePictureUrl} size={44} />
+          <div className="min-w-0">
+            <div className="truncate font-semibold">
+              <span className="sr-only">{ordinal(i + 1)}: </span>
+              {r.name}
+              {r.userId === meId && <span className="ml-2 font-mono text-[11px] text-accent-ink">you</span>}
+            </div>
+            <div className="font-mono text-sm text-muted num">{hoursHm(r.totalHours)}</div>
+          </div>
+        </Card>
+      ))}
+    </ol>
+  );
 }
 
-export default function Leaderboard() {
-  const { theme } = useTheme();
-  // React Query (roadmap item 11): cached for 30 s, so navigating away and
-  // back does not refetch the whole board.
-  const board = useQuery({
-    queryKey: ['leaderboard'],
-    queryFn: () => apiGet<LeaderboardEntry[]>('/api/leaderboard'),
-  });
-  const leaders: LeaderboardEntry[] = board.data ?? [];
-  const loading = board.isPending;
+/** Everyone on CodeTrackr, ranked by credited hours. */
+export default function Leaderboard({ user }: { user: Me }) {
+  const [days, setDays] = useState<number | null>(null);
+  const q = useLeaderboard(days);
+  const rows = q.data ?? [];
+  const active = rows.filter((r) => r.totalHours > 0);
+  const meIdx = rows.findIndex((r) => r.userId === user.id);
+  const me = rows[meIdx];
+  const average = active.length ? active.reduce((a, r) => a + r.totalHours, 0) / active.length : 0;
 
-  const getRankBadge = (rank: number) => {
-    if (rank === 1) {
-      return (
-        <div className="flex items-center justify-center w-10 h-10 rounded-full bg-gradient-to-br from-yellow-400 to-yellow-600">
-          <span className="text-yellow-900 font-bold text-lg">1</span>
-        </div>
-      );
-    } else if (rank === 2) {
-      return (
-        <div className="flex items-center justify-center w-10 h-10 rounded-full bg-gradient-to-br from-gray-300 to-gray-500">
-          <span className="text-gray-800 font-bold text-lg">2</span>
-        </div>
-      );
-    } else if (rank === 3) {
-      return (
-        <div className="flex items-center justify-center w-10 h-10 rounded-full bg-gradient-to-br from-orange-400 to-orange-600">
-          <span className="text-orange-900 font-bold text-lg">3</span>
-        </div>
-      );
-    } else {
-      return (
-        <span className="text-gray-400 font-semibold text-lg">{rank}</span>
-      );
-    }
-  };
-
-  // Calculate team averages
-  const teamAverage = leaders.length > 0 ? {
-    totalHours: (leaders.reduce((sum, l) => sum + l.totalHours, 0) / leaders.length).toFixed(1),
-    codeAdded: Math.round(leaders.reduce((sum, l) => sum + l.totalLinesAdded, 0) / leaders.length),
-    codeRemoved: Math.round(leaders.reduce((sum, l) => sum + l.totalLinesRemoved, 0) / leaders.length),
-    speed: (leaders.reduce((sum, l) => sum + parseFloat(l.speed.toString()), 0) / leaders.length).toFixed(1),
-  } : null;
-
-  if (loading) {
-    return (
-      <div 
-        className="flex items-center justify-center min-h-screen transition-colors duration-300"
-        style={{ backgroundColor: theme.colors.background }}
-      >
-        <div 
-          className="text-2xl animate-pulse font-semibold"
-          style={{ color: theme.colors.text }}
-        >
-          Loading leaderboard...
-        </div>
-      </div>
-    );
-  }
+  const tower: TowerRow[] = rows.map((r) => ({
+    id: r.userId,
+    name: r.name,
+    isMe: r.userId === user.id,
+    value: hoursHm(r.totalHours),
+    extras: [int(r.commits), int(r.codeChanges)],
+    summary: `${hoursHm(r.totalHours)}, ${plural(r.commits, 'commit')}, ${int(r.codeChanges)} lines changed`,
+  }));
 
   return (
-    <div 
-      className="max-w-[1600px] mx-auto px-4 sm:px-6 lg:px-8 py-8 transition-colors duration-300"
-      style={{ backgroundColor: theme.colors.background }}
-    >
-      {/* Header */}
-      <div className="mb-8">
-        <h1 className="text-4xl font-bold mb-2 flex items-center gap-3">
-          <Trophy className="w-10 h-10" style={{ color: theme.colors.accent }} />
-          <GradientText animationSpeed={6}>Global Leaderboard</GradientText>
-        </h1>
-        <p style={{ color: theme.colors.textSecondary }}>Team performance metrics and rankings</p>
-      </div>
-
-      {/* Leaderboard Table */}
-      <div 
-        className="backdrop-blur-lg rounded-xl border overflow-hidden transition-all duration-300"
-        style={{
-          backgroundColor: `${theme.colors.surface}80`,
-          borderColor: `${theme.colors.primary}40`,
-        }}
+    <>
+      <PageHeader
+        eyebrow="Everyone on CodeTrackr"
+        title="Leaderboard"
+        actions={
+          <Segmented
+            label="Period"
+            value={days ?? 0}
+            onChange={(v) => setDays(v === 0 ? null : v)}
+            options={[
+              { value: 0, label: 'All time' },
+              { value: 30, label: 'Last 30 days' },
+              { value: 7, label: 'Last 7 days' },
+            ]}
+          />
+        }
       >
-        {leaders.length === 0 ? (
-          <div className="text-center py-12">
-            <Trophy className="w-16 h-16 mx-auto mb-4" style={{ color: theme.colors.textSecondary }} />
-            <h3 className="text-xl font-semibold mb-2" style={{ color: theme.colors.text }}>No Data Yet</h3>
-            <p style={{ color: theme.colors.textSecondary }}>Start coding to appear on the leaderboard!</p>
-          </div>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead 
-                style={{ 
-                  backgroundColor: `${theme.colors.background}80`,
-                }}
-              >
-                <tr 
-                  className="border-b"
-                  style={{ borderColor: theme.colors.border }}
-                >
-                  <th className="px-4 py-3 text-left text-xs font-semibold" style={{ color: theme.colors.text }}>#</th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold" style={{ color: theme.colors.text }}>Name</th>
-                  <th className="px-4 py-3 text-center text-xs font-semibold" style={{ color: theme.colors.text }}>Line Changes</th>
-                  <th className="px-4 py-3 text-center text-xs font-semibold" style={{ color: theme.colors.text }}>Speed</th>
-                  <th className="px-4 py-3 text-center text-xs font-semibold" style={{ color: theme.colors.text }}>Overall Coding Time</th>
-                </tr>
-              </thead>
-              <tbody>
-                {/* Team Average Row */}
-                {teamAverage && (
-                  <tr 
-                    className="border-b transition-colors duration-300"
-                    style={{
-                      borderColor: `${theme.colors.border}80`,
-                      backgroundColor: `${theme.colors.primary}10`,
-                    }}
-                  >
-                    <td className="px-4 py-3">
-                      <Users className="w-6 h-6" style={{ color: theme.colors.primary }} />
-                    </td>
-                    <td className="px-4 py-3">
-                      <span className="font-semibold" style={{ color: theme.colors.text }}>Team average</span>
-                    </td>
-                    <td className="px-4 py-3 text-center">
-                      <span style={{ color: theme.colors.accent }}>
-                        <GradientText animationSpeed={4}>+{teamAverage.codeAdded}</GradientText>
-                      </span>
-                      {' '}
-                      <span style={{ color: theme.colors.secondary }}>
-                        <GradientText animationSpeed={4}>-{teamAverage.codeRemoved}</GradientText>
-                      </span>
-                    </td>
-                    <td className="px-4 py-3 text-center" style={{ color: theme.colors.textSecondary }}>
-                      <GradientText animationSpeed={4}>{teamAverage.speed}</GradientText>
-                    </td>
-                    <td className="px-4 py-3 text-center">
-                      <div className="flex items-center justify-center gap-1">
-                        <span className="font-semibold" style={{ color: theme.colors.text }}>
-                          <GradientText animationSpeed={5}>{teamAverage.totalHours}h</GradientText>
-                        </span>
-                        <Trophy className="w-4 h-4" style={{ color: theme.colors.primary }} />
-                      </div>
-                    </td>
-                  </tr>
-                )}
+        Ranked by hours. Hours are credited time: they count only while VS Code had focus.
+      </PageHeader>
 
-                {/* Individual Rows */}
-                {leaders.map((leader) => (
-                  <tr 
-                    key={leader.userId} 
-                    className={`border-b transition-all duration-200`}
-                    style={{
-                      borderColor: `${theme.colors.border}80`,
-                      backgroundColor: leader.rank <= 3 ? `${theme.colors.accent}05` : 'transparent',
-                    }}
-                    onMouseEnter={(e) => {
-                      e.currentTarget.style.backgroundColor = `${theme.colors.surface}60`;
-                    }}
-                    onMouseLeave={(e) => {
-                      e.currentTarget.style.backgroundColor = leader.rank <= 3 ? `${theme.colors.accent}05` : 'transparent';
-                    }}
-                  >
-                    <td className="px-4 py-3">
-                      {getRankBadge(leader.rank)}
-                    </td>
-                    <td className="px-4 py-3">
-                      <div className="flex items-center gap-3">
-                        <div 
-                          className="w-10 h-10 rounded-full flex items-center justify-center text-white font-bold text-sm"
-                          style={{
-                            background: `linear-gradient(to right, ${theme.colors.primary}, ${theme.colors.accent})`,
-                          }}
-                        >
-                          {leader.name.charAt(0).toUpperCase()}
-                        </div>
-                        <div>
-                          <p className="font-medium" style={{ color: theme.colors.text }}>{leader.name}</p>
-                        </div>
-                      </div>
-                    </td>
-                    <td className="px-4 py-3 text-center">
-                      <span style={{ color: theme.colors.accent }}>
-                        <GradientText animationSpeed={4}>+{leader.totalLinesAdded}</GradientText>
-                      </span>
-                      {' '}
-                      <span style={{ color: theme.colors.secondary }}>
-                        <GradientText animationSpeed={4}>-{leader.totalLinesRemoved}</GradientText>
-                      </span>
-                    </td>
-                    <td className="px-4 py-3 text-center" style={{ color: theme.colors.textSecondary }}>
-                      <GradientText animationSpeed={4}>{leader.speed}</GradientText>
-                    </td>
-                    <td className="px-4 py-3 text-center">
-                      <div className="flex items-center justify-center gap-1">
-                        <span className="font-semibold" style={{ color: theme.colors.text }}>
-                          <GradientText animationSpeed={5}>{leader.totalHours.toFixed(1)}h</GradientText>
-                        </span>
-                        <Trophy className="w-4 h-4" style={{ color: theme.colors.accent }} />
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
-    </div>
+      {q.isPending ? (
+        <Skeleton className="h-[480px]" />
+      ) : q.isError ? (
+        <ErrorBox message={errorText(q.error)} onRetry={() => q.refetch()} />
+      ) : active.length === 0 ? (
+        <Card>
+          <EmptyState icon={<Trophy className="h-10 w-10" />} title="Nobody has coded in this period yet">
+            Code for a couple of minutes with the extension connected and you will be the first one here.
+          </EmptyState>
+        </Card>
+      ) : (
+        <>
+          <Podium rows={rows} meId={user.id} />
+          <Card className="p-4 sm:p-5">
+            <CardTitle aside={`average ${hoursHm(average)} across ${plural(active.length, 'person', 'people')}`}>
+              {me ? (
+                <span>
+                  You are {ordinal(meIdx + 1)} of {rows.length}
+                  {meIdx > 0 && <span className="font-normal text-muted"> · {hoursHm(rows[meIdx - 1].totalHours - me.totalHours)} behind {rows[meIdx - 1].name}</span>}
+                </span>
+              ) : (
+                'Standings'
+              )}
+            </CardTitle>
+            <StandingsTower rows={tower} dense valueHeader="Hours" label="Leaderboard" columns={[{ label: 'Commits' }, { label: 'Lines', title: 'Lines added plus lines removed' }]} />
+            {q.isFetching && <p className="mt-3 font-mono text-xs text-muted">updating…</p>}
+          </Card>
+        </>
+      )}
+    </>
   );
 }

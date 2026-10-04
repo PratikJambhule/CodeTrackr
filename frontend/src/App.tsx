@@ -1,273 +1,129 @@
-import React, { useState, useEffect } from 'react';
-import { BrowserRouter as Router, Routes, Route, Navigate, Link, useLocation, useNavigate } from 'react-router-dom';
-import { Code2, LayoutDashboard, Trophy, Target, Users2, UserCircle, Sparkles } from 'lucide-react';
-import './index.css';
-import Orb from './components/Orb';
-import TargetCursor from './components/TargetCursor';
-import NotificationPanel from './components/NotificationPanel';
-import ThemeSelector from './components/ThemeSelector';
-import GradientText from './components/GradientText';
-import { useTheme } from './contexts/ThemeContext';
-import { API_URL } from './config';
+import { lazy, Suspense, useEffect, useState } from 'react';
+import { Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
+import { useMe } from './hooks/queries';
+import { AppShell } from './components/layout/AppShell';
+import { PublicLayout } from './components/layout/PublicLayout';
+import { Button, Logo } from './components/ui';
+import { readSession, writeSession } from './lib/storage';
 
-// Pages
-import Dashboard from './pages/Dashboard';
-import Insights from './pages/Insights';
-import Leaderboard from './pages/Leaderboard';
-import Goals from './pages/Goals';
-import Groups from './pages/Groups';
-import Onboarding from './pages/Onboarding';
-import Profile from './pages/Profile';
-import Login from './pages/Login';
-import Device from './pages/Device';
+// Each page is its own chunk, so the landing page does not download the dashboard.
+const Landing = lazy(() => import('./pages/public/Landing'));
+const Guide = lazy(() => import('./pages/public/Guide'));
+const Privacy = lazy(() => import('./pages/public/Privacy'));
+const Login = lazy(() => import('./pages/public/Login'));
+const NotFound = lazy(() => import('./pages/public/NotFound'));
+const Dashboard = lazy(() => import('./pages/Dashboard'));
+const Leaderboard = lazy(() => import('./pages/Leaderboard'));
+const Groups = lazy(() => import('./pages/Groups'));
+const GroupBoard = lazy(() => import('./pages/GroupBoard'));
+const JoinGroup = lazy(() => import('./pages/JoinGroup'));
+const Goals = lazy(() => import('./pages/Goals'));
+const Insights = lazy(() => import('./pages/Insights'));
+const Profile = lazy(() => import('./pages/Profile'));
+const Onboarding = lazy(() => import('./pages/Onboarding'));
+const Device = lazy(() => import('./pages/Device'));
 
-// A signed-out visitor who opens the VS Code approval link (/device?code=...)
-// would lose the code on the way through Google sign-in. Remember where they
-// were going and return them there once signed in.
-const AFTER_LOGIN_KEY = 'codetrackr.afterLogin';
+/** Pages that need a signed-in user. Visiting one signed out goes to sign-in and comes back. */
+const PROTECTED = ['/dashboard', '/leaderboard', '/groups', '/groups/:groupId', '/goals', '/insights', '/profile', '/onboarding', '/device', '/join/:groupId'];
+
+const AFTER_LOGIN = 'codetrackr.afterLogin';
 
 function RememberThenLogin() {
   const location = useLocation();
-  try { sessionStorage.setItem(AFTER_LOGIN_KEY, location.pathname + location.search); } catch { /* storage blocked */ }
-  return <Navigate to="/login" />;
+  writeSession(AFTER_LOGIN, location.pathname + location.search);
+  return <Navigate to="/login" replace />;
 }
 
+/** After Google sign-in the API lands on /dashboard; resume an invite link or device code instead. */
 function ResumeAfterLogin() {
   const navigate = useNavigate();
   useEffect(() => {
-    let target: string | null = null;
-    try {
-      target = sessionStorage.getItem(AFTER_LOGIN_KEY);
-      sessionStorage.removeItem(AFTER_LOGIN_KEY);
-    } catch { /* storage blocked */ }
-    if (target && target.startsWith('/device')) navigate(target, { replace: true });
+    const target = readSession(AFTER_LOGIN);
+    writeSession(AFTER_LOGIN, null);
+    if (target && target.startsWith('/') && !target.startsWith('//')) navigate(target, { replace: true });
   }, [navigate]);
   return null;
 }
 
-function App() {
-  const { theme } = useTheme();
-  const [user, setUser] = useState<{
-    id: string;
-    name: string;
-    email: string;
-  } | null>(null);
-  const [loading, setLoading] = useState(true);
-
+/** True once `pending` has lasted longer than `ms`: the free server is probably waking up. */
+function useSlow(pending: boolean, ms = 2500) {
+  const [slow, setSlow] = useState(false);
   useEffect(() => {
-    loadUserProfile();
-  }, []);
-
-  const loadUserProfile = async () => {
-    try {
-      const res = await fetch(`${API_URL}/api/user/profile`, {
-        credentials: 'include'
-      });
-      if (res.ok) {
-        const data = await res.json();
-        if (data?.user?.id) {
-          setUser(data.user);
-        } else {
-          setUser(null);
-        }
-      } else {
-        setUser(null);
-      }
-    } catch (error) {
-      console.error('Profile fetch failed, redirecting to login:', error);
-      setUser(null);
-    } finally {
-      setLoading(false);
+    if (!pending) {
+      setSlow(false);
+      return;
     }
-  };
+    const t = window.setTimeout(() => setSlow(true), ms);
+    return () => window.clearTimeout(t);
+  }, [pending, ms]);
+  return slow;
+}
 
-  const handleLogout = async () => {
-    try {
-      await fetch(`${API_URL}/auth/logout`, {
-        method: 'POST',
-        credentials: 'include'
-      });
-    } catch (error) {
-      console.error('Logout failed:', error);
-    } finally {
-      setUser(null);
-    }
-  };
+function Splash({ slow, failed, onRetry }: { slow: boolean; failed?: boolean; onRetry?: () => void }) {
+  return (
+    <div className="flex min-h-screen flex-col items-center justify-center gap-5 bg-bg px-6 text-center">
+      <Logo size={44} />
+      {failed ? (
+        <>
+          <p role="alert" className="max-w-sm text-muted">
+            Could not reach the server. It may be waking up after being idle, which takes about 20 seconds.
+          </p>
+          <Button onClick={onRetry}>Try again</Button>
+        </>
+      ) : (
+        <p aria-live="polite" className="max-w-sm text-muted">
+          {slow ? 'Waking up the server. The free hosting sleeps when idle; this takes about 20 seconds the first time.' : 'Loading…'}
+        </p>
+      )}
+    </div>
+  );
+}
 
-  if (loading) {
-    return (
-      <div 
-        className="min-h-screen flex items-center justify-center transition-colors duration-300"
-        style={{ 
-          backgroundColor: theme.colors.background,
-          backgroundImage: `linear-gradient(to bottom right, ${theme.colors.background}, ${theme.colors.surface})`,
-        }}
-      >
-        <div 
-          className="text-2xl animate-pulse font-semibold"
-          style={{ color: theme.colors.text }}
-        >
-          Loading...
-        </div>
-      </div>
-    );
-  }
+export default function App() {
+  const me = useMe();
+  const user = me.data ?? null;
+  const slow = useSlow(me.isPending);
 
-  if (!user) {
-    return (
-      <Router>
+  return (
+    <>
+      {user && <ResumeAfterLogin />}
+      <Suspense fallback={<Splash slow={false} />}>
         <Routes>
-          <Route path="/login" element={<Login />} />
-          <Route path="/device" element={<RememberThenLogin />} />
-          <Route path="*" element={<Navigate to="/login" />} />
+          <Route element={<PublicLayout user={user} />}>
+            <Route path="/" element={<Landing />} />
+            <Route path="/guide" element={<Guide />} />
+            <Route path="/privacy" element={<Privacy />} />
+          </Route>
+          <Route path="/login" element={user ? <Navigate to="/dashboard" replace /> : <Login />} />
+
+          {user ? (
+            <Route element={<AppShell user={user} />}>
+              <Route path="/dashboard" element={<Dashboard user={user} />} />
+              <Route path="/leaderboard" element={<Leaderboard user={user} />} />
+              <Route path="/groups" element={<Groups />} />
+              <Route path="/groups/:groupId" element={<GroupBoard user={user} />} />
+              <Route path="/join/:groupId" element={<JoinGroup />} />
+              <Route path="/goals" element={<Goals />} />
+              <Route path="/insights" element={<Insights />} />
+              <Route path="/profile" element={<Profile user={user} />} />
+              <Route path="/onboarding" element={<Onboarding user={user} />} />
+              <Route path="/device" element={<Device />} />
+            </Route>
+          ) : (
+            PROTECTED.map((path) => (
+              <Route
+                key={path}
+                path={path}
+                element={me.isPending ? <Splash slow={slow} /> : me.isError ? <Splash slow={false} failed onRetry={() => me.refetch()} /> : <RememberThenLogin />}
+              />
+            ))
+          )}
+
+          <Route element={<PublicLayout user={user} />}>
+            <Route path="*" element={<NotFound />} />
+          </Route>
         </Routes>
-      </Router>
-    );
-  }
-
-  return (
-    <Router>
-      <div 
-        className="min-h-screen relative transition-colors duration-300"
-        style={{ backgroundColor: theme.colors.background }}
-      >
-        {/* Target Cursor */}
-        <TargetCursor
-          spinDuration={2}
-          hideDefaultCursor={true}
-          parallaxOn={true}
-        />
-
-        {/* Animated Background */}
-        <div className="fixed inset-0 w-full h-full z-0">
-          <Orb
-            hoverIntensity={0.5}
-            rotateOnHover={true}
-            hue={theme.colors.orbHue}
-            forceHoverState={false}
-          />
-        </div>
-
-        {/* Content Wrapper */}
-        <div className="relative z-10">
-          <nav 
-            className="backdrop-blur-lg border-b relative z-50 transition-colors duration-300"
-            style={{
-              backgroundColor: `${theme.colors.surface}80`,
-              borderColor: `${theme.colors.primary}33`,
-            }}
-          >
-            <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-              <div className="flex justify-between h-16">
-                <div className="flex items-center space-x-8">
-                  <Link 
-                    to="/dashboard"
-                    className="cursor-target flex items-center space-x-2 transition-colors duration-200"
-                    style={{ color: theme.colors.text }}
-                    onMouseEnter={(e) => e.currentTarget.style.color = theme.colors.primary}
-                    onMouseLeave={(e) => e.currentTarget.style.color = theme.colors.text}
-                  >
-                    <Code2 className="w-8 h-8" />
-                    <span className="text-xl font-bold">
-                      <GradientText animationSpeed={6}>
-                        Codex
-                      </GradientText>
-                    </span>
-                  </Link>
-                  <div className="hidden md:flex space-x-4">
-                    <NavLink to="/dashboard" icon={<LayoutDashboard className="w-4 h-4" />}>Dashboard</NavLink>
-                    <NavLink to="/insights" icon={<Sparkles className="w-4 h-4" />}>Insights</NavLink>
-                    <NavLink to="/leaderboard" icon={<Trophy className="w-4 h-4" />}>Leaderboard</NavLink>
-                    <NavLink to="/goals" icon={<Target className="w-4 h-4" />}>Goals</NavLink>
-                    <NavLink to="/groups" icon={<Users2 className="w-4 h-4" />}>Groups</NavLink>
-                    <NavLink to="/profile" icon={<UserCircle className="w-4 h-4" />}>Profile</NavLink>
-                  </div>
-                </div>
-
-                <div className="flex items-center space-x-4">
-                  {/* Notification Panel */}
-                  <NotificationPanel />
-                  
-                  {/* Theme Selector */}
-                  <ThemeSelector />
-                  
-                  <span 
-                    className="hidden sm:block font-medium"
-                    style={{ color: theme.colors.text }}
-                  >
-                    <GradientText animationSpeed={5}>
-                      Hi, {user.name}!
-                    </GradientText>
-                  </span>
-                  <button
-                    type="button"
-                    onClick={handleLogout}
-                    className="cursor-target px-3 py-1 rounded-lg transition-all duration-200"
-                    style={{
-                      color: theme.colors.textSecondary,
-                      border: `1px solid ${theme.colors.primary}55`
-                    }}
-                    onMouseEnter={(e) => {
-                      e.currentTarget.style.color = theme.colors.text;
-                      e.currentTarget.style.backgroundColor = `${theme.colors.primary}20`;
-                    }}
-                    onMouseLeave={(e) => {
-                      e.currentTarget.style.color = theme.colors.textSecondary;
-                      e.currentTarget.style.backgroundColor = 'transparent';
-                    }}
-                  >
-                    Logout
-                  </button>
-                </div>
-              </div>
-            </div>
-          </nav>
-
-          <ResumeAfterLogin />
-          <Routes>
-            <Route path="/login" element={<Navigate to="/dashboard" />} />
-            <Route path="/onboarding" element={<Onboarding />} />
-            <Route path="/dashboard" element={<Dashboard user={user} />} />
-            <Route path="/insights" element={<Insights />} />
-            <Route path="/leaderboard" element={<Leaderboard />} />
-            <Route path="/goals" element={<Goals />} />
-            <Route path="/groups" element={<Groups user={user} />} />
-            <Route path="/profile" element={<Profile />} />
-            <Route path="/device" element={<Device />} />
-            <Route path="/" element={<Navigate to="/dashboard" />} />
-          </Routes>
-        </div>
-      </div>
-    </Router>
+      </Suspense>
+    </>
   );
 }
-
-function NavLink({ to, icon, children }: { to: string; icon: React.ReactNode; children: React.ReactNode }) {
-  const { theme } = useTheme();
-  
-  return (
-    <Link 
-      to={to}
-      className="cursor-target flex items-center space-x-2 px-3 py-2 rounded-lg transition-all duration-200"
-      style={{ color: theme.colors.textSecondary }}
-      onMouseEnter={(e) => {
-        e.currentTarget.style.color = theme.colors.text;
-        e.currentTarget.style.backgroundColor = `${theme.colors.primary}20`;
-      }}
-      onMouseLeave={(e) => {
-        e.currentTarget.style.color = theme.colors.textSecondary;
-        e.currentTarget.style.backgroundColor = 'transparent';
-      }}
-    >
-      {icon}
-      <span>
-        <GradientText animationSpeed={5}>
-          {children}
-        </GradientText>
-      </span>
-    </Link>
-  );
-}
-
-export default App;
-

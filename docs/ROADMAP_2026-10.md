@@ -20,12 +20,12 @@ Integration tests come first because every later change is verified with them.
 | 0 | Fix contradictions in the interview guides; make the resume match | doc §0 | ✅ 2026-10-03 |
 | 1 | Integration tests: supertest + mongodb-memory-server, track → analytics → leaderboard → group join, in CI | T1-4 | ✅ 2026-10-03 — 7 tests; found M-31 |
 | 2 | Quick correctness fixes found in the audit: H-22 today window, M-28/M-29 emails, M-26 cancel redirect, M-25 Marketplace link, L-11 OAuth state | audit | ✅ 2026-10-03 (M-27 moves to item 3: the key flow changes there) |
-| 3 | Hash API keys (`ct_<id>_<secret>`, lookup by id, compare hash with `timingSafeEqual`); old plaintext keys keep working until migrated; extension stores the key in SecretStorage | T1-1 | ✅ 2026-10-03 (backend + frontend + extension 2.5.0 unreleased; live migration is the user's step) |
+| 3 | Hash API keys (`ct_<id>_<secret>`, lookup by id, compare hash with `timingSafeEqual`); old plaintext keys keep working until migrated; extension stores the key in SecretStorage | T1-1 | ✅ 2026-10-03 (backend + frontend; extension 2.5.0 live since 2026-10-04; live migration is the user's step) |
 | 4 | Idempotency key per flush (client UUID, unique index with TTL, resend ignored) | T1-2 | ✅ 2026-10-03 (server + extension 2.5.0) |
 | 5 | Anti-cheat: cap each user's 10-minute window at 600 s (H-21), per-key ingest quota, leaderboard hours count only with corroborating edits/focus | T1-5 | ✅ 2026-10-03 (window cap + spreading, focus corroboration, per-key quota, batch cap) |
 | 6 | `UserStats` running totals updated on write; leaderboard reads them; all-time reads move to `dailysummaries` | T1-3 | ✅ 2026-10-03 (`userstats` + fallback; backfill is the user's step; windowed reads still scan, bounded by the window) |
 | 7 | Contest-week group boards: `?from=&to=` on group details | T1-6 | ✅ 2026-10-03 (+ all-time group board on `userstats`, closes H-8) |
-| 8 | Extension: persisted per-interval queue in `globalState`, replayed on activation (fixes M-30 + restart loss) | T2-7 | ✅ 2026-10-03 (extension 2.5.0, unreleased; also sends `flushId`) |
+| 8 | Extension: persisted per-interval queue in `globalState`, replayed on activation (fixes M-30 + restart loss) | T2-7 | ✅ 2026-10-03 (extension 2.5.0, live since 2026-10-04; also sends `flushId`) |
 | 9 | Move remaining JS-side analytics to `$group` pipelines (M-1) | T2-8 | ✅ 2026-10-03 daily + weekly (timeslot stays in JS: a 2-hour window); found M-32 |
 | 10 | `activities.userId` String → ObjectId, with a dual-read window and a dry-run migration | T2-9 | ✅ expand + migration script 2026-10-03; live `--apply` and the contract step are the user's |
 | 11 | React Query; delete Teams page + backend; Goals to-dos already removed | T2-10 | ✅ 2026-10-03 (Dashboard, Leaderboard, Insights on React Query; Teams page/route/model deleted; fixes M-11, M-12 partly) |

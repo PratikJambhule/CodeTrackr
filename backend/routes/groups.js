@@ -8,6 +8,7 @@ const { isAuthenticated } = require('../middleware/auth');
 const { hashPassword, verifyPassword, isHashed } = require('../services/passwordHash');
 const { containsRegex } = require('../services/textQuery');
 const { parseBoardWindow } = require('../services/boardWindow');
+const { groupDaily } = require('../services/groupDaily');
 const UserStats = require('../models/UserStats');
 const { matchActivityUsers, USER_KEY } = require('../services/activityUser');
 const rateLimit = require('express-rate-limit');
@@ -269,6 +270,16 @@ router.get('/:groupId/details', isAuthenticated, async (req, res, next) => {
             entry.rank = index + 1;
         });
 
+        // Seconds per member per local day: the standings tower's day cells and
+        // the race chart (redesign spec §6). The window's days, or the last 7.
+        const offset = Number.parseInt(req.query.timezone, 10);
+        const daily = await groupDaily({
+            memberIds,
+            from: board.from,
+            to: board.to,
+            offsetMinutes: Number.isFinite(offset) ? offset : 0,
+        });
+
         res.json({
             success: true,
             group: {
@@ -282,7 +293,40 @@ router.get('/:groupId/details', isAuthenticated, async (req, res, next) => {
             members: membersList,
             leaderboard: leaderboardWithUsers,
             window: board.from ? { from: board.from, to: board.to } : null,
+            daily,
             source
+        });
+    } catch (error) {
+        return next(error);
+    }
+});
+
+// Preview a group for an invite link (/join/:groupId on the website): what it
+// is and whether the caller already belongs. Exposes no more than Discover does
+// (name, description, visibility, creator's name) plus a member count: no
+// member list, no emails, never the password.
+router.get('/:groupId/preview', isAuthenticated, async (req, res, next) => {
+    try {
+        const group = await Group.findById(req.params.groupId).populate('createdBy', 'name');
+        if (!group) {
+            return res.status(404).json({ message: 'Group not found' });
+        }
+        const [memberCount, membership] = await Promise.all([
+            GroupMember.countDocuments({ groupId: group._id }),
+            GroupMember.exists({ groupId: group._id, userId: req.user._id }),
+        ]);
+        res.json({
+            success: true,
+            group: {
+                _id: group._id,
+                name: group.name,
+                description: group.description,
+                visibility: group.visibility,
+                createdBy: group.createdBy ? { _id: group.createdBy._id, name: group.createdBy.name } : null,
+                createdAt: group.createdAt,
+            },
+            memberCount,
+            isMember: Boolean(membership),
         });
     } catch (error) {
         return next(error);

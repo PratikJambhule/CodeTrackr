@@ -15,15 +15,22 @@
 
 Between 2026-10-03 and now, the 18-item plan in `docs/ROADMAP_2026-10.md` was built and tested
 and **deployed on 2026-10-03** (commit `11040c5`; Google login verified live). Still pending: live
-data migrations and publishing extension 2.5.0 (`docs/RELEASE.md` §3–4). Where a section below still describes the
+data migrations (`docs/RELEASE.md` §3). Extension 2.5.0 is live on the Marketplace since 2026-10-04 (§4). Where a section below still describes the
 earlier design, this list wins; the dated detail is in `docs/PROGRESS.md`.
 
-- Integration tests (`npm run test:int`, in-memory MongoDB) — 36 tests; unit 26 suites / 369;
-  extension 6 suites / 70.
+- Integration tests (`npm run test:int`, in-memory MongoDB) — 39 tests; unit 27 suites / 375;
+  extension 6 suites / 70; frontend 51 (Vitest).
+- **Website redesign (2026-10-04, built and tested, NOT deployed):** "the weekly race". Landing,
+  guide, privacy, invite links (`/join/:id`), group board as its own route (standings tower with day
+  cells, race chart, contest dates in the URL), dashboard rebuilt from small SVG chart components,
+  two themes as CSS variables, every page lazy-loaded (landing first visit 748 → 359 kB). New API:
+  `/api/analytics/history/:userId`, group `daily` cells, `/api/groups/:id/preview`. Spec
+  `docs/specs/2026-10-04-frontend-redesign.md`; decisions D-31..D-36; found + fixed M-34 (goals
+  saved a day early in India); found M-35 and L-14 (open).
 - API keys hashed (`ct_<id>_<secret>`, SHA-256), shown once; per-device keys via **device-code
   sign-in**; extension keeps keys in SecretStorage.
 - Idempotent ingest (`flushId`), anti-cheat crediting (focus corroboration, 600 s per user per
-  10-minute window, per-key quota), persisted extension outbox (extension 2.5.0, unpublished).
+  10-minute window, per-key quota), persisted extension outbox (extension 2.5.0, live since 2026-10-04).
 - Leaderboard and group boards read `userstats` running totals (1M rows: 6.72 s → 62 ms p50);
   contest-week group boards (`?from=&to=`); group admin (rename, remove, ownership hand-off).
 - Dashboard daily/weekly views aggregate in MongoDB (`$facet`); `activities.userId` → ObjectId in
@@ -81,11 +88,13 @@ CodeTrackr-main/
 │   └── vercel.json               Serverless build config
 ├── frontend/         React 19 + Vite 7 + TS + Tailwind 3 SPA
 │   └── src/
-│       ├── App.tsx               Router + auth gate + nav shell
+│       ├── App.tsx               Routes; public pages render at once, app pages wait for /api/user/profile; all lazy-loaded
 │       ├── config.ts             API_URL: '' in production (same site, Vercel proxy); VITE_API_URL in dev
-│       ├── contexts/ThemeContext.tsx   28 themes, localStorage, CSS vars
-│       ├── pages/                Login, Onboarding, Dashboard, Insights, Leaderboard, Goals, Groups, Profile (Teams deleted 2026-10-03)
-│       └── components/           NotificationPanel, ThemeSelector, + decorative (Orb, Hyperspeed, LetterGlitch, TargetCursor, GradientText, TextType, ElectricBorder)
+│       ├── api.ts, hooks/        apiGet/apiSend + errorText; typed React Query hooks for every read
+│       ├── theme.tsx, index.css  design tokens as CSS variables; dark (default) / light / system
+│       ├── lib/                  pure, unit-tested: format (local dates), standings, calendar, storage
+│       ├── components/ui|charts|layout   UI kit; SVG/HTML charts (StandingsTower, RaceChart, Bars, YearHeatmap, ...); AppShell, PublicLayout
+│       └── pages/                public/ (Landing, Guide, Privacy, Login, NotFound), Dashboard (+ dashboard/), Groups, GroupBoard, JoinGroup, Leaderboard, Goals, Insights, Profile, Onboarding, Device
 ├── extension/        VS Code extension (TypeScript, esbuild bundle)
 │   ├── src/extension.ts          Activation, flush timer, payload build, axios POST
 │   ├── src/editorTracker.ts      Gross edits, churn, read/write attention split, file switches
@@ -130,11 +139,11 @@ workspace; each is installed and deployed independently.
 | Extension | TypeScript 5, esbuild (CJS bundle, `--external:vscode`), `@vscode/vsce`, axios; `@types/vscode ^1.85` |
 | Backend | Node 18, Express **5**, Mongoose **8**, jsonwebtoken, passport + passport-google-oauth20, cookie-parser, cors, dotenv, node-cron, serverless-http. **`helmet` + `express-rate-limit` wired 2026-09-09** on `/auth` + `/api/extension` (M‑3), extended 2026-09-12 to `/api/analytics` and group `/join` (M-24). Ingest is bounds-checked by a pure `services/ingestValidation.js` (M‑4, 2026-09-09); `express-validator` remains installed-but-unused. `three`/`postprocessing` in backend deps are spurious. |
 | Database | MongoDB Atlas (connection via `MONGO_URI`) |
-| Frontend | React **19**, Vite **7**, TypeScript ~5.9, Tailwind **3**, react-router-dom **7**, chart.js 4 + react-chartjs-2 + chartjs-plugin-datalabels, lucide-react, gsap, three/ogl/postprocessing (decorative visuals). **`@tanstack/react-query` is a dependency but unused.** |
+| Frontend | React **19**, Vite **7**, TypeScript ~5.9, Tailwind **3** (CSS-variable tokens), react-router-dom **7**, **@tanstack/react-query 5** (every read), lucide-react; charts are hand-made SVG/HTML components. Tests: Vitest + Testing Library + jsdom. *(Before 2026-10-04: chart.js + plugins, gsap, three/ogl/postprocessing, 28 themes.)* |
 | Auth | Google OAuth 2.0 → JWT in httpOnly cookie (web); random API key in `x-api-key` header (extension) |
 | ML/Insights | **None built.** Pure deterministic JavaScript statistics (`metricsDerive.js`) plus a 13-rule threshold engine. No Python, no trained model, no LLM. A work-type classifier (logistic regression over 18 session attributes, learned from one-tap user labels) feeding rule-based personas and group titles is designed in `docs/ML_INTEGRATION_PLAN.md` (redesigned 2026-09-17) and blocked on data. |
 | Deploy | Backend: Render (`codetrackr-backend-uckp.onrender.com`, per extension default) — also has a Vercel serverless config. Frontend: Vercel (`code-trackr-frontend.vercel.app`). DB: MongoDB Atlas. |
-| Testing | Plain `node:assert` scripts: **26 backend suites (369 assertions)**, 6 extension suites (70). **36 integration tests** (`supertest` + `mongodb-memory-server`, real HTTP and real queries, incl. CORS preflight). **Zero frontend tests.** CI runs all of it, the frontend build and a Docker health check on every push. |
+| Testing | Plain `node:assert` scripts: **27 backend suites (375 assertions)**, 6 extension suites (70). **39 integration tests** (`supertest` + `mongodb-memory-server`, real HTTP and real queries, incl. CORS preflight). **51 frontend tests** (Vitest, jsdom, `TZ=Asia/Kolkata`). CI runs all of it, the frontend build and a Docker health check on every push. |
 
 ---
 
@@ -189,7 +198,7 @@ key **once**. `GET /api/user/profile` never returns the key — only `hasApiKey`
 every older key.
 
 **Delivery to the extension.** `CodeTrackr: Setup API Key` stores it in **VS Code
-SecretStorage** (OS keychain) from extension 2.5.0 (unreleased); a key left in `settings.json`
+SecretStorage** (OS keychain) from extension 2.5.0 (live since 2026-10-04); a key left in `settings.json`
 by an older version is moved there on activation and the setting is cleared.
 
 **Verification.** `middleware/auth.js → findUserByApiKey`: a `ct_` key is looked up by `id`, then
@@ -341,7 +350,7 @@ Legacy unauthenticated `POST /api/user-activity` / `GET /api/user-stats/:id` wer
     `onDidStart/EndTerminalShellExecution`; classifies command category, build/test/debug,
     git action; success/failure by exit code; repeated-failure detection.
   - `DebugTracker` — debug session count, folded into `terminalAnalytics.debuggingSessions`.
-- **Failure handling (2.5.0, built 2026-10-03, unpublished):** every interval with signal gets a
+- **Failure handling (2.5.0, built 2026-10-03, live since 2026-10-04):** every interval with signal gets a
   `flushId` (UUID) and is saved to a persisted outbox (`src/outbox.ts`, `globalState`) *before*
   the upload; the outbox is drained oldest first on every flush, on activation and after a key is
   set. `sendActivity` returns `ok` / `drop` (400, or a duration outside 1–3600 s) / `retry`
@@ -437,6 +446,9 @@ scale (H-7, open — the fix is a `UserStats` running-total rollup). Group leade
 
 ## 12. Frontend notes
 
+> **2026-10-04: the website was redesigned; the notes below describe the OLD frontend.** Current
+> structure: `docs/ARCHITECTURE.md` §8 and `docs/specs/2026-10-04-frontend-redesign.md`.
+
 - **Routing:** `react-router-dom` v7. `App.tsx` gates on `GET /api/user/profile`; unauthenticated
   users only see `/login`. Routes: `/dashboard`, `/insights`, `/leaderboard`, `/goals`,
   `/groups`, `/profile`, `/onboarding`. **No `/teams` route** (Teams.tsx is dead code).
@@ -495,7 +507,7 @@ ownership (H‑1); legacy open write/read endpoints deleted (H‑2); group passw
   still easy to inject with a valid key.
 - ~~Error responses echo `error.message`~~ — fixed (M-10).
 - ~~Leaderboard exposes every user's email~~ — ✅ fixed 2026‑09‑12 (M-23 / Quick-Wins #16).
-- Extension stores the key in SecretStorage from 2.5.0 (built 2026-10-03, not yet published); 2.4.0 still uses `settings.json`.
+- Extension stores the key in SecretStorage from 2.5.0 (live since 2026-10-04); 2.4.0 and older kept it in `settings.json`, and 2.5.0 moves an old key across on first start.
 - Ingest is still not idempotent, but a re-sent flush now `$inc`s the same bucket rather than
   creating a second document — a same-window replay double-counts within one bucket, not a new row.
 - Client supplies `timestamp` on ingest — bounded to `[now-24h, now+60s]` (M-4) but not server-set.
@@ -587,7 +599,7 @@ Plus, since 2026-09-10: `metrics` rewritten (37), `metricsService` (35), `sessio
 Plus, since 2026-09-12: four more assertions in `metricsService` and `quickWins` (the cadence
 regression, the email projection, and the two new rate limiters).
 
-**Total (2026-10-04): 369 backend unit assertions across 26 suites, 36 backend integration tests, 70 extension assertions across 6.** *(The paragraph below describes the state before the integration suite existed.)* No test framework, **no
+**Total (2026-10-04): 375 backend unit assertions across 27 suites, 39 backend integration tests, 70 extension assertions across 6, 51 frontend tests (Vitest).** *(The paragraph below describes the state before the integration suite existed.)* No test framework, **no
 integration/API/DB/e2e tests, no frontend tests.** Nothing has been run against a real
 database — the bucketing/rollup/wiring logic is proven at the pure-function / source-scan
 level only (a `supertest` + `mongodb-memory-server` integration test is the tracked next step,
@@ -605,7 +617,7 @@ Quick-Wins #24).
 6. ~~Frontend does not typecheck~~ ✅ fixed 2026-09-09 (M‑13) — `npm run build` green, enforced by CI.
 7. Dashboard "Repeated Failures" shows real data (2026-09-09); the half-built Goals to-dos were removed; Teams was deleted (2026-10-03).
 8. `activities.userId` String → ObjectId is mid-migration (M-6): reads accept both; the live `--apply` and the contract step remain.
-9. ~~Extension has no offline queue~~ — extension 2.5.0 (built 2026-10-03, unpublished) persists every upload in a `globalState` outbox with its own `flushId` (M-30 fixed). 2.4.0, the published version, still loses unsent time on restart.
+9. ~~Extension has no offline queue~~ — extension 2.5.0 (built 2026-10-03, live since 2026-10-04) persists every upload in a `globalState` outbox with its own `flushId` (M-30 fixed). Anyone still on 2.4.0 or older loses unsent time on restart until VS Code updates the extension.
 17. The Dashboard's "today" window is the previous day from 00:00 to 05:30 IST (H-22).
 18. Group listings (`/discover`, `/my-groups`, `/details`) return emails — creators' to any signed-in user, members' to members (M-28, M-29).
 10. ~~Ingest not idempotent~~ — uploads with a `flushId` (extension 2.5.0) are applied once (2026-10-03); older extensions send none.

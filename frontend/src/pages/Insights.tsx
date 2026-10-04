@@ -1,37 +1,13 @@
-import { useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
-import { Brain, Timer, Activity, Sunrise, Target, RefreshCw, Flame, Repeat, Layers } from 'lucide-react';
-import { useTheme } from '../contexts/ThemeContext';
-import GradientText from '../components/GradientText';
-import { apiGet } from '../api';
+import { useState, type ReactNode } from 'react';
+import { RotateCw } from 'lucide-react';
+import { errorText } from '../api';
+import { useMetrics } from '../hooks/queries';
+import { Button, Card, CardTitle, ErrorBox, PageHeader, Pill, Segmented, Skeleton } from '../components/ui';
+import { pct, plural } from '../lib/format';
+import { hourLabel } from '../lib/calendar';
+import type { Finding, MetricMeta, Metrics, Severity } from '../types';
 
-type Confidence = 'insufficient' | 'low' | 'high';
-
-interface MetricMeta {
-  confidence: Confidence;
-  sampleSize: number;
-  unit: string;
-  /** The user's own 90-day value, when the baseline window supports it. */
-  baseline?: number;
-  /** Signed fractional change from that baseline (0.2 = +20%). */
-  delta?: number | null;
-}
-
-interface SessionSummary {
-  startMs: number;
-  endMs: number;
-  minutes: number;
-  archetype: string;
-  reason: string;
-  projects: string[];
-  languages: string[];
-  deepBlockCount: number;
-  commits: number;
-}
-
-type ArchetypeMix = Record<string, { sessions: number; minutes: number }>;
-
-const ARCHETYPE_LABELS: Record<string, string> = {
+const ARCHETYPE: Record<string, string> = {
   'deep-build': 'Deep build',
   'debug-grind': 'Debug grind',
   exploration: 'Exploration',
@@ -40,524 +16,220 @@ const ARCHETYPE_LABELS: Record<string, string> = {
   unclassified: 'Too short to classify',
 };
 
-interface Metrics {
-  windowDays: number;
-  deepWorkRatio: number;
-  flowBlocks: {
-    medianMs: number;
-    longestMs: number;
-    deepBlockCount: number;
-    blockCount: number;
-    totalMs: number;
-  };
-  /** Back-compat alias of volumeStability. */
-  consistencyIndex: number;
-  volumeStability: number;
-  activeDaysRatio: number;
-  activeDays: number;
-  qualityStreak: number;
-  truePeakWindow: {
-    startHour: number;
-    endHour: number;
-    score: number;
-    minutes: number;
-    days: number;
-  } | null;
-  estimationCalibration: {
-    factor: number;
-    minFactor: number;
-    maxFactor: number;
-    sampleSize: number;
-  } | null;
-  churnRatio: number;
-  comprehensionLoad: number;
-  contextSwitchesPerHour: number;
-  interruptionsPerHour: number;
-  commits: number;
-  totalHours: number;
-  focusedHours: number;
-  meta: Record<string, MetricMeta>;
-  sessionCount: number;
-  sessionWindowDays: number;
-  archetypeMix: ArchetypeMix;
-  recentSessions: SessionSummary[];
-  baselineDays?: number;
-}
-
-const minutes = (ms: number) => Math.round(ms / 60000);
-const pct = (ratio: number) => `${Math.round(ratio * 100)}%`;
-const fmtHour = (h: number) => `${String(((h % 24) + 24) % 24).padStart(2, '0')}:00`;
-
-/** Human explanation of why a metric is being withheld. */
-const needMoreData = (meta?: MetricMeta) =>
-  meta ? `Needs more data — ${meta.sampleSize} of ${meta.unit} so far.` : 'Not enough data yet.';
-
-type Severity = 'warning' | 'info' | 'positive';
-
-/**
- * One rule-engine finding. `evidence` holds the numbers that tripped the rule,
- * so a claim can always be checked against the metric it came from.
- */
-interface Finding {
-  id: string;
-  category: string;
-  severity: Severity;
-  title: string;
-  detail: string;
-  evidence: Record<string, unknown>;
-}
-
-interface InsightsPayload {
-  findings: Finding[];
-  skipped: { id: string; reason: string; metrics?: string[]; message?: string }[];
-  totalFindings: number;
-}
-
-const SEVERITY_ICON: Record<Severity, string> = {
-  warning: '▲',
-  info: '●',
-  positive: '✓',
+const SEVERITY: Record<Severity, { label: string; tone: 'warn' | 'good' | 'accent' }> = {
+  warning: { label: 'worth a look', tone: 'warn' },
+  positive: { label: 'going well', tone: 'good' },
+  info: { label: 'note', tone: 'accent' },
 };
 
-export default function Insights() {
-  const { theme } = useTheme();
-  const [days, setDays] = useState(30);
+const minutes = (ms: number) => Math.round(ms / 60000);
 
-  // React Query (roadmap item 11): each window (7/30/90 days) is cached, so
-  // switching back to one already loaded is instant.
-  const timezone = new Date().getTimezoneOffset();
-  const query = useQuery({
-    queryKey: ['metrics', days, timezone],
-    queryFn: () => apiGet<{ metrics: Metrics; insights?: InsightsPayload }>(`/api/metrics?days=${days}&timezone=${timezone}`),
-  });
-  const metrics: Metrics | null = query.data?.metrics ?? null;
-  // Older backends do not send `insights`; the panel simply hides.
-  const insights: InsightsPayload | null = query.data?.insights ?? null;
-  const loading = query.isFetching;
-  const error: string | null = query.isError
-    ? (String(query.error?.message).includes(' 401') ? 'Please sign in again to view your insights.' : 'Could not load your insights.')
-    : null;
-  const fetchMetrics = () => { void query.refetch(); };
-
-  const card = {
-    backgroundColor: theme.colors.surface,
-    border: `1px solid ${theme.colors.primary}33`,
-  };
-
-  if (loading) {
-    return (
-      <div
-        className="flex items-center justify-center min-h-screen transition-colors duration-300"
-        style={{ backgroundColor: theme.colors.background }}
-      >
-        <div className="text-2xl animate-pulse font-semibold" style={{ color: theme.colors.text }}>
-          Working out your insights...
-        </div>
+/** A headline number that shows "—" and why, instead of a misleading figure. */
+function Stat({ title, meta, value, explain, baselineDays }: { title: string; meta?: MetricMeta; value: string; explain: ReactNode; baselineDays?: number }) {
+  const insufficient = meta?.confidence === 'insufficient';
+  const low = meta?.confidence === 'low';
+  const delta = meta?.delta;
+  return (
+    <Card className="flex flex-col gap-2 p-5">
+      <div className="flex items-center justify-between gap-2">
+        <h2 className="font-semibold text-ink">{title}</h2>
+        {low && <Pill title={`Based on only ${meta?.sampleSize} ${meta?.unit}.`}>early</Pill>}
       </div>
-    );
-  }
-
-  if (error || !metrics) {
-    return (
-      <div
-        className="flex flex-col items-center justify-center min-h-screen gap-4"
-        style={{ backgroundColor: theme.colors.background }}
-      >
-        <p style={{ color: theme.colors.text }}>{error ?? 'No insights available.'}</p>
-        <button
-          type="button"
-          onClick={fetchMetrics}
-          className="cursor-target px-4 py-2 rounded-lg"
-          style={{ color: theme.colors.text, border: `1px solid ${theme.colors.primary}55` }}
-        >
-          Try again
-        </button>
-      </div>
-    );
-  }
-
-  const meta = metrics.meta || {};
-  const ok = (key: string) => meta[key]?.confidence !== 'insufficient';
-  const isLow = (key: string) => meta[key]?.confidence === 'low';
-
-  /** A headline card. Renders "—" + a reason rather than a misleading number. */
-  const Stat = ({
-    icon,
-    title,
-    metricKey,
-    value,
-    explain,
-    wide = false,
-  }: {
-    icon: React.ReactNode;
-    title: string;
-    metricKey: string;
-    value: string;
-    explain: string;
-    wide?: boolean;
-  }) => (
-    <div className={`p-5 rounded-xl ${wide ? 'md:col-span-2' : ''}`} style={card}>
-      <div className="flex items-center gap-2 mb-1" style={{ color: theme.colors.primary }}>
-        {icon}
-        <h2 className="font-semibold">{title}</h2>
-        {isLow(metricKey) && (
-          <span
-            className="text-xs px-2 py-0.5 rounded-full"
-            style={{
-              color: theme.colors.textSecondary,
-              border: `1px solid ${theme.colors.textSecondary}55`,
-            }}
-            title={`Based on only ${meta[metricKey]?.sampleSize} ${meta[metricKey]?.unit}.`}
-          >
-            early
+      <div className="flex flex-wrap items-baseline gap-3">
+        <span className="display text-balance text-[48px]">{insufficient ? '—' : value}</span>
+        {!insufficient && typeof delta === 'number' && Math.abs(delta) >= 0.05 && (
+          <span className={`font-mono text-[12px] ${delta > 0 ? 'text-good-ink' : 'text-bad-ink'}`} title={`Your ${baselineDays ?? 90}-day usual is ${meta?.baseline}.`}>
+            {delta > 0 ? '▲' : '▼'} {Math.abs(Math.round(delta * 100))}% vs your usual
           </span>
         )}
       </div>
-      <div className="flex items-baseline gap-2 flex-wrap">
-        <p className="text-4xl font-bold" style={{ color: theme.colors.text }}>
-          {ok(metricKey) ? value : '—'}
-        </p>
-        {ok(metricKey) && <Trend metricKey={metricKey} />}
-      </div>
-      <p className="text-sm mt-2" style={{ color: theme.colors.textSecondary }}>
-        {ok(metricKey) ? explain : needMoreData(meta[metricKey])}
-      </p>
-    </div>
+      <p className="text-sm text-muted">{insufficient ? `Needs more data: ${meta?.sampleSize ?? 0} ${meta?.unit ?? ''} so far.` : explain}</p>
+    </Card>
   );
+}
 
-  /** Change against the user's own 90-day baseline, when one exists. */
-  const Trend = ({ metricKey }: { metricKey: string }) => {
-    const d = meta[metricKey]?.delta;
-    if (typeof d !== 'number' || Math.abs(d) < 0.05) return null;
-    const up = d > 0;
-    return (
-      <span
-        className="text-sm font-medium"
-        style={{ color: theme.colors.textSecondary }}
-        title={`Your ${metrics.baselineDays ?? 90}-day average is ${meta[metricKey]?.baseline}.`}
-      >
-        {up ? '▲' : '▼'} {Math.abs(Math.round(d * 100))}% vs your usual
-      </span>
-    );
-  };
+function FindingRow({ f }: { f: Finding }) {
+  const s = SEVERITY[f.severity];
+  return (
+    <li className="flex flex-col gap-1.5 border-t border-line py-4 first:border-0 first:pt-0">
+      <div className="flex flex-wrap items-center gap-2">
+        <Pill tone={s.tone}>{s.label}</Pill>
+        <span className="font-semibold text-ink">{f.title}</span>
+      </div>
+      <p className="text-sm text-muted">{f.detail}</p>
+    </li>
+  );
+}
 
-  const peak = metrics.truePeakWindow;
-  const cal = metrics.estimationCalibration;
-
-  const secondary = [
-    { label: 'Commits', key: null as string | null, value: String(metrics.commits) },
-    { label: 'Rework ratio', key: 'churnRatio', value: pct(metrics.churnRatio) },
-    { label: 'Time reading', key: 'comprehensionLoad', value: pct(metrics.comprehensionLoad) },
-    {
-      label: 'File switches / hr',
-      key: 'contextSwitchesPerHour',
-      value: String(metrics.contextSwitchesPerHour),
-    },
-    {
-      label: 'Interruptions / hr',
-      key: 'contextSwitchesPerHour',
-      value: String(metrics.interruptionsPerHour),
-    },
-    { label: 'Active days', key: null, value: `${metrics.activeDays} of ${metrics.windowDays}` },
-    { label: 'Focused hours', key: null, value: String(metrics.focusedHours) },
-    { label: 'Deep blocks', key: 'flowBlocks', value: String(metrics.flowBlocks.deepBlockCount) },
+function Body({ m, findings, skipped, total }: { m: Metrics; findings: Finding[]; skipped: number; total: number }) {
+  const meta = m.meta || {};
+  const ok = (k: string) => meta[k]?.confidence !== 'insufficient';
+  const peak = m.truePeakWindow;
+  const cal = m.estimationCalibration;
+  const secondary: [string, string | null, string][] = [
+    ['Commits', null, String(m.commits)],
+    ['Rework ratio', 'churnRatio', pct(m.churnRatio)],
+    ['Time reading', 'comprehensionLoad', pct(m.comprehensionLoad)],
+    ['File switches / hr', 'contextSwitchesPerHour', String(m.contextSwitchesPerHour)],
+    ['Interruptions / hr', 'contextSwitchesPerHour', String(m.interruptionsPerHour)],
+    ['Active days', null, `${m.activeDays} of ${m.windowDays}`],
+    ['Focused hours', null, String(m.focusedHours)],
+    ['Deep blocks', 'flowBlocks', String(m.flowBlocks.deepBlockCount)],
   ];
 
   return (
-    <div
-      className="min-h-screen p-6 transition-colors duration-300"
-      style={{ backgroundColor: theme.colors.background }}
-    >
-      <div className="max-w-6xl mx-auto">
-        <div className="flex items-center justify-between mb-2 flex-wrap gap-3">
-          <h1 className="text-3xl font-bold" style={{ color: theme.colors.text }}>
-            <GradientText animationSpeed={5}>Your Insights</GradientText>
-          </h1>
-          <div className="flex items-center gap-2">
-            <select
-              value={days}
-              onChange={(e) => setDays(Number(e.target.value))}
-              aria-label="Time window"
-              className="px-3 py-1 rounded-lg text-sm"
-              style={{
-                backgroundColor: theme.colors.surface,
-                color: theme.colors.text,
-                border: `1px solid ${theme.colors.primary}55`,
-              }}
-            >
-              <option value={7}>Last 7 days</option>
-              <option value={30}>Last 30 days</option>
-              <option value={90}>Last 90 days</option>
-            </select>
-            <button
-              type="button"
-              onClick={fetchMetrics}
-              aria-label="Refresh insights"
-              className="cursor-target p-2 rounded-lg"
-              style={{
-                color: theme.colors.textSecondary,
-                border: `1px solid ${theme.colors.primary}55`,
-              }}
-            >
-              <RefreshCw className="w-4 h-4" />
-            </button>
+    <>
+      <p className="mb-6 text-sm text-muted">
+        Based on {m.totalHours} hours across {plural(m.activeDays, 'active day')} in the last {m.windowDays} days. Anything shown as — does not have enough data behind it yet.
+      </p>
+
+      <Card className="mb-6 p-5">
+        <CardTitle aside="rules over the numbers below, not predictions">What stands out</CardTitle>
+        {findings.length ? (
+          <ul>
+            {findings.map((f) => (
+              <FindingRow key={f.id} f={f} />
+            ))}
+          </ul>
+        ) : (
+          <p className="text-sm text-muted">
+            Nothing worth flagging in this window.{skipped > 0 ? ` ${plural(skipped, 'check')} could not run yet for lack of data.` : ''}
+          </p>
+        )}
+        {total > findings.length && <p className="mt-3 font-mono text-xs text-muted">{total - findings.length} more not shown.</p>}
+      </Card>
+
+      <div className="mb-6 grid gap-4 [grid-template-columns:repeat(auto-fit,minmax(min(280px,100%),1fr))]">
+        <Stat title="Deep work" meta={meta.deepWorkRatio} baselineDays={m.baselineDays} value={pct(m.deepWorkRatio)} explain="Share of your working time that fell in unbroken stretches of 25 minutes or more." />
+        <Stat
+          title="Longest focus"
+          meta={meta.flowBlocks}
+          baselineDays={m.baselineDays}
+          value={`${minutes(m.flowBlocks.longestMs)} min`}
+          explain={`Your longest unbroken stretch. A typical block is ${minutes(m.flowBlocks.medianMs)} min, across ${plural(m.flowBlocks.blockCount, 'block')}.`}
+        />
+        <Stat
+          title="Steady volume"
+          meta={meta.volumeStability}
+          baselineDays={m.baselineDays}
+          value={pct(m.volumeStability)}
+          explain={m.volumeStability >= 0.6 ? 'On the days you code, you put in a similar amount of time.' : 'Your daily time swings a lot between the days you code.'}
+        />
+        <Stat
+          title="Coding cadence"
+          meta={meta.activeDaysRatio}
+          baselineDays={m.baselineDays}
+          value={pct(m.activeDaysRatio)}
+          explain={`You coded on ${m.activeDays} of the last ${m.windowDays} days.${m.qualityStreak > 0 ? ` Current streak with a deep block: ${plural(m.qualityStreak, 'day')}.` : ''}`}
+        />
+        <Stat
+          title="Peak window"
+          meta={meta.truePeakWindow}
+          value={peak ? `${hourLabel(peak.startHour)}–${hourLabel(peak.endHour)}` : '—'}
+          explain={peak ? `Your most productive two hours, scored on how much of what you wrote survived, seen on ${plural(peak.days, 'day')}.` : ''}
+        />
+        <Stat title="Rework" meta={meta.churnRatio} baselineDays={m.baselineDays} value={pct(m.churnRatio)} explain="Share of the lines you wrote that you deleted again within ten minutes. Some is normal; a sustained high figure points at a design problem." />
+        <Card className="flex flex-col gap-2 p-5">
+          <div className="flex items-center justify-between gap-2">
+            <h2 className="font-semibold text-ink">Estimation accuracy</h2>
+            {meta.estimationCalibration?.confidence === 'low' && <Pill>early</Pill>}
           </div>
-        </div>
-
-        <p className="mb-6 text-sm" style={{ color: theme.colors.textSecondary }}>
-          Based on {metrics.totalHours} hours tracked across {metrics.activeDays} active{' '}
-          {metrics.activeDays === 1 ? 'day' : 'days'} in the last {metrics.windowDays} days.
-          Anything marked <strong>—</strong> does not have enough data behind it yet.
-        </p>
-
-        {insights && insights.findings.length > 0 && (
-          <div className="mb-6 rounded-xl p-5" style={card}>
-            <h2 className="text-lg font-semibold mb-1" style={{ color: theme.colors.text }}>
-              What stands out
-            </h2>
-            <p className="text-xs mb-4" style={{ color: theme.colors.textSecondary }}>
-              Threshold rules read over the metrics below — not a prediction. Each one shows the
-              numbers it fired on.
-            </p>
-
-            <ul className="space-y-3">
-              {insights.findings.map((f) => {
-                // The palette has no semantic colours (28 themes, all
-                // primary/accent), so severity uses fixed hues on the rail only.
-                const rail =
-                  f.severity === 'warning' ? '#f59e0b'
-                    : f.severity === 'positive' ? '#10b981'
-                      : theme.colors.accent;
-                return (
-                  <li
-                    key={f.id}
-                    className="pl-3"
-                    style={{ borderLeft: `3px solid ${rail}` }}
-                  >
-                    <div className="flex items-start gap-2">
-                      <span aria-hidden="true" style={{ color: rail }} className="text-xs mt-1">
-                        {SEVERITY_ICON[f.severity]}
-                      </span>
-                      <div className="min-w-0">
-                        <p className="font-medium text-sm" style={{ color: theme.colors.text }}>
-                          {f.title}
-                        </p>
-                        <p className="text-sm mt-0.5" style={{ color: theme.colors.textSecondary }}>
-                          {f.detail}
-                        </p>
-                      </div>
-                    </div>
-                  </li>
-                );
-              })}
-            </ul>
-
-            {insights.totalFindings > insights.findings.length && (
-              <p className="text-xs mt-3" style={{ color: theme.colors.textSecondary }}>
-                {insights.totalFindings - insights.findings.length} more not shown.
+          {cal ? (
+            <>
+              <span className="display text-balance text-[48px]">{cal.factor}×</span>
+              <p className="text-sm text-muted">
+                {cal.factor > 1.1 ? `You take about ${cal.factor}× longer than you estimate.` : cal.factor < 0.9 ? 'You finish goals faster than you estimate.' : 'Your estimates are close to reality.'}{' '}
+                {cal.sampleSize > 1 ? `Median across ${cal.sampleSize} completed goals, from ${cal.minFactor}× to ${cal.maxFactor}×.` : 'Based on one completed goal: treat it as a first data point.'}
               </p>
-            )}
-          </div>
-        )}
+            </>
+          ) : (
+            <p className="text-sm text-muted">Set a language or project on a goal and mark it complete from the Goals page. This compares your estimate with the hours you actually logged.</p>
+          )}
+        </Card>
+      </div>
 
-        {insights && insights.findings.length === 0 && insights.skipped.length > 0 && (
-          <div className="mb-6 rounded-xl p-5" style={card}>
-            <h2 className="text-lg font-semibold mb-1" style={{ color: theme.colors.text }}>
-              What stands out
-            </h2>
-            <p className="text-sm" style={{ color: theme.colors.textSecondary }}>
-              Nothing worth flagging in this window. {insights.skipped.length} check
-              {insights.skipped.length === 1 ? '' : 's'} could not run yet for lack of data — keep
-              coding with the extension installed and they will start to fill in.
-            </p>
-          </div>
-        )}
+      <div className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-4">
+        {secondary.map(([label, key, value]) => (
+          <Card key={label} className="p-4">
+            <div className="display text-balance text-[32px]">{key && !ok(key) ? '—' : value}</div>
+            <div className="mt-1 text-xs text-muted">{label}</div>
+          </Card>
+        ))}
+      </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <Stat
-            icon={<Brain className="w-5 h-5" />}
-            title="Deep work"
-            metricKey="deepWorkRatio"
-            value={pct(metrics.deepWorkRatio)}
-            explain="Share of the time you were actually working that fell in unbroken stretches of 25 minutes or more."
-          />
-
-          <Stat
-            icon={<Timer className="w-5 h-5" />}
-            title="Flow blocks"
-            metricKey="flowBlocks"
-            value={`${minutes(metrics.flowBlocks.longestMs)} min`}
-            explain={`Longest unbroken stretch. Typical block ${minutes(
-              metrics.flowBlocks.medianMs
-            )} min across ${metrics.flowBlocks.blockCount} blocks.`}
-          />
-
-          <Stat
-            icon={<Activity className="w-5 h-5" />}
-            title="Steady volume"
-            metricKey="volumeStability"
-            value={pct(metrics.volumeStability)}
-            explain={
-              metrics.volumeStability >= 0.6
-                ? 'On the days you code, you put in a similar amount of time.'
-                : 'Your daily volume swings a lot between the days you code.'
-            }
-          />
-
-          <Stat
-            icon={<Flame className="w-5 h-5" />}
-            title="Coding cadence"
-            metricKey="activeDaysRatio"
-            value={pct(metrics.activeDaysRatio)}
-            explain={`You coded on ${metrics.activeDays} of the last ${metrics.windowDays} days.${
-              metrics.qualityStreak > 0
-                ? ` Current streak with a deep block: ${metrics.qualityStreak} ${
-                    metrics.qualityStreak === 1 ? 'day' : 'days'
-                  }.`
-                : ''
-            }`}
-          />
-
-          <Stat
-            icon={<Sunrise className="w-5 h-5" />}
-            title="Peak window"
-            metricKey="truePeakWindow"
-            value={peak ? `${fmtHour(peak.startHour)}–${fmtHour(peak.endHour)}` : '—'}
-            explain={
-              peak
-                ? `Your most productive two hours, scored on how much of what you wrote survived rather than on how busy you were. Seen on ${peak.days} separate days.`
-                : ''
-            }
-          />
-
-          <Stat
-            icon={<Repeat className="w-5 h-5" />}
-            title="Rework"
-            metricKey="churnRatio"
-            value={pct(metrics.churnRatio)}
-            explain="Share of the lines you wrote that you deleted again within ten minutes. Some rework is normal; a sustained high figure usually points at a design problem."
-          />
-
-          <div className="p-5 rounded-xl md:col-span-2" style={card}>
-            <div className="flex items-center gap-2 mb-1" style={{ color: theme.colors.primary }}>
-              <Target className="w-5 h-5" />
-              <h2 className="font-semibold">Estimation accuracy</h2>
-              {isLow('estimationCalibration') && (
-                <span
-                  className="text-xs px-2 py-0.5 rounded-full"
-                  style={{
-                    color: theme.colors.textSecondary,
-                    border: `1px solid ${theme.colors.textSecondary}55`,
-                  }}
-                >
-                  early
+      {m.sessionCount > 0 && (
+        <Card className="mb-6 p-5">
+          <CardTitle aside={`last ${m.sessionWindowDays} days`}>How you worked: {plural(m.sessionCount, 'session')}</CardTitle>
+          <div className="mb-4 flex flex-wrap gap-2">
+            {Object.entries(m.archetypeMix)
+              .filter(([, v]) => v.sessions > 0)
+              .sort((a, b) => b[1].minutes - a[1].minutes)
+              .map(([name, v]) => (
+                <span key={name} className="rounded-full border border-line bg-surface-2 px-3 py-1 text-sm">
+                  {ARCHETYPE[name] ?? name}: {v.sessions} <span className="text-muted">({v.minutes} min)</span>
                 </span>
-              )}
-            </div>
-            {cal ? (
-              <>
-                <p className="text-4xl font-bold" style={{ color: theme.colors.text }}>
-                  {cal.factor}×
-                </p>
-                <p className="text-sm mt-2" style={{ color: theme.colors.textSecondary }}>
-                  {cal.factor > 1.1
-                    ? `You take about ${cal.factor}× longer than you estimate.`
-                    : cal.factor < 0.9
-                    ? 'You finish goals faster than you estimate.'
-                    : 'Your estimates are close to reality.'}{' '}
-                  {cal.sampleSize > 1
-                    ? `Median across ${cal.sampleSize} completed goals, ranging ${cal.minFactor}×–${cal.maxFactor}×.`
-                    : 'Based on one completed goal, so treat it as a first data point.'}
-                </p>
-              </>
-            ) : (
-              <p className="text-sm mt-2" style={{ color: theme.colors.textSecondary }}>
-                Set a tech stack on a goal, then mark it complete from the Goals page. This will
-                compare your estimate against the hours actually logged for it while it was open.
-              </p>
-            )}
+              ))}
           </div>
-        </div>
+          <ul className="flex flex-col gap-2">
+            {m.recentSessions.slice(0, 6).map((s) => (
+              <li key={s.startMs} className="flex flex-wrap items-baseline justify-between gap-2 rounded-xl bg-surface-2 px-3 py-2.5">
+                <span className="text-sm">
+                  {new Date(s.startMs).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })} · {s.minutes} min ·{' '}
+                  <strong>{ARCHETYPE[s.archetype] ?? s.archetype}</strong>
+                </span>
+                <span className="text-xs text-muted">{s.reason}</span>
+              </li>
+            ))}
+          </ul>
+          <p className="mt-3 text-xs text-muted">
+            Sessions are grouped from your activity with a 30-minute break between them. Activity is recorded in ten-minute blocks, so times are accurate to about ten minutes.
+          </p>
+        </Card>
+      )}
 
-        <div className="mt-6 grid grid-cols-2 md:grid-cols-4 gap-4">
-          {secondary.map((item) => (
-            <div key={item.label} className="p-4 rounded-xl" style={card}>
-              <p className="text-2xl font-bold" style={{ color: theme.colors.text }}>
-                {item.key && !ok(item.key) ? '—' : item.value}
-              </p>
-              <p className="text-xs mt-1" style={{ color: theme.colors.textSecondary }}>
-                {item.label}
-              </p>
-            </div>
+      <p className="text-xs text-muted">These figures are private to you and never appear on a board. Times are in your time zone.</p>
+    </>
+  );
+}
+
+/** Statistics over your own history, each with a confidence level (not AI). */
+export default function Insights() {
+  const [days, setDays] = useState(30);
+  const q = useMetrics(days);
+  return (
+    <>
+      <PageHeader
+        eyebrow="Private to you"
+        title="Insights"
+        actions={
+          <>
+            <Segmented
+              label="Window"
+              value={days}
+              onChange={setDays}
+              options={[
+                { value: 7, label: '7 days' },
+                { value: 30, label: '30 days' },
+                { value: 90, label: '90 days' },
+              ]}
+            />
+            <Button aria-label="Refresh insights" onClick={() => q.refetch()} icon={<RotateCw className={`h-4 w-4 ${q.isFetching ? 'animate-spin' : ''}`} aria-hidden="true" />} />
+          </>
+        }
+      >
+        Plain statistics over your own coding, compared with your own usual. Every number can be checked.
+      </PageHeader>
+      {q.isPending ? (
+        <div className="grid gap-4 [grid-template-columns:repeat(auto-fit,minmax(min(280px,100%),1fr))]">
+          {Array.from({ length: 6 }, (_, i) => (
+            <Skeleton key={i} className="h-40" />
           ))}
         </div>
-
-        {metrics.sessionCount > 0 && (
-          <div className="mt-6 p-5 rounded-xl" style={card}>
-            <div className="flex items-center gap-2 mb-3" style={{ color: theme.colors.primary }}>
-              <Layers className="w-5 h-5" />
-              <h2 className="font-semibold">
-                How you worked — {metrics.sessionCount}{' '}
-                {metrics.sessionCount === 1 ? 'session' : 'sessions'} over the last{' '}
-                {metrics.sessionWindowDays} days
-              </h2>
-            </div>
-
-            <div className="flex flex-wrap gap-2 mb-4">
-              {Object.entries(metrics.archetypeMix)
-                .filter(([, v]) => v.sessions > 0)
-                .sort((a, b) => b[1].minutes - a[1].minutes)
-                .map(([name, v]) => (
-                  <span
-                    key={name}
-                    className="px-3 py-1 rounded-full text-xs"
-                    style={{
-                      backgroundColor: `${theme.colors.primary}18`,
-                      color: theme.colors.text,
-                      border: `1px solid ${theme.colors.primary}44`,
-                    }}
-                  >
-                    {ARCHETYPE_LABELS[name] ?? name}: {v.sessions} ({v.minutes} min)
-                  </span>
-                ))}
-            </div>
-
-            <div className="space-y-2">
-              {metrics.recentSessions.slice(0, 6).map((s) => (
-                <div
-                  key={s.startMs}
-                  className="flex flex-wrap items-baseline justify-between gap-2 px-3 py-2 rounded-lg"
-                  style={{ backgroundColor: `${theme.colors.surface}80` }}
-                >
-                  <span className="text-sm" style={{ color: theme.colors.text }}>
-                    {new Date(s.startMs).toLocaleString([], {
-                      month: 'short',
-                      day: 'numeric',
-                      hour: '2-digit',
-                      minute: '2-digit',
-                    })}{' '}
-                    · {s.minutes} min · <strong>{ARCHETYPE_LABELS[s.archetype] ?? s.archetype}</strong>
-                  </span>
-                  <span className="text-xs" style={{ color: theme.colors.textSecondary }}>
-                    {s.reason}
-                  </span>
-                </div>
-              ))}
-            </div>
-
-            <p className="text-xs mt-3" style={{ color: theme.colors.textSecondary }}>
-              Sessions are grouped from your activity with a 30-minute break between them.
-              Because activity is recorded in 10-minute blocks, start and end times are accurate
-              to about ±10 minutes.
-            </p>
-          </div>
-        )}
-
-        <p className="mt-6 text-xs" style={{ color: theme.colors.textSecondary }}>
-          These figures are private to you and are never shown on the leaderboard. Times are shown
-          in your local timezone.
-        </p>
-      </div>
-    </div>
+      ) : q.isError ? (
+        <ErrorBox message={errorText(q.error)} onRetry={() => q.refetch()} />
+      ) : (
+        <Body m={q.data.metrics} findings={q.data.insights?.findings ?? []} skipped={q.data.insights?.skipped.length ?? 0} total={q.data.insights?.totalFindings ?? 0} />
+      )}
+    </>
   );
 }

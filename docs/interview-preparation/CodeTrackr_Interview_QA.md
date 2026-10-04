@@ -17,8 +17,8 @@
 >
 > This document was written before the October 2026 roadmap (`docs/ROADMAP_2026-10.md`). That work
 > is **deployed (2026-10-03, commit `11040c5`) and Google login works on the live site**. Not done
-> yet: the live data migrations (so the leaderboard still uses the old scan) and publishing extension
-> **2.5.0** (2.4.0 is live) — say "deployed", but "built" for the extension's new features. **Wherever the text below disagrees with this box, this box wins.**
+> yet: the live data migrations (so the leaderboard still uses the old scan). Extension **2.5.0** is
+> **live on the Marketplace since 2026-10-04** (Sign In, offline queue, keychain), so "live" is right for those too. **Wherever the text below disagrees with this box, this box wins.**
 > Up-to-date short versions: `CodeTrackr_Interview_Cheat_Sheet.md` (rewritten) and
 > `docs/INTERVIEW_PREP.md`. Measured numbers: `docs/BENCHMARKS.md`.
 >
@@ -30,14 +30,15 @@
 > | Duplicates / offline | no idempotency; memory-only buffer, lost on restart | `flushId` receipts (applied once); persisted outbox in `globalState`, FIFO, survives restart (M-30 fixed) |
 > | Analytics | `find()` then JS reduce (M-1) | daily/weekly from one `$facet` pipeline, proven equal to the old code by an oracle test |
 > | Write reduction | "~10× fewer writes" | **measured**: 4.9× fewer documents, 12.7× less data at the 2-minute cadence (19.6× / 51× vs the old 30 s); same throughput |
-> | Tests | 18 suites / 296; nothing against a real DB | unit **26 suites / 369**, **36 integration tests** (supertest + in-memory MongoDB, incl. CORS preflight), extension **6 / 70**; no frontend tests |
+> | Tests | 18 suites / 296; nothing against a real DB | unit **27 suites / 375**, **39 integration tests** (supertest + in-memory MongoDB, incl. CORS preflight), extension **6 / 70**, **frontend 51** (Vitest + Testing Library, run in IST) |
 > | `userId` type | String on activities (M-6) | ObjectId migration in progress (reads accept both; script converts) |
 > | Teams | orphaned page + live API | deleted |
 > | Groups | no admin powers | creator can rename / remove members; ownership passes on when the creator leaves |
 > | Ops | no Docker, no CD, console logs | Dockerfile + CI health check; **`docker compose up` runs MongoDB + API + website locally** (verified); deploy-on-green (off until a secret), JSON logs with request ids, optional Sentry that receives **every** `log.error` (requests, route 500s, jobs, crashes) |
 > | Bugs found while building | — | **H-23** CORS lacked PATCH → goal completion and mark-as-read never worked in a browser; M-31 goal window; M-32 weekly window; H-22 IST "today"; email leaks M-28/M-29 |
 > | Web login / API address | SPA calls Render directly (`VITE_API_URL`); login cookie is cross-site (`SameSite=None`); rate limits per IP | **Vercel forwards `/api` + `/auth` to Render**; the production site calls its own address (`config.ts`: `API_URL = ''`), so the cookie is first-party (still `SameSite=None` during the switch); Google's callback goes through the website; browser-facing limits per user/session (`rateLimitKeys.js`). **Live 2026-10-03** |
-> | Still open | — | H-19 login fix **live** (Vercel forwards `/api` + `/auth`; Google login works on the deployed site; Safari/private-window check pending); a failed Google sign-in shows raw JSON (M-33); client-chosen timestamps, no web refresh token. H-20 fixed (limits per user/session) |
+> | Website (redesigned 2026-10-04, **built, not deployed**) | 3D background, glitch text, custom cursor, 28 themes; 1,150-line Dashboard; Chart.js; no public page; no frontend tests | "The weekly race": an F1-style **standings tower** (position, one cell per day, gap), race chart, landing + guide + privacy pages, invite links `/join/:id`, dark + light themes as CSS variables; hand-made SVG charts (no chart library); every page lazy-loaded: landing first visit **748 → 359 kB (232 → 114 kB gzip)**; 51 Vitest tests; found + fixed: goals saved a day early in India (M-34); sign-out landed on the sign-in page (D-37). Spec `docs/specs/2026-10-04-frontend-redesign.md`, D-31..D-36 |
+> | Still open | — | H-19 login fix **live** (Vercel forwards `/api` + `/auth`; Google login works on the deployed site; Safari/private-window check pending); a failed Google sign-in shows raw JSON (M-33); goal progress misses the deadline day (M-35); no self-serve data deletion (L-14); client-chosen timestamps, no web refresh token; the API still runs end-of-life Node 20 (L-15). H-20 fixed (limits per user/session) |
 
 ---
 
@@ -535,6 +536,9 @@
 > `/api/user/profile` on mount and only renders the app if that's a 200. Pages are Dashboard,
 > Insights, Leaderboard, Goals, Groups, Profile, Onboarding, Login. State is local `useState`
 > plus prop-drilling the `user` object; the only Context is `ThemeContext` for the 28 themes.
+> `[2026-10-04]` Redesigned: public pages (landing, guide, privacy, invite links) render without
+> waiting for the API; signed-in pages sit in an app shell; every page is lazy-loaded; reads go
+> through typed React Query hooks; two themes (dark, light) as CSS variables.
 
 **G2. How do you manage server state?**
 > Honestly, badly — every page refetches on navigation with `cache:'no-cache'`.
@@ -575,6 +579,9 @@
 **G9. Chart.js vs Recharts — which would you pick now?**
 > Recharts. It's declarative React components, no global registration, and easier to theme.
 > Chart.js is canvas — not accessible, hard to server-render.
+> `[2026-10-04]` In the redesign I chose neither: every chart is bars, lines or a grid, so seven
+> small SVG/HTML components do it. They read the CSS-variable theme, render in jsdom for tests,
+> label the data directly and carry text summaries for screen readers (D-32).
 
 **G10. Any bugs in the frontend you know about?**
 > Two real ones now (the "Repeated Failures" panel was wired to real data 2026-09-09). Historically the panel rendered hardcoded mock
@@ -1291,13 +1298,14 @@
 > static scan that fails if an auth-protected route loses its middleware.
 
 **P9. What are you weakest at in this project?**
-> *(Updated 2026-10-03.)* Frontend testing — the backend now has 36 integration tests against a
-> real (in-memory) database, but the React app has none. And deployment: the October work is built
+> *(Updated 2026-10-04.)* End-to-end testing — there are backend unit and integration tests and,
+> since the redesign, 51 frontend Vitest tests, but nothing drives a real browser through a whole
+> flow yet (Playwright is next). And deployment: the October work is built
 > and tested but still waiting on the live migrations.
 
 ---
 
-## Q. The October 2026 work (added 2026-10-03 — deployed 2026-10-03; migrations + extension 2.5.0 pending)
+## Q. The October 2026 work (added 2026-10-03 — deployed 2026-10-03; extension 2.5.0 live 2026-10-04; migrations pending)
 
 **Q0. Tell me about a production issue you debugged.**
 Going live with the login fix. First Google refused with `redirect_uri_mismatch`: the callback
@@ -1348,7 +1356,7 @@ back to the login page instead of showing JSON (logged as M-33).
 > paces itself still gets an hour per real hour — you can't make client telemetry unforgeable.
 
 **Q8. What happens offline now?**
-> `[ACTUAL]` (extension 2.5.0, not yet published) Every upload is saved to VS Code's `globalState`
+> `[ACTUAL]` (extension 2.5.0, live since 2026-10-04) Every upload is saved to VS Code's `globalState`
 > before sending and drained oldest first. A retry keeps its `flushId`, and the server's receipt
 > table makes it count once.
 
@@ -1397,4 +1405,33 @@ back to the login page instead of showing JSON (logged as M-33).
 > throwaway MongoDB. `docker compose up` starts MongoDB, the API and the website with demo data
 > for development. Production on Render still runs Node directly — I'd switch to the image only
 > with a reason, like moving off Render.
+
+**Q15. Why did you redesign the website, and how did you decide what it looks like?**
+> `[ACTUAL]` The old site had a 3D background, glitch text, a custom cursor and 28 themes, a
+> 1,150-line dashboard, and no page explaining the product. The product exists for friendly
+> competition, so the design is built on one idea, "the weekly race": an F1-style standings tower
+> with one cell per day (purple for the best in the group that day, green for a personal best) and
+> the gap to the leader. I showed a proposal with mockups and chart styles before writing code.
+
+**Q16. How did you make it faster, and how do you know?**
+> `[ACTUAL]` I measured the build: one 712 kB JavaScript file for everyone. Removing the 3D,
+> animation and chart libraries and lazy-loading every page cut the landing page's first visit to
+> 359 kB (114 kB gzipped), about half. Public pages also stopped waiting for the API, because the
+> free server takes about 20 seconds to wake.
+
+**Q17. Tell me about a frontend bug you found.**
+> `[ACTUAL]` Goals were saved a day early in India: the old calendar did
+> `new Date(y, m, d).toISOString()`, and local midnight in India is the previous day in UTC. Now
+> the picked date is sent as a local `YYYY-MM-DD`, and the frontend tests run in `Asia/Kolkata`.
+> **Follow-up — why pin the time zone?** Both date bugs in this project only appear east of UTC;
+> CI machines run in UTC, so without it the tests would pass and the bug would ship.
+> **Follow-up — another one?** Sign-out cleared the signed-in user, then navigated home. React drew
+> the current page first, now "signed out", so its guard sent you to `/login` and remembered that
+> page for whoever signed in next. Sign-out now ends the session and does a full page load of `/`:
+> no race, and nothing from the old session stays in memory (D-37). A routing test covers it.
+
+**Q18. How is the animated tower accessible?**
+> `[ACTUAL]` It is an ordered list in rank order with a spoken summary per row ("2nd, Soham, you,
+> +30m"). The slide is a FLIP animation with the Web Animations API, skipped entirely when the
+> system asks for reduced motion.
 

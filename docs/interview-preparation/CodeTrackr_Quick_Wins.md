@@ -1,6 +1,6 @@
 # CodeTrackr — Quick Wins for Interview Impact
 
-> **2026-10-03:** items 9, 10, 13 and 24 are now built too (October roadmap, deployed 2026-10-03; extension 2.5.0 not yet published).
+> **2026-10-03:** items 9, 10, 13 and 24 are now built too (October roadmap, deployed 2026-10-03; extension 2.5.0 live since 2026-10-04).
 > Since 2026-10-03 the per-IP limits in item 3 are per user / per session (H-20). What is built
 > and measured is summarised in `docs/ROADMAP_2026-10.md` and `docs/BENCHMARKS.md`.
 

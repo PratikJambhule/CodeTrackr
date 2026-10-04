@@ -1,7 +1,8 @@
 # CodeTrackr — Decisions
 
 One entry per decision: **what** was chosen, **why**, the **alternatives** rejected, and the
-**trade-offs** accepted. Newest decisions are at the bottom. Created 2026-10-03 by collecting
+**trade-offs** accepted. Numbers follow the order decisions were made (D-01 is the oldest); from
+D-38 down to D-16 the October 2026 entries are listed newest first. Created 2026-10-03 by collecting
 decisions that were previously spread across the session log, specs and interview docs; dates
 are when the decision was made.
 
@@ -177,6 +178,119 @@ are when the decision was made.
   yet); OpenTelemetry tracing (one service, no downstream calls to trace).
 - **Trade-off:** synchronous `stdout.write` per line; fine at this traffic, the first thing to
   swap for pino if log volume grows.
+
+## D-38. The website's tooling runs on Node 24; the API stays on Node 20 for now (2026-10-04)
+
+- **What:** the CI frontend job and `frontend/Dockerfile.dev` use Node 24 (the current LTS, the same
+  as the development laptop). The backend and extension jobs and `backend/Dockerfile` stay on Node 20.
+- **Why:** Vitest 5 and jest-dom 7 declare Node 22 or newer. On Node 20 npm prints `EBADENGINE` and
+  the tools work only because nothing they use is missing yet (all 51 tests passed on 20.20 in a
+  clean container on 2026-10-04), so any patch release could break CI. Node 20 itself has been out
+  of support since April 2026.
+- **Rejected:** pinning older Vitest and jest-dom that still support Node 20 (holding the tools back
+  to suit an end-of-life runtime); moving the API to Node 24 in the same change (that changes what
+  runs in production on Render, so it gets its own change, test run and redeploy: L-15).
+- **Trade-off:** CI runs two Node versions until L-15 is done.
+
+## D-37. Sign-out reloads the page instead of navigating inside the app (2026-10-04)
+
+- **What:** Sign out calls `POST /auth/logout`, then `window.location.replace('/')`: a fresh page
+  load of the landing page (`frontend/src/components/layout/signOut.ts`).
+- **Why:** The first version cleared the signed-in user from the React Query cache and then
+  navigated to `/`. React drew the current page first with no user (the cache update is urgent,
+  React Router's navigation is a transition), so that page's sign-in guard remembered it and sent
+  the person to `/login`; whoever signed in next on that tab would have been sent to the previous
+  user's page. A full page load has no such race and guarantees nothing from the old session
+  (cached data, component state) stays in memory, which matters on shared lab computers. Found
+  while checking the redesign in a browser; a routing test covers it.
+- **Rejected:** ordering tricks (navigate first and clear later, or clear inside a transition):
+  they depend on React's scheduling and on how fast the landing page's chunk loads. A "signing
+  out" flag read by the guard: one more piece of state to keep right.
+- **Trade-off:** sign-out reloads the app (the JavaScript comes from the browser cache, so it is
+  quick). In local `AUTH_BYPASS` mode the reload signs the demo user straight back in.
+
+## D-36. Sign In is the main way to connect VS Code; the profile key moves to "Advanced" (2026-10-04)
+
+- **What:** Onboarding, Profile, the guide and the landing page lead with **CodeTrackr: Sign In**.
+  Onboarding no longer creates a profile API key by itself; the key (create, show once, copy) sits
+  in a collapsed "Advanced: connect with an API key" section on Profile.
+- **Why:** Sign In gives each computer its own expiring, revocable key and nobody copies secrets by
+  hand (D-24). Showing a key first taught people the old way.
+- **Rejected:** removing the profile key now. Everyone on extension 2.4.0 connects with one and 2.4.0
+  has no Sign In; that removal is parked until 2.5.0 is widely installed (docs/SESSION_STATE.md).
+- **Trade-off:** two ways to connect still exist, so the docs explain both.
+
+## D-35. Backend additions for the redesign: one history pipeline, day cells in the viewer's time zone, an invite preview (2026-10-04)
+
+- **What:** `GET /api/analytics/history/:userId` (one `$facet` over 365 local days: seconds per day,
+  per hour of day and per project over 7 days, commits over 7 days); a `daily` field on group details
+  (seconds per member per local day of the window, or the last 7 days; none beyond 62 days); and
+  `GET /api/groups/:id/preview` for invite links. All additive; integration-tested.
+- **Why:** the year heatmap, "when you code", the tower's day cells, the race chart and invite links
+  had no data source. The old `/summary` endpoint groups by UTC day and scans all history, so a
+  late-night session in India landed on the wrong day.
+- **Rejected:** one endpoint per chart (more round trips, more code); computing day cells on the
+  client from per-upload data (far more data over the wire); each member's own time zone for day
+  cells (a board is read by one person, and mixed boundaries would make cells disagree with each
+  other); a public, unauthenticated preview (it would list every group to anyone).
+- **Trade-off:** a friend in another time zone sees day boundaries in their own zone, so two people
+  can see a session on different days. The preview shows a group's name to any signed-in user
+  with the link, which Discover already did.
+
+## D-34. Frontend tests: Vitest + Testing Library in jsdom, pinned to India's time zone (2026-10-04)
+
+- **What:** `npm test` in `frontend/` runs Vitest with jsdom and Testing Library. Pure logic (local
+  dates, standings, day cells, label layout, heatmap levels, streaks) has unit tests; components are
+  tested through what a person or screen reader gets (an ordered list read as "2nd, Soham (you),
+  +30m"); routing is tested with the API mocked. `TZ=Asia/Kolkata` for every run. Runs in CI.
+- **Why:** "no frontend tests" was a known gap. Both date bugs found in this project (H-22 and the
+  goal-date bug) only happen east of UTC, so the tests run where the users are.
+- **Rejected:** Jest (needs its own TypeScript and ESM setup alongside Vite); Playwright end-to-end
+  tests now (much slower and needs a running API; the right next step, not the first).
+- **Trade-off:** jsdom has no layout or animation, so visual checks (overflow at 320 px, the slide
+  animation, contrast) were done by hand in a browser and recorded in PROGRESS.
+
+## D-33. Every page is its own chunk (2026-10-04)
+
+- **What:** pages load with `React.lazy`, each layout wraps its outlet in `Suspense` with a
+  skeleton, and public pages render without waiting for the sign-in check.
+- **Why:** the old site shipped one 712 kB JavaScript file to everyone, including people reading
+  the landing page. Measured after: the landing page's first visit is 359 kB (114 kB gzipped), down
+  about half (see PROGRESS 2026-10-04).
+- **Rejected:** manual `manualChunks` tuning (more config for a small extra gain).
+- **Trade-off:** the first visit to each signed-in page fetches a small extra file (a skeleton shows
+  briefly). The shared core (React, router, React Query) is still 307 kB.
+
+## D-32. Hand-made SVG/HTML charts instead of Chart.js (2026-10-04)
+
+- **What:** seven small components (`StandingsTower`, `RaceChart`, `Bars`, `YearHeatmap`,
+  `HourStrip`, `Ring`, `Sparkline`) replace Chart.js, react-chartjs-2 and the datalabels plugin.
+- **Why:** every chart here is bars, lines or a grid. SVG/HTML reads the theme's CSS variables
+  directly, so dark and light need no JavaScript re-styling; it renders in jsdom, so it can be
+  tested; labels can sit on the data (names at line ends, pushed apart so they never overlap); and
+  each chart can carry a text summary or a hidden data table for screen readers.
+- **Rejected:** Chart.js (canvas: no CSS variables, nothing for tests or screen readers to read,
+  and the largest dependency after the 3D libraries); Recharts (another library to learn and size
+  for the same few chart types).
+- **Trade-off:** we maintain tooltips, axes and resizing ourselves (about 600 lines); adding an
+  unusual chart type later means writing it.
+
+## D-31. Website redesign: "the weekly race" (2026-10-04)
+
+- **What:** a new design built around one idea, every week is a race between friends. The
+  signature is a standings tower borrowed from F1 timing (position, name, one cell per day coloured
+  like timing sectors, gap to the leader). Dark by default with a full light theme; three typefaces
+  with one job each (Big Shoulders Display for headings and positions, Instrument Sans for text,
+  Martian Mono for numbers); one animated moment (rows sliding into new positions); new public pages
+  (landing, guide, privacy) and invite links. Spec: `docs/specs/2026-10-04-frontend-redesign.md`;
+  the user approved the proposal board before any code changed.
+- **Why:** the user found the old site flashy (3D background, glitch text, custom cursor, 28
+  themes), confusing (a 1,150-line dashboard) and generic, and there was no page explaining the
+  product. The product exists for friendly competition, so the competition leads.
+- **Rejected:** a clean, quiet dev-tool look (the user chose "playful and competitive"); keeping the
+  28 themes (two done properly instead); restyling only (the layouts were the problem).
+- **Trade-off:** the typefaces load from Google Fonts (a third-party request; system fonts are the
+  fallback). A teammate's `THEME_USER_GUIDE.md` now describes a theme system that no longer exists.
 
 ## D-30. Report every `log.error` to Sentry, from one place (2026-10-04)
 

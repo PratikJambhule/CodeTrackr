@@ -1,109 +1,112 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { MonitorSmartphone, CheckCircle } from 'lucide-react';
-import { useTheme } from '../contexts/ThemeContext';
-import { API_URL } from '../config';
+import { useQueryClient } from '@tanstack/react-query';
+import { CheckCircle2, Laptop } from 'lucide-react';
+import { ApiError, apiGet, apiSend, errorText } from '../api';
+import { Button, ButtonLink, Card } from '../components/ui';
 
 /**
- * Approve a VS Code sign-in (roadmap item 13). The extension shows a code like
- * WXYZ-2345 and opens this page; approving it gives that VS Code its own
- * revocable key, so nobody has to copy an API key by hand.
+ * Approve a VS Code sign-in (device flow, roadmap item 13). The extension shows
+ * a code like WXYZ-2345 and opens this page; approving gives that VS Code its
+ * own key, so nobody copies a key by hand.
  */
 export default function Device() {
-  const { theme } = useTheme();
   const [params] = useSearchParams();
-  const [code, setCode] = useState(params.get('code') || '');
+  const qc = useQueryClient();
+  const [code, setCode] = useState((params.get('code') || '').toUpperCase());
   const [clientName, setClientName] = useState<string | null>(null);
   const [message, setMessage] = useState('');
   const [approved, setApproved] = useState(false);
   const [busy, setBusy] = useState(false);
 
-  // Look the code up so the user sees which device they are approving.
+  // Look the code up so the person sees which device they are approving.
   useEffect(() => {
     setClientName(null);
     setMessage('');
     const compact = code.replace(/[\s-]/g, '');
     if (compact.length !== 8) return;
     let cancelled = false;
-    fetch(`${API_URL}/api/device/pending/${encodeURIComponent(compact)}`, { credentials: 'include' })
-      .then(async (res) => {
-        const data = await res.json().catch(() => ({}));
+    apiGet<{ clientName: string }>(`/api/device/pending/${encodeURIComponent(compact)}`)
+      .then((d) => !cancelled && setClientName(d.clientName))
+      .catch((err) => {
         if (cancelled) return;
-        if (res.ok) setClientName(data.clientName);
-        else setMessage(data.message || 'That code is not valid or has expired.');
-      })
-      .catch(() => { if (!cancelled) setMessage('Could not reach the server.'); });
-    return () => { cancelled = true; };
+        setMessage(err instanceof ApiError && err.status < 500 ? 'That code is not valid or has expired. Run CodeTrackr: Sign In again for a new one.' : errorText(err));
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [code]);
 
-  const approve = async () => {
+  const approve = async (e: FormEvent) => {
+    e.preventDefault();
     setBusy(true);
     setMessage('');
     try {
-      const res = await fetch(`${API_URL}/api/device/approve`, {
-        method: 'POST',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userCode: code }),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (res.ok) setApproved(true);
-      else setMessage(data.message || 'Could not approve that code.');
-    } catch {
-      setMessage('Could not reach the server.');
+      await apiSend('POST', '/api/device/approve', { userCode: code });
+      setApproved(true);
+      void qc.invalidateQueries({ queryKey: ['devices'] });
+    } catch (err) {
+      setMessage(errorText(err, 'Could not approve that code.'));
     } finally {
       setBusy(false);
     }
   };
 
-  const card = { backgroundColor: `${theme.colors.surface}cc`, borderColor: `${theme.colors.primary}40` };
-
   return (
-    <div className="min-h-screen py-12 px-4" style={{ backgroundColor: theme.colors.background }}>
-      <div className="max-w-md mx-auto rounded-2xl p-8 border" style={card}>
-        <div className="flex items-center gap-3 mb-4">
-          <MonitorSmartphone className="w-6 h-6" style={{ color: theme.colors.primary }} />
-          <h1 className="text-2xl font-bold" style={{ color: theme.colors.text }}>Connect VS Code</h1>
+    <div className="mx-auto mt-6 max-w-[480px]">
+      <Card className="p-7 shadow-card">
+        <div className="mb-5 flex items-center gap-3">
+          <Laptop className="h-6 w-6 text-accent" aria-hidden="true" />
+          <h1 className="display text-balance text-[44px]">Connect VS Code</h1>
         </div>
-
         {approved ? (
-          <p role="status" className="flex items-center gap-2" style={{ color: theme.colors.text }}>
-            <CheckCircle className="w-5 h-5" style={{ color: theme.colors.primary }} />
-            Done. {clientName || 'VS Code'} is connected; you can close this tab.
-          </p>
-        ) : (
-          <>
-            <p className="mb-4 text-sm" style={{ color: theme.colors.textSecondary }}>
-              Enter the code shown in VS Code. Only approve a code that YOUR editor is showing right now.
+          <div role="status" className="flex flex-col gap-4">
+            <p className="flex items-center gap-2 text-lg font-semibold text-good-ink">
+              <CheckCircle2 className="h-6 w-6" aria-hidden="true" />
+              {clientName ?? 'VS Code'} is connected.
             </p>
-            <label htmlFor="device-code" className="block text-sm mb-1" style={{ color: theme.colors.text }}>Code</label>
-            <input
-              id="device-code"
-              value={code}
-              onChange={(e) => setCode(e.target.value.toUpperCase())}
-              placeholder="WXYZ-2345"
-              maxLength={9}
-              autoComplete="off"
-              className="w-full font-mono text-xl tracking-widest px-3 py-2 rounded-lg mb-3"
-              style={{ backgroundColor: theme.colors.background, color: theme.colors.text, border: `1px solid ${theme.colors.border}` }}
-            />
+            <p className="text-muted">You can close this tab. Your first summary arrives after about two minutes of coding.</p>
+            <ButtonLink to="/dashboard" variant="primary">
+              Go to the dashboard
+            </ButtonLink>
+          </div>
+        ) : (
+          <form onSubmit={approve} className="flex flex-col gap-4">
+            <p className="text-muted">
+              Enter the code VS Code is showing. Only approve a code that <strong className="text-ink">your own</strong> editor is showing right now.
+            </p>
+            <div className="flex flex-col gap-1.5">
+              <label htmlFor="device-code" className="text-sm font-medium">
+                Code
+              </label>
+              <input
+                id="device-code"
+                value={code}
+                onChange={(e) => setCode(e.target.value.toUpperCase())}
+                placeholder="WXYZ-2345"
+                maxLength={9}
+                autoComplete="off"
+                spellCheck={false}
+                aria-describedby={message ? 'device-message' : undefined}
+                className="rounded-xl border border-line-strong bg-bg px-4 py-3 text-center font-mono text-[26px] tracking-[0.15em] text-ink focus:border-accent focus:outline-none"
+              />
+            </div>
             {clientName && (
-              <p className="mb-3 text-sm" style={{ color: theme.colors.textSecondary }}>
-                Device: <strong style={{ color: theme.colors.text }}>{clientName}</strong>
+              <p className="text-sm text-muted">
+                Device: <strong className="text-ink">{clientName}</strong>
               </p>
             )}
-            {message && <p role="alert" className="mb-3 text-sm" style={{ color: theme.colors.accent }}>{message}</p>}
-            <button
-              onClick={approve}
-              disabled={!clientName || busy}
-              className="w-full py-3 rounded-lg text-white font-semibold disabled:opacity-50"
-              style={{ background: `linear-gradient(to right, ${theme.colors.primary}, ${theme.colors.accent})` }}
-            >
+            {message && (
+              <p id="device-message" role="alert" className="text-sm text-bad-ink">
+                {message}
+              </p>
+            )}
+            <Button type="submit" variant="primary" size="lg" disabled={!clientName || busy}>
               {busy ? 'Approving…' : 'Approve this device'}
-            </button>
-          </>
+            </Button>
+          </form>
         )}
-      </div>
+      </Card>
     </div>
   );
 }

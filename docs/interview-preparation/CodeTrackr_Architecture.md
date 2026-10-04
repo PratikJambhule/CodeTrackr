@@ -7,8 +7,8 @@ Where this contradicts the informal project description, the code is authoritati
 >
 > This document was written before the October 2026 roadmap (`docs/ROADMAP_2026-10.md`). That work
 > is **deployed (2026-10-03, commit `11040c5`) and Google login works on the live site**. Not done
-> yet: the live data migrations (so the leaderboard still uses the old scan) and publishing extension
-> **2.5.0** (2.4.0 is live) — say "deployed", but "built" for the extension's new features. **Wherever the text below disagrees with this box, this box wins.**
+> yet: the live data migrations (so the leaderboard still uses the old scan). Extension **2.5.0** is
+> **live on the Marketplace since 2026-10-04** (Sign In, offline queue, keychain), so "live" is right for those too. **Wherever the text below disagrees with this box, this box wins.**
 > Up-to-date short versions: `CodeTrackr_Interview_Cheat_Sheet.md` (rewritten) and
 > `docs/INTERVIEW_PREP.md`. Measured numbers: `docs/BENCHMARKS.md`.
 >
@@ -20,14 +20,15 @@ Where this contradicts the informal project description, the code is authoritati
 > | Duplicates / offline | no idempotency; memory-only buffer, lost on restart | `flushId` receipts (applied once); persisted outbox in `globalState`, FIFO, survives restart (M-30 fixed) |
 > | Analytics | `find()` then JS reduce (M-1) | daily/weekly from one `$facet` pipeline, proven equal to the old code by an oracle test |
 > | Write reduction | "~10× fewer writes" | **measured**: 4.9× fewer documents, 12.7× less data at the 2-minute cadence (19.6× / 51× vs the old 30 s); same throughput |
-> | Tests | 18 suites / 296; nothing against a real DB | unit **26 suites / 369**, **36 integration tests** (supertest + in-memory MongoDB, incl. CORS preflight), extension **6 / 70**; no frontend tests |
+> | Tests | 18 suites / 296; nothing against a real DB | unit **27 suites / 375**, **39 integration tests** (supertest + in-memory MongoDB, incl. CORS preflight), extension **6 / 70**, **frontend 51** (Vitest + Testing Library, run in IST) |
 > | `userId` type | String on activities (M-6) | ObjectId migration in progress (reads accept both; script converts) |
 > | Teams | orphaned page + live API | deleted |
 > | Groups | no admin powers | creator can rename / remove members; ownership passes on when the creator leaves |
 > | Ops | no Docker, no CD, console logs | Dockerfile + CI health check; **`docker compose up` runs MongoDB + API + website locally** (verified); deploy-on-green (off until a secret), JSON logs with request ids, optional Sentry that receives **every** `log.error` (requests, route 500s, jobs, crashes) |
 > | Bugs found while building | — | **H-23** CORS lacked PATCH → goal completion and mark-as-read never worked in a browser; M-31 goal window; M-32 weekly window; H-22 IST "today"; email leaks M-28/M-29 |
 > | Web login / API address | SPA calls Render directly (`VITE_API_URL`); login cookie is cross-site (`SameSite=None`); rate limits per IP | **Vercel forwards `/api` + `/auth` to Render**; the production site calls its own address (`config.ts`: `API_URL = ''`), so the cookie is first-party (still `SameSite=None` during the switch); Google's callback goes through the website; browser-facing limits per user/session (`rateLimitKeys.js`). **Live 2026-10-03** |
-> | Still open | — | H-19 login fix **live** (Vercel forwards `/api` + `/auth`; Google login works on the deployed site; Safari/private-window check pending); a failed Google sign-in shows raw JSON (M-33); client-chosen timestamps, no web refresh token. H-20 fixed (limits per user/session) |
+> | Website (redesigned 2026-10-04, **built, not deployed**) | 3D background, glitch text, custom cursor, 28 themes; 1,150-line Dashboard; Chart.js; no public page; no frontend tests | "The weekly race": an F1-style **standings tower** (position, one cell per day, gap), race chart, landing + guide + privacy pages, invite links `/join/:id`, dark + light themes as CSS variables; hand-made SVG charts (no chart library); every page lazy-loaded: landing first visit **748 → 359 kB (232 → 114 kB gzip)**; 51 Vitest tests; found + fixed: goals saved a day early in India (M-34); sign-out landed on the sign-in page (D-37). Spec `docs/specs/2026-10-04-frontend-redesign.md`, D-31..D-36 |
+> | Still open | — | H-19 login fix **live** (Vercel forwards `/api` + `/auth`; Google login works on the deployed site; Safari/private-window check pending); a failed Google sign-in shows raw JSON (M-33); goal progress misses the deadline day (M-35); no self-serve data deletion (L-14); client-chosen timestamps, no web refresh token; the API still runs end-of-life Node 20 (L-15). H-20 fixed (limits per user/session) |
 
 > **Changed 2026‑09‑08:** the ingest write model. `POST /api/extension/track` no longer does
 > one `Activity.create` per flush — it **`$inc`-upserts a 10-minute `(userId, projectName,
@@ -162,7 +163,7 @@ own row; the extension (2.3.0) also **drops a flush entirely when it carries no 
 | `contexts/ThemeContext.tsx` | 28 theme palettes, `localStorage.selectedTheme`, applies CSS custom properties, `useTheme()` hook. |
 | `pages/Login.tsx` | Single button → `window.location.href = API_URL + '/auth/google'`. |
 | `pages/Onboarding.tsx` | `GET /api/user/profile` → show API key + install steps; `POST /api/user/complete-onboarding` → `/dashboard`. |
-| `pages/Dashboard.tsx` | Daily/weekly toggle; `GET /api/analytics/:id`, `/weekly/:id`, `/timeslot/:id`; chart.js Line/Pie/Bar; 2-hour drill-down. "Repeated Failures" panel now wired to real `terminalSummary.repeatedFailedCommands` (2026-09-09). |
+| `pages/Dashboard.tsx` *(rewritten 2026-10-04, see the update box)* | Daily/weekly toggle; `GET /api/analytics/:id`, `/weekly/:id`, `/timeslot/:id`; chart.js Line/Pie/Bar; 2-hour drill-down. "Repeated Failures" panel now wired to real `terminalSummary.repeatedFailedCommands` (2026-09-09). |
 | `pages/Insights.tsx` | `GET /api/metrics?days=&timezone=`; 5 metric cards + 4 secondary tiles; hides focus metrics until extension 2.1.0 data exists. |
 | `pages/Leaderboard.tsx` | `GET /api/leaderboard`; table + computed "team average" row. |
 | `pages/Goals.tsx` | Calendar; `GET /api/goals`, `POST /api/goals/create`. To-do list is **client-state only**. No progress/complete/delete. |

@@ -1,6 +1,6 @@
 # Website in DEVELOPMENT mode for docker-compose.yml (Vite dev server with live reload).
 # Not used in production: Vercel builds and serves the site there.
-FROM node:20-alpine
+FROM node:24-alpine
 
 WORKDIR /app
 

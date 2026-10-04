@@ -27,6 +27,12 @@ function flush(overrides = {}) {
   };
 }
 
+// 00:00 India time (UTC+5:30) on the instant's IST date, as a UTC epoch ms.
+function istMidnightUtc(instant) {
+  const local = new Date(instant + 330 * 60000);
+  return Date.UTC(local.getUTCFullYear(), local.getUTCMonth(), local.getUTCDate()) - 330 * 60000;
+}
+
 async function main() {
   const app = await h.start();
   const Activity = require('../../models/Activity');
@@ -735,6 +741,120 @@ async function main() {
         User.findById = origFindById;
         reporter.setClient(null);
       }
+    }],
+
+    // ---- Redesign API additions (spec 2026-10-04 §6) ------------------------
+
+    ['history: a year of local days, hours of day, top projects and commits, owner only', async () => {
+      const me = await h.makeUser('Me');
+      const other = await h.makeUser('Other');
+      const tz = -330; // IST: local = UTC + 5:30
+      const T0 = istMidnightUtc(Date.now()); // today 00:00 IST, as a UTC instant
+      const doc = (at, seconds, extra = {}) => ({
+        userId: me.user._id, fileName: 'a.ts', language: 'typescript', projectName: 'alpha',
+        duration: seconds, timestamp: new Date(at), ...extra,
+      });
+      await Activity.create([
+        // 01:30 IST yesterday = 20:00 UTC the day before: must land on YESTERDAY's IST date, hour 1.
+        doc(T0 - 22.5 * 3600e3, 1800, { gitAnalytics: { commits: 2 } }),
+        // 21:10 IST two days ago, project beta, counted via the terminal fallback for commits.
+        doc(T0 - 2 * 864e5 + 21 * 3600e3 + 600e3, 1200, { projectName: 'beta', terminalAnalytics: { gitActivity: { commits: 3 } } }),
+        // 100 days ago: in the year, outside the 7-day views. Legacy String userId must still count.
+        doc(T0 - 100 * 864e5 + 10 * 3600e3, 3600, { userId: String(me.user._id), projectName: 'old' }),
+        // 400 days ago: outside the year.
+        doc(T0 - 400 * 864e5, 600),
+        // Another user's activity never leaks in.
+        { ...doc(T0 - 3600e3, 999), userId: other.user._id },
+      ]);
+      const key = (instant) => new Date(instant + 330 * 60000).toISOString().slice(0, 10);
+
+      const res = await request(app).get(`/api/analytics/history/${me.user.id}?timezone=${tz}`).set('Cookie', me.cookie);
+      assert.strictEqual(res.status, 200, JSON.stringify(res.body));
+      const days = Object.fromEntries(res.body.days.map((d) => [d.date, d.seconds]));
+      assert.strictEqual(days[key(T0 - 22.5 * 3600e3)], 1800);
+      assert.strictEqual(key(T0 - 22.5 * 3600e3), key(T0 - 1), 'the 01:30 IST upload belongs to yesterday');
+      assert.strictEqual(days[key(T0 - 2 * 864e5 + 21 * 3600e3 + 600e3)], 1200);
+      assert.strictEqual(days[key(T0 - 100 * 864e5 + 10 * 3600e3)], 3600);
+      assert.strictEqual(res.body.days.length, 3, 'no day outside the last 365, no other user');
+      assert.ok(res.body.days.every((d, i, a) => i === 0 || a[i - 1].date < d.date), 'days are sorted');
+
+      assert.strictEqual(res.body.hourOfDay.length, 24);
+      assert.strictEqual(res.body.hourOfDay[1], 1800);
+      assert.strictEqual(res.body.hourOfDay[21], 1200);
+      assert.strictEqual(res.body.hourOfDay.reduce((a, b) => a + b, 0), 3000, 'only the last 7 days');
+
+      assert.deepStrictEqual(res.body.projects, [{ name: 'alpha', seconds: 1800 }, { name: 'beta', seconds: 1200 }]);
+      assert.strictEqual(res.body.commits7d, 5, 'git tracker first, terminal commits as the fallback');
+
+      const theirs = await request(app).get(`/api/analytics/history/${me.user.id}`).set('Cookie', other.cookie);
+      assert.strictEqual(theirs.status, 403);
+      assert.strictEqual((await request(app).get(`/api/analytics/history/${me.user.id}`)).status, 401);
+    }],
+
+    ['groups: the board carries per-member daily hours in the viewer\'s time zone', async () => {
+      const owner = await h.makeUser('Owner');
+      const rival = await h.makeUser('Rival');
+      const created = await request(app).post('/api/groups/create').set('Cookie', owner.cookie)
+        .send({ groupName: 'Race', groupDescription: 'daily cells', visibility: 'public' });
+      const id = created.body.group._id;
+      await request(app).post(`/api/groups/${id}/join`).set('Cookie', rival.cookie).send({});
+
+      const T0 = istMidnightUtc(Date.now());
+      const at = (daysAgo, hour) => new Date(T0 - daysAgo * 864e5 + hour * 3600e3);
+      await Activity.create([
+        { userId: owner.user._id, fileName: 'a', language: 'ts', projectName: 'p', duration: 1800, timestamp: at(1, 1.5) },
+        { userId: owner.user._id, fileName: 'a', language: 'ts', projectName: 'p', duration: 600, timestamp: at(3, 10) },
+        { userId: rival.user._id, fileName: 'a', language: 'ts', projectName: 'p', duration: 3000, timestamp: at(3, 23) },
+        { userId: rival.user._id, fileName: 'a', language: 'ts', projectName: 'p', duration: 900, timestamp: at(9, 12) },
+      ]);
+      const key = (instant) => new Date(instant + 330 * 60000).toISOString().slice(0, 10);
+
+      // All-time board: the cells cover the last 7 local days, ending today.
+      const all = await request(app).get(`/api/groups/${id}/details?timezone=-330`).set('Cookie', owner.cookie);
+      assert.strictEqual(all.status, 200, JSON.stringify(all.body));
+      const d = all.body.daily;
+      assert.strictEqual(d.dates.length, 7);
+      assert.strictEqual(d.dates[6], key(T0));
+      assert.strictEqual(d.byUser[owner.user.id][d.dates.indexOf(key(at(1, 1.5).getTime()))], 1800);
+      assert.strictEqual(d.byUser[owner.user.id][d.dates.indexOf(key(at(3, 10).getTime()))], 600);
+      assert.strictEqual(d.byUser[rival.user.id][d.dates.indexOf(key(at(3, 23).getTime()))], 3000);
+      assert.strictEqual(d.byUser[rival.user.id].reduce((a, b) => a + b, 0), 3000, 'nine days ago is outside the 7');
+
+      // A contest window: one cell per local day in it, and the cells add up to the board's hours.
+      const from = encodeURIComponent(new Date(T0 - 4 * 864e5).toISOString());
+      const to = encodeURIComponent(new Date(T0).toISOString());
+      const contest = await request(app).get(`/api/groups/${id}/details?from=${from}&to=${to}&timezone=-330`).set('Cookie', owner.cookie);
+      assert.strictEqual(contest.status, 200);
+      assert.deepStrictEqual(contest.body.daily.dates, [4, 3, 2, 1].map((n) => key(T0 - n * 864e5)));
+      for (const row of contest.body.leaderboard) {
+        const sum = contest.body.daily.byUser[row.userId].reduce((a, b) => a + b, 0);
+        assert.strictEqual(Math.round((sum / 3600) * 100) / 100, row.codingHours, `${row.userName}: cells must add up to the board`);
+      }
+    }],
+
+    ['groups: an invite preview shows a group to a non-member without members, emails or the password', async () => {
+      const owner = await h.makeUser('Owner');
+      const outsider = await h.makeUser('Outsider');
+      const created = await request(app).post('/api/groups/create').set('Cookie', owner.cookie)
+        .send({ groupName: 'Secret club', groupDescription: 'invite only', visibility: 'private', password: 'hunter2' });
+      const id = created.body.group._id;
+
+      const seen = await request(app).get(`/api/groups/${id}/preview`).set('Cookie', outsider.cookie);
+      assert.strictEqual(seen.status, 200, JSON.stringify(seen.body));
+      assert.strictEqual(seen.body.group.name, 'Secret club');
+      assert.strictEqual(seen.body.group.visibility, 'private');
+      assert.strictEqual(seen.body.memberCount, 1);
+      assert.strictEqual(seen.body.isMember, false);
+      const text = JSON.stringify(seen.body);
+      assert.ok(!text.includes('hunter2') && !text.includes('password'), 'no password, hashed or not');
+      assert.ok(!text.includes('@'), 'no emails');
+      assert.ok(!('members' in seen.body) && !('leaderboard' in seen.body));
+
+      const mine = await request(app).get(`/api/groups/${id}/preview`).set('Cookie', owner.cookie);
+      assert.strictEqual(mine.body.isMember, true);
+      assert.strictEqual((await request(app).get('/api/groups/aaaaaaaaaaaaaaaaaaaaaaaa/preview').set('Cookie', owner.cookie)).status, 404);
+      assert.strictEqual((await request(app).get('/api/groups/not-an-id/preview').set('Cookie', owner.cookie)).status, 400);
+      assert.strictEqual((await request(app).get(`/api/groups/${id}/preview`)).status, 401);
     }],
   ]);
 

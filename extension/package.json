@@ -1,18 +1,21 @@
 {
   "name": "codetrackr-vscode",
   "displayName": "CodeTrackr for VS Code",
-  "description": "A VS Code extension for CodeTrackr, a time-tracking tool for developers. This extension automatically tracks your coding activity in Visual Studio Code and sends it to your CodeTrackr backend.",
+  "description": "Automatic coding-time tracking: hours, languages, projects, commits and failed builds. Sign in once and compete with friends on group boards and the leaderboard.",
   "publisher": "CodeTrackr-ext",
   "repository": {
     "type": "git",
-    "url": "https://github.com/Soham-Official/CodeTrackr.git"
+    "url": "https://github.com/PratikJambhule/CodeTrackr.git"
+  },
+  "bugs": {
+    "url": "https://github.com/PratikJambhule/CodeTrackr/issues"
   },
   "version": "2.5.0",
   "icon": "images/icon.png",
   "license": "MIT",
   "author": {
     "name": "Pratik Jambhule, Kartik Kharat, Soham",
-    "url": "https://github.com/Soham-Official/CodeTrackr"
+    "url": "https://github.com/PratikJambhule/CodeTrackr"
   },
   "contributors": [
     {
@@ -28,7 +31,11 @@
       "url": "https://github.com/Soham-Official"
     }
   ],
-  "homepage": "https://github.com/Soham-Official/CodeTrackr",
+  "homepage": "https://code-trackr-frontend.vercel.app",
+  "galleryBanner": {
+    "color": "#6D28D9",
+    "theme": "dark"
+  },
   "engines": {
     "vscode": "^1.85.0"
   },

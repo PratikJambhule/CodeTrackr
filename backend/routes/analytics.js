@@ -6,6 +6,7 @@ const { isAuthenticated } = require('../middleware/auth');
 const { assertOwnership } = require('../services/authorization');
 const { viewData } = require('../services/analyticsViews');
 const { matchActivityUser } = require('../services/activityUser');
+const { historyData } = require('../services/historyView');
 
 /**
  * Verifies the caller owns :userId. Returns the id to query, or null when a
@@ -354,6 +355,20 @@ router.get('/weekly/:userId', isAuthenticated, async (req, res, next) => {
             gitTimeline
         });
 
+    } catch (error) {
+        return next(error);
+    }
+});
+
+// GET long-range views for the dashboard (redesign spec 2026-10-04 §6): a year
+// of local days (heatmap), hours of the day and top projects over the last 7
+// days, and commits in the last 7 days. One $facet pipeline; owner only.
+router.get('/history/:userId', isAuthenticated, async (req, res, next) => {
+    try {
+        const userIdStr = resolveOwnedUserId(req, res);
+        if (!userIdStr) return;
+        const offset = Number.parseInt(req.query.timezone, 10);
+        res.json(await historyData({ userId: userIdStr, offsetMinutes: Number.isFinite(offset) ? offset : 0 }));
     } catch (error) {
         return next(error);
     }

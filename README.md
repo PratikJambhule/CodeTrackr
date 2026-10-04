@@ -8,34 +8,37 @@ by hand.
 
 - **Live site:** https://code-trackr-frontend.vercel.app (backend on Render's free tier: the
   first request after ~15 idle minutes takes ~22 s)
-- **Extension:** `CodeTrackr-ext.codetrackr-vscode` on the VS Code Marketplace (version 2.4.0)
+- **Extension:** `CodeTrackr-ext.codetrackr-vscode` on the VS Code Marketplace (2.5.0 live since
+  2026-10-04: Sign In, uploads kept safe offline, key in the OS keychain)
 
 ## What it does
 
 | Part | What the user sees |
 |---|---|
 | VS Code extension | Runs in the background. Every ~2 minutes of active coding it sends one summary: time, language, project, edit counts, terminal commands and their exit codes, commits, focus time. Never file contents, diffs or full paths. |
-| Dashboard | Today's hours by hour, the last 7 days, languages, streak, terminal/build success, repeated failing commands. |
+| Website (public) | A landing page that explains the product with an animated example week, a step-by-step guide, a plain-language privacy page, and group invite links (`/join/:id`). |
+| Dashboard | This week's race in your group (your position and the gap to the person above you), today/this week, a year heatmap, languages and projects, when you code, build health, goals and the top insight. Click an hour of today for a two-hour detail. |
 | Sign-in for the extension | **CodeTrackr: Sign In** shows a code; approve it on the website and that VS Code gets its own revocable key (or paste a key from Profile). |
 | Insights | Statistics over your own data (deep-work ratio, peak 2-hour window, cadence, churn, ...) plus a "What stands out" panel from 13 threshold rules. Each number shows "—" when there is not enough data. **Not machine learning.** |
 | Goals | "Spend N hours on X by date". Progress comes from tracked time whose language or project matches X. Deadline reminders run hourly. |
-| Leaderboard + Groups | Global ranking by hours, plus private or public groups whose leaderboard shows hours, lines, commits and failed commands/builds per member. |
+| Leaderboard + Groups | Global ranking by hours. Groups (public, or private with a password) each have a board: a standings tower with one cell per day, a race chart of running totals, highlights, and contest dates you can share as a link. |
 
 ## Tech stack
 
 | Layer | Stack |
 |---|---|
 | Extension | TypeScript, esbuild, axios, VS Code API (shell integration, Git extension API) |
-| Backend | Node 18, Express 5, Mongoose 8, Passport (Google OAuth 2.0), JWT in an httpOnly cookie, helmet, express-rate-limit |
+| Backend | Node 20, Express 5, Mongoose 8, Passport (Google OAuth 2.0), JWT in an httpOnly cookie, helmet, express-rate-limit |
 | Database | MongoDB Atlas |
-| Frontend | React 19, Vite 7, TypeScript, Tailwind 3, react-router 7, Chart.js |
+| Frontend | React 19, Vite 7, TypeScript, Tailwind 3 with CSS-variable design tokens (dark + light), react-router 7, React Query 5, small hand-made SVG/HTML charts, lucide icons; Vitest + Testing Library |
 | Hosting | Backend on Render, frontend on Vercel, scheduled jobs from GitHub Actions |
-| CI / CD | GitHub Actions: unit + integration tests, extension tests, frontend build, Docker image health check; optional deploy-on-green (`deploy.yml`) |
+| CI / CD | GitHub Actions: backend unit + integration tests, extension tests, frontend lint + tests + build, Docker image health check; optional deploy-on-green (`deploy.yml`) |
 | Ops | JSON logs with request ids, optional Sentry, `backend/Dockerfile` |
 
 ## Run it locally
 
-You need Node 18+, a MongoDB connection string and a Google OAuth client
+You need Node 22.12 or newer (24 recommended; the website's test tools need it, the API also runs
+on 20), a MongoDB connection string and a Google OAuth client
 (redirect URI `http://localhost:5050/auth/google/callback`).
 
 ```bash
@@ -93,8 +96,9 @@ cd frontend && npm run dev
 ```
 
 `dev:local` starts the real API on an in-memory MongoDB with `AUTH_BYPASS` on (refused in
-production) and seeds two demo users, their activity and a shared group. Open
-http://localhost:5173. Data is gone when the process stops. On Windows start it with
+production) and seeds demo data for every page: you ("Soham (local)") with about ten months of
+activity, five friends with three weeks of it, four groups (the private one's password is
+`squad`), goals and notifications. Open http://localhost:5173. Data is gone when the process stops. On Windows start it with
 `node scripts/dev-local.js` if you will stop it from a script: stopping `npm run` can leave the
 server running on port 5050.
 
@@ -129,13 +133,15 @@ cd extension && npm test
 ```
 
 ```bash
-cd frontend && npm run build
+cd frontend && npm run lint && npm test && npm run build
 ```
 
-Current results (2026-10-04): backend unit 26 suites / 369 assertions, backend integration
-36 tests (the real Express app over HTTP against an in-memory MongoDB), extension 6 suites /
-70 assertions, frontend type-check + build green. Benchmarks: `docs/BENCHMARKS.md`. Unit tests are plain `node:assert` scripts;
-integration tests use `supertest` + `mongodb-memory-server`. There are no frontend tests yet.
+Current results (2026-10-04): backend unit 27 suites / 375 assertions, backend integration
+39 tests (the real Express app over HTTP against an in-memory MongoDB), extension 6 suites /
+70 assertions, frontend 51 Vitest tests (formatting and standings logic, chart components,
+routing, sign-out), lint + type-check + build green. Benchmarks: `docs/BENCHMARKS.md`. Backend unit tests are plain
+`node:assert` scripts; integration tests use `supertest` + `mongodb-memory-server`; frontend tests
+run in jsdom in the India time zone (`TZ=Asia/Kolkata`, where the date bugs were).
 
 ## Documentation
 
@@ -149,6 +155,7 @@ integration tests use `supertest` + `mongodb-memory-server`. There are no fronte
 | [docs/BENCHMARKS.md](docs/BENCHMARKS.md) | Measured leaderboard and ingest numbers, with how to re-run them |
 | [docs/RELEASE.md](docs/RELEASE.md) | Deploy order, live migrations, publishing the extension |
 | [docs/ROADMAP_2026-10.md](docs/ROADMAP_2026-10.md) | The October 2026 improvement plan and its status |
+| [docs/specs/2026-10-04-frontend-redesign.md](docs/specs/2026-10-04-frontend-redesign.md) | The website redesign: direction, design tokens, pages, API additions |
 | [CODETRACKR_PROJECT_CONTEXT.md](CODETRACKR_PROJECT_CONTEXT.md) | Long-form reference of the whole implementation |
 | [docs/INSIGHTS_METRICS.md](docs/INSIGHTS_METRICS.md), [docs/RULES_ENGINE.md](docs/RULES_ENGINE.md) | Every Insights formula and rule |
 | [docs/ML_INTEGRATION_PLAN.md](docs/ML_INTEGRATION_PLAN.md) | The machine-learning plan (designed, **not built**, blocked on data) |

@@ -1,8 +1,8 @@
 # Release checklist
 
-**Status 2026-10-03:** §1, §1b and §2 are done (deployed, Google login works live). Still to do:
-§1b Safari/cold-start check, §3 migrations, §4 extension publish. These are the steps only the
-account owner can do, in order. Every script has a dry run (no flag) — run that
+**Status 2026-10-04:** §1, §1b, §2 and §4 are done (deployed, Google login works live, extension
+2.5.0 live on the Marketplace). Still to do: §1b Safari/cold-start check, §2b once the website
+redesign is pushed, §3 migrations. These are the steps only the account owner can do, in order. Every script has a dry run (no flag) — run that
 first and read its counts.
 
 > `backend/.env` points at the **live** database. The scripts below read it. Run them from
@@ -15,8 +15,9 @@ git push origin main
 ```
 
 CI (`.github/workflows/ci.yml`) runs backend unit + integration tests, extension tests, the
-frontend build, and builds the Docker image and checks its `/health` against a throwaway MongoDB.
-CI runs on Node 20 (the integration-test library needs it).
+frontend lint, tests and build, and builds the Docker image and checks its `/health` against a throwaway MongoDB.
+CI runs the backend and extension on Node 20 (the integration-test library needs at least 20) and
+the website on Node 24 (Vitest 5 needs 22.12+; D-38).
 
 ## 1b. Two settings for the login fix (H-19) — do these BEFORE deploying
 
@@ -56,6 +57,15 @@ itself.
 Check: `GET https://codetrackr-backend-uckp.onrender.com/health` → `{"status":"ok","db":true}`,
 and in a browser, goal **Mark complete** now works (H-23).
 
+## 2b. Shipping the website redesign (built 2026-10-04)
+
+The redesigned website calls three new API routes (`/api/analytics/history/:userId`, the `daily`
+field on group details, `/api/groups/:id/preview`). Push the backend and frontend changes in the
+same commit. Vercel usually finishes before Render, so for a minute or two the new site can show
+"This did not load" on the year heatmap or group board; it recovers on refresh once Render is live.
+After deploying: open the landing page signed out, sign in, check the dashboard, a group board,
+`/join/<group id>` and the light theme, and run CodeTrackr: Sign In once to check `/device`.
+
 ## 3. Migrations (live database)
 
 ```bash
@@ -78,6 +88,9 @@ Then with `--apply`, when uploads are quiet. Until this runs the leaderboard kee
 (correct, just slow); afterwards it reads running totals (`X-Leaderboard-Source: userstats`).
 
 ## 4. Publish extension 2.5.0
+
+**Done 2026-10-04** on the VS Code Marketplace (check: `npx vsce show CodeTrackr-ext.codetrackr-vscode`).
+Open VSX is optional and not done. The steps stay here as the recipe for the next version.
 
 ```bash
 cd extension && npm ci && npm test && npx vsce package

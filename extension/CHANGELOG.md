@@ -2,7 +2,7 @@
 
 All notable changes to the CodeTrackr VS Code extension will be documented in this file.
 
-## [2.5.0] - unreleased
+## [2.5.0] - 2026-10-04
 
 ### Fixed — offline data
 
@@ -31,6 +31,14 @@ All notable changes to the CodeTrackr VS Code extension will be documented in th
   is moved too. If no keychain is available the extension keeps working from settings.
 - Accepts the new `ct_<id>_<secret>` key format (the server now stores keys hashed). Old
   64-character keys keep working until you generate a new one.
+
+### Marketplace page
+
+- New icon (a stopwatch with code brackets) replacing a blank placeholder, and a matching banner.
+- README rewritten for 2.5.0: Sign In first, what is and is not sent, all commands and settings.
+  The old one described 2.0-era setup, a removed Teams feature, and said file names are tracked
+  (they are not).
+- Repository and issue links point to the real repository (`PratikJambhule/CodeTrackr`).
 
 ## [2.4.0] - 2026-09-10
 

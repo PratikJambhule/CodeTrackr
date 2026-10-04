@@ -63,11 +63,17 @@ cd extension && npm test
 ```
 
 ```bash
-cd frontend && npm run build
+cd backend && npm run test:int
+```
+
+```bash
+cd frontend && npm run lint && npm test && npm run build
 ```
 
 Report failures with their output. A task is done only when these are green and the change has
-been seen working.
+been seen working. To see the website with data and no accounts: `node scripts/dev-local.js` in
+`backend/` (in-memory database, demo data, signed in automatically), then `npm run dev` in
+`frontend/`.
 
 ## 6. Git and safety
 

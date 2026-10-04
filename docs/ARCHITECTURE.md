@@ -1,6 +1,7 @@
 # CodeTrackr — Architecture
 
-_Rewritten 2026-10-03 from the code on `main` (`92b899b` + working tree). The previous version
+_Rewritten 2026-10-03 from the code on `main` (`92b899b` + working tree); updated 2026-10-04 for the
+website redesign (section 8) and the new history, daily-cells and invite-preview endpoints. The previous version
 (verified 2026-08-28, extension 2.1.0) described per-flush documents, the `date` field and
 unauthenticated analytics, all of which are gone. For line-level detail see
 `CODETRACKR_PROJECT_CONTEXT.md`; for known defects see `docs/IMPROVEMENT_PLAN.md`._
@@ -9,10 +10,10 @@ unauthenticated analytics, all of which are gone. For line-level detail see
 
 | Component | Where | What it does |
 |---|---|---|
-| VS Code extension (2.4.0 live, 2.5.0 built) | `extension/src/*.ts` → `dist/extension.js` | Five trackers collect counters; a 30 s timer decides when to upload one summary. |
+| VS Code extension (2.5.0 live since 2026-10-04) | `extension/src/*.ts` → `dist/extension.js` | Five trackers collect counters; a 30 s timer decides when to upload one summary. |
 | Express API | `backend/app.js`, `routes/`, `services/`, `models/` | One process (a modular monolith). Feature routers, a thin service layer for ingest and insights, a central error handler. |
 | MongoDB Atlas | 13 collections | `activities` is the only high-volume one. |
-| React SPA | `frontend/src/` | Pages: Login, Onboarding, Dashboard, Insights, Leaderboard, Goals, Groups, Profile, Device (approve a VS Code sign-in). Reads use React Query (`src/api.ts`). |
+| React SPA | `frontend/src/` | Public: landing, guide, privacy, sign-in, invite links. Signed in: Dashboard, Groups + group board, Leaderboard, Goals, Insights, Profile, Onboarding, Device approval. Redesigned 2026-10-04 (section 8). |
 | Scheduler | `.github/workflows/cron.yml` | Calls two secret-protected internal routes: hourly goal-deadline sweep, nightly daily-summary rollup. |
 
 ```mermaid
@@ -44,9 +45,12 @@ Static figures (architecture, DFD level 0/1, use cases, class diagram, ML pipeli
    sessions.
 2. **Decide when to send.** Every 30 s: if idle ≥ 2 min, flush and pause; otherwise flush once
    ≥ 2 minutes of active time are buffered **and** the interval has real signal (an edit, save,
-   command, commit or flow block). A signal-less or failed flush is *held* in memory and merged
-   into the next one.
-3. **Authenticate.** `verifyApiKey` looks the `x-api-key` header up with `User.findOne({ apiKey })`.
+   command, commit or flow block). Extension 2.5.0 saves every upload to a persisted outbox in
+   `globalState` before sending and retries oldest first with the same `flushId`; only
+   signal-less intervals still merge into the next one.
+3. **Authenticate.** `verifyApiKey` parses `ct_<id>_<secret>`, finds the id in `users` and then
+   `devicetokens`, and compares SHA-256 of the secret in constant time (old plaintext keys are
+   found by their hash and converted on first use).
 4. **Validate.** `ingestValidation.js` rejects duration outside (0, 3600] s, over-long strings and
    timestamps outside [now − 24 h, now + 60 s].
 5. **Normalise.** `activityNormalizers.js` coerces every counter, drops negatives, caps arrays.
@@ -72,9 +76,11 @@ upload. Setting `ACTIVITY_BUCKET_MS=0` restores one document per upload.
 | `GET /api/analytics/:userId` (today), `/weekly` | one `$facet` pipeline (`services/analyticsViews.js`) over today / the last 7 local days | Response size independent of document count (M-1 fixed) |
 | `GET /api/analytics/timeslot/:userId` | `Activity.find()` of a 2-hour window, reduced in JavaScript | Bounded by the window |
 | `GET /api/analytics/summary/:userId` | `$group` pipeline by day and language | All of the user's history |
+| `GET /api/analytics/history/:userId` (2026-10-04) | one `$facet` pipeline over the last 365 local days: seconds per day (heatmap), per hour of day and per project over the last 7 days, commits in the last 7 | One user, one year |
 | `GET /api/metrics` | `metricsService` runs `$group` pipelines → `metricsDerive` (pure functions) → `sessionize` → `insightsBaseline` (90-day baseline cached once a day in `userinsights`) → `rulesEngine` | Measured 239 ms cold, 44 ms warm |
 | `GET /api/leaderboard` | Top N `userstats` rows + two indexed maxima; `?days=` windows scan activities | O(N) all-time (H-7 fixed); windowed scan bounded by the window |
-| `GET /api/groups/:id/details` | Members' `userstats`; `?from=&to=` scans that window | O(members) all-time (H-8 fixed) |
+| `GET /api/groups/:id/details` | Members' `userstats`; `?from=&to=` scans that window. Also `daily`: seconds per member per local day of the window (or the last 7 days), for the day cells and race chart (`services/groupDaily.js`, up to 62 days) | O(members) all-time (H-8 fixed); daily cells bounded by the window |
+| `GET /api/groups/:id/preview` (2026-10-04) | name, description, visibility, member count, whether the caller is a member: what an invite link shows | Two indexed reads |
 | `GET /api/goals/:id/progress` | `$match` on language or project (case-insensitive, regex-escaped) inside the goal's lifetime, `$sum` duration | One user, one window |
 
 Every per-user route takes the user from the session. The four `/:userId` analytics routes keep
@@ -115,7 +121,7 @@ M-28/29, L-11.
 | `userstats` | one row of running totals per user | read by the all-time leaderboard and group boards |
 | `deviceauths`, `devicetokens` | pending device sign-ins (10 min TTL); issued per-device keys | only hashes of codes and secrets |
 | `userinsights` | cached 90-day baseline per user | Refreshed on read, at most daily |
-| `users` | `googleId`, `email`, `apiKey` | |
+| `users` | `googleId`, `email`, `apiKeyId` + `apiKeyHash` (select:false), `apiKeyLast4` | The plain key is never stored; legacy keys keep only a hash until converted |
 | `groups`, `groupmembers` | group + join table with a unique `(groupId, userId)` index | Last member leaving deletes the group |
 | `goals`, `notifications` | owner-scoped | Notifications created by the hourly sweep |
 
@@ -136,7 +142,8 @@ ObjectIds, reads match both forms through `services/activityUser.js`, and
   session (`services/rateLimitKeys.js`).
 - **Scheduler:** GitHub Actions, hourly + 03:30 UTC, with the same secret in GitHub and Render.
 - **CI:** `.github/workflows/ci.yml` on every push and PR: backend unit tests + an import smoke
-  of `app.js`, backend integration tests (in-memory MongoDB), extension tests, frontend build,
+  of `app.js`, backend integration tests (in-memory MongoDB), extension tests, frontend lint,
+  tests (Vitest) and build (the website job on Node 24, the rest on Node 20: L-15),
   and a Docker job that builds the image and waits for `/health` with `db:true`.
 - **CD:** `.github/workflows/deploy.yml` triggers a Render deploy hook after green CI on `main`
   and waits for `/health` — inert until `RENDER_DEPLOY_HOOK_URL` is set (see `docs/RELEASE.md`).
@@ -162,6 +169,44 @@ ObjectIds, reads match both forms through `services/activityUser.js`, and
 2. **Ingest does several writes per upload** (receipt, window counter, bucket, stats). Throughput
    matched the single-insert path locally (~450 req/s), but at much higher volume a queue in front
    of the database (and batching the stats `$inc`) becomes the next move.
-3. **One region, one free instance:** Render's free tier sleeps (~22 s cold start, L-10) and the
-   cookie is third-party across `vercel.app`/`onrender.com` (H-19). Both are hosting decisions,
-   not code.
+3. **One region, one free instance:** Render's free tier sleeps (~22 s cold start, L-10); the
+   website now says "waking up the server" instead of showing a blank page. The cross-site cookie
+   (H-19) was fixed by the Vercel proxy.
+
+## 8. The website (redesigned 2026-10-04)
+
+Spec: `docs/specs/2026-10-04-frontend-redesign.md`. Direction: "the weekly race". The signature
+is a **standings tower** borrowed from F1 timing: position, name, one cell per day (purple = best
+in the group that day, green = personal best, yellow = coded, grey = off), gap to the leader.
+
+```
+frontend/src/
+  main.tsx, App.tsx      providers; routes; every page lazy-loaded (its own chunk)
+  api.ts, hooks/queries  one fetcher + typed React Query hooks for every read
+  lib/                   pure logic, unit-tested: format (local dates), standings, calendar
+  components/ui          Button, Card, Modal (focus trap), Toast, fields, Segmented, Pill
+  components/charts      StandingsTower (FLIP animation), RaceChart, Bars, YearHeatmap,
+                         HourStrip, Ring, Sparkline: small SVG/HTML, no chart library
+  components/layout      AppShell (sidebar / phone tab bar), PublicLayout, notifications, account menu
+  pages/                 one file per page; dashboard/ split into cards
+  index.css, theme.tsx   design tokens as CSS variables; dark (default), light, or system
+```
+
+- **Data flow:** page → hook (`useGroupDetails`, `useHistory`, …) → `apiGet` → `/api/...`
+  (same site in production; Vercel forwards it). Writes use `apiSend` and invalidate the matching
+  queries. Errors show the server's own message (`errorText`).
+- **Auth gate:** `useMe()` asks `/api/user/profile`; a 401 means signed out. Public pages render
+  at once without waiting for it (the free server can take 20 s to wake). Signed-out visits to
+  app pages remember the address, go to sign-in, and come back (invite links, device codes).
+  Signing out ends the session and reloads `/` (a full page load), so nothing from the session
+  stays in memory (D-37).
+- **Files:** a `.tsx` file exports only components, so React Fast Refresh can hot-swap it; hooks
+  and helpers (`useToast`, `useTheme`, `buttonClass`, chart colours) live in `.ts` files, and
+  `components/ui/index.ts` re-exports the kit. Lint enforces this in CI.
+- **Motion:** only the tower moves (rows slide when positions change, via the Web Animations
+  API); `prefers-reduced-motion` turns it off. The landing page plays an example week.
+- **Accessibility:** the tower is a real ordered list with a spoken summary per row; charts have
+  text summaries or hidden data tables; dialogs trap focus and return it; everything works by
+  keyboard; text contrast is at least 4.5:1 in both themes; nothing scrolls sideways at 320 px.
+- **Size:** first visit to the landing page downloads 359 kB (114 kB gzipped) against 748 kB
+  (232 kB) for the old single bundle; measured 2026-10-04 (`docs/PROGRESS.md`).

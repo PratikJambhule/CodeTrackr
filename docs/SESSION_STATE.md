@@ -1,138 +1,127 @@
 # Session state (handoff)
 
 _Snapshot for the next session. Read this first. History is in `docs/PROGRESS.md`._
-_Last updated: 2026-10-04 (deployed; live login works; L-13 error reporting built, uncommitted)._
+_Last updated: 2026-10-04 (frontend lint clean, sign-out bug fixed; ready for the user to commit)._
 
-## 🟢 Right now: deployed, live Google login works (2026-10-03, late evening)
+## 🟡 Right now: website redesign built, tested and documented — NOT committed, NOT deployed
 
-Commit `11040c5` is live on Render + Vercel. Live login hit two config errors, both fixed by the
-user: `redirect_uri_mismatch` (new callback URL not registered) and `invalid_client` (Render's
-`GOOGLE_CLIENT_SECRET` was stale; user added a new secret in Google and pasted it into Render).
-Full story: `docs/PROGRESS.md` top entry. All docs + interview-prep were updated to "deployed"
-(2026-10-04), then a full stale-fact audit (counts, INTERVIEW_PREP answers, ARCHITECTURE §4, new
-Q13/Q14 in the Q&A bank); PDFs rebuilt. Resume bullet 1 wording flagged to the user (2.5.0 unpublished).
+**Live:** commit `13569e7` on Render + Vercel (the OLD website; Google login works; the Sentry hook is
+in and switches on once `SENTRY_DSN` is set on Render). **Extension 2.5.0 is live on the Marketplace**
+(checked 2026-10-04: `npx vsce show CodeTrackr-ext.codetrackr-vscode` lists 2.5.0; the listing page
+shows the 2.5.0 README and 94 installs). All docs were corrected from "submitted/unpublished" to live.
 
-**Latest code change (2026-10-04, uncommitted, not deployed): L-13 error reporting.** New
-`backend/services/errorReporter.js` hooks the logger so every `log.error` goes to Sentry when
-`SENTRY_DSN` is set; `app.js` handles unhandledRejection/uncaughtException; access lines use
-`log.access` (not reported). Tests: new `tests/errorReporter.test.js` (9), integration +1 (36),
-flaky key-split test fixed. Unit 26 / 369, integration 36, extension 6 / 70, build green. Docs
-(D-30, L-13, PROGRESS, RELEASE §5, interview prep) and PDFs updated. User step: create a Sentry
-Node.js project, put the DSN in Render `SENTRY_DSN`, redeploy, enable email alerts.
+**Uncommitted in the working tree (~90 entries, all from this work):** the website redesign "the
+weekly race" — spec `docs/specs/2026-10-04-frontend-redesign.md`, decisions D-31..D-36, PROGRESS
+entries of 2026-10-04.
+- Backend: `services/historyView.js` (`GET /api/analytics/history/:userId`), `services/groupDaily.js`
+  (`daily` cells on group details, viewer's time zone, ≤ 62 days), `GET /api/groups/:id/preview`
+  (invite links), `tests/localDays.test.js`, 3 integration tests, richer `scripts/dev-local.js` seed.
+- Frontend: new `src/` — `lib/` (format, standings, calendar; unit-tested), `hooks/queries.ts`,
+  `components/ui|charts|layout`, `pages/public/*` (landing, guide, privacy, login, 404),
+  `pages/dashboard/*`, `GroupBoard`, `JoinGroup`, `theme.tsx`, `types.ts`, Vitest tests. Old effects,
+  28 themes, Chart.js, three/ogl/gsap removed (22 deletions already staged with `git rm`).
+- Extension 2.5.0 Marketplace files (README, CHANGELOG, icon, package.json links): already published
+  from this tree, not yet committed.
+- Docs: all updated for the redesign (README, ARCHITECTURE §8, DECISIONS, PROGRESS, IMPROVEMENT_PLAN,
+  INTERVIEW_PREP "The website", CONTEXT, RELEASE §2b, CI frontend-test step, CLAUDE.md §5, interview-prep
+  update boxes + cheat sheet + Q&A + guides, resume frontend bullets).
 
-**Next, user's steps (in order):**
-1. Log in from Safari / a private window (real H-19 proof) and after ~15 min idle (cold start
-   behind the Vercel proxy). Then mark H-19 ✅ in `IMPROVEMENT_PLAN.md` + cheat sheet + update boxes.
-2. In Google, disable then delete the OLD client secret; optionally copy the new one into
-   `backend/.env`. Check consent screen is "In production".
-3. Live migrations from `backend/`, dry run first, then `--apply`: `migrate-hash-api-keys.js` →
+**Verified 2026-10-04 (latest run):** frontend lint 0 problems, `tsc -b` clean, Vitest 51 (6 files),
+`npm run build` green; backend unit 27 suites / 375, integration 39, extension 6 suites / 70. Every
+page seen in a browser on desktop and at 307–375 px, light + dark; flows tested by hand are listed in
+PROGRESS. Landing first visit 358,681 B raw / 114,167 B gzip vs 747,989 / 231,590 before.
+
+**Done since (2026-10-04):** lint 13 → 0 (helpers moved to `.ts` files: `ui/buttonClass.ts`,
+`ui/toastContext.ts`, `themeContext.ts`, `charts/tone.ts`, `cellsSummary` → `lib/standings.ts`;
+`ui/index.tsx` → `ui/Primitives.tsx` + a re-export-only `ui/index.ts`); CI now runs `npm run lint`.
+Bug found in the browser and fixed: sign-out landed on `/login` and remembered the page → sign-out
+now ends the session and reloads `/` (`layout/signOut.ts`, D-37, routing test). Docs, interview
+prep (counts 49 → 51, the new bug story, stale 2.5.0 caveat in the cheat sheet) updated; PDFs rebuilt.
+Then the website's CI job and `frontend/Dockerfile.dev` moved to Node 24 (D-38; Vitest 5 needs 22.12+;
+both 20 and 24 pass in clean containers); the API on end-of-life Node 20 is logged as L-15.
+
+## Next steps — mine, in order
+
+1. ✅ Handover written 2026-10-04: message in `.git/COMMIT_DRAFT.txt`, the 104 files (no directories,
+   not the three permanently-dirty files) in `.git/COMMIT_FILES.txt`; the 22 deletions are already
+   staged. The user runs `git add --pathspec-from-file=.git/COMMIT_FILES.txt` then
+   `git commit -F .git/COMMIT_DRAFT.txt` and pushes; **pushing deploys the redesign**.
+2. Tell the user `THEME_USER_GUIDE.md` (teammates' guide to the old 28 themes) is obsolete. It is not
+   edited (project rule).
+3. After the user pushes: `docs/RELEASE.md` §2b checks, then change "built, not deployed" to
+   "deployed" for the website in every doc, the update boxes, cheat sheet and resume notes; rebuild PDFs.
+
+## Next steps — the user's, in order
+
+1. Commit + push the redesign (after my step 1), then the §2b checks on the live site.
+2. Log in from Safari / a private window and after ~15 min idle (H-19 proof; cold start behind the
+   proxy). Then mark H-19 ✅ in `IMPROVEMENT_PLAN.md` + cheat sheet + update boxes.
+3. In Google, delete the OLD client secret; check the consent screen is "In production".
+4. Live migrations from `backend/`, dry run first, then `--apply`: `migrate-hash-api-keys.js` →
    `migrate-activity-userid.js` → `backfill-userstats.js` (quiet time). Record counts in PROGRESS.
-4. Publish extension 2.5.0 (`docs/RELEASE.md` §4), then update resume notes + update boxes.
-5. Commit the doc changes (I hand over the `git add` list).
+5. Sentry: confirm `SENTRY_DSN` is set on Render (was being set up 2026-10-04) and email alerts are on.
+6. With 2.5.0 installed: run **CodeTrackr: Sign In** against the live site; check Profile → Connected devices.
 
-**Offered, not started:** M-33 — a thrown OAuth error (e.g. `invalid_client`) shows raw JSON; fix
-with a custom `passport.authenticate` callback in `routes/auth.js` that logs + redirects to
-`/login?error=signin`, plus an integration test stubbing a failing token exchange.
+## Open findings (detail in `docs/IMPROVEMENT_PLAN.md`)
 
-**Diagnosis tips:** Render logs are JSON lines with `requestId`; the `id` in an error body equals
-it. Bash `curl` is blocked by a context-mode hook — use `ctx_execute` with JS `fetch`.
-
-## What this project is
-
-CodeTrackr: VS Code extension (TypeScript) → Express 5 / Mongoose 8 / MongoDB Atlas API on
-Render (`codetrackr-backend-uckp.onrender.com`) → React 19 + Vite dashboard on Vercel
-(`code-trackr-frontend.vercel.app`). Built for friendly competition in a college friend group.
-Team of 3; the user (Soham) owns extension + backend. Repo remote: `PratikJambhule/CodeTrackr`.
-
-## What was done in this session (2026-10-03), all in commit 11040c5
-
-1. **Full audit** of code vs docs; standard docs created (README, ARCHITECTURE, DECISIONS,
-   PROGRESS, INTERVIEW_PREP) and root `CLAUDE.md` (working rules: read this file first, keep
-   docs + interview-prep folder current, honesty, verify, git rules).
-2. **The 18-item roadmap** from the user's `CodeTrackr_Improvement_Plan.docx` →
-   `docs/ROADMAP_2026-10.md` (all ✅ except the README demo GIF, which needs a real recording):
-   integration tests (supertest + mongodb-memory-server, `npm run test:int`); hashed API keys
-   `ct_<id>_<secret>` (SHA-256, shown once); device-code sign-in with per-device keys
-   (`routes/device.js`, `/device` page, Profile → Connected devices, extension command
-   "CodeTrackr: Sign In"); idempotent ingest (`flushId`); anti-cheat crediting (focus + 120 s,
-   600 s per 10-min window, atomic counter); `userstats` running totals for leaderboard + group
-   boards; contest-week group boards; group admin; extension 2.5.0 persisted outbox +
-   SecretStorage; `$facet` dashboard pipeline (oracle-tested); `activities.userId` String →
-   ObjectId expand step; React Query; Teams deleted; benchmarks; JSON logs + request ids +
-   optional Sentry; Dockerfile + deploy-on-green workflow (off until `RENDER_DEPLOY_HOOK_URL`).
-3. **Bugs found and fixed:** H-22 (IST "today"), M-28/M-29 (emails), M-31 (goal window), M-32
-   (weekly window), H-23 (**CORS lacked PATCH → goal complete / mark-read never worked in
-   browsers**), L-11 (OAuth state), L-12 (key fields in logs), M-30 root cause, flushCount on
-   spread docs, flaky tests. Profile: Copy button hidden when only a key hint is shown.
-4. **Measured** (`docs/BENCHMARKS.md`, local): leaderboard p50 6.72 s → 62 ms at 1M rows;
-   bucketing 4.9× fewer docs / 12.7× less data at the 2-min cadence, same throughput.
-5. **Docker Compose** (`docker-compose.yml`: mongo on host port 27018 — 27017 is a MongoDB
-   installed on this laptop — backend with AUTH_BYPASS + `scripts/seed-local.js`, frontend Vite
-   dev with live reload). Verified: health, persistence across restart, live reload.
-6. **Login fix H-19 + H-20** (`docs/specs/2026-10-03-first-party-api-proxy.md`):
-   `frontend/vercel.json` forwards `/api/*` and `/auth/*` to Render; production site calls its
-   own address (`config.ts` `API_URL = ''` in production); rate limits keyed by user/session
-   (`services/rateLimitKeys.js`) because Vercel hides visitor IPs. Verified locally with a
-   stand-in proxy. Live since 2026-10-03 (after fixing the Google redirect URI and a stale
-   client secret).
-7. **Interview prep** folder updated (cheat sheet rewritten, update boxes, new Q&A, PDFs rebuilt
-   via `docs/interview-preparation/build_pdfs.sh`). Resume entry:
-   `docs/interview-preparation/CodeTrackr_Resume_Current.tex` (claims = measured; notes say
-   deployed, migrations + extension 2.5.0 pending).
-
-Last full test run (2026-10-04): backend unit 26 suites / 369, integration 36 / 36, extension 6 suites / 70,
-frontend build green.
-
-## User decisions on record
-
-- Resume ownership: extension + backend (team of 3).
-- Private groups stay visible in Discover (password-protected).
-- External services built off-by-default; user switches them on.
-- Login fix: option A (Vercel rewrites), not moving the backend or a custom domain.
-- Docker: Compose with the frontend dev server.
-- The user commits/pushes normally; this session the user asked me to commit, and pushed after.
+M-33 a failed Google sign-in shows raw JSON (offered fix: custom `passport.authenticate` callback in
+`routes/auth.js` → `/login?error=signin`, plus an integration test with a failing token exchange);
+M-35 goal progress stops at 00:00 UTC of the deadline day; L-14 no self-serve data deletion; L-10
+cold start (now explained on screen); H-19 Safari proof pending; L-15 Node 20 is end of life: the website's CI
+job + dev image moved to Node 24 (D-38); the API (Dockerfile, backend/extension CI, Render) is still on
+20, the user's call since it changes production. Others: M-5 dead files, M-7 root
+`package.json`, L-6 extension strict TS, L-7 idle ≤ 2 min counted, `SameSite=Lax` once every browser
+uses the proxy, the `userId` contract step, no end-to-end browser tests.
 
 ## ⏸ Parked task (user asked 2026-10-04, then said "keep it for next time")
 
 **Remove the profile API key completely; "CodeTrackr: Sign In" becomes the only way to connect.**
-Not started, no code changed. **Blocking decision to ask first:** what happens to existing profile
-keys? Everyone on the live extension 2.4.0 uses one, and 2.4.0 has no Sign In command, so a hard
-cutoff before 2.5.0 is published would silently stop their tracking. Options prepared:
-(A, recommended) stop issuing keys and remove all UI/commands, but keep accepting existing keys
-until a cleanup script runs after 2.5.0 is out; (B) hard cutoff now (401); (C) reject after a date,
-extension shows "please sign in" on rejection.
+Not started. Already done by the redesign (D-36): Onboarding leads with Sign In; the key lives on
+Profile under "Advanced: connect with an API key". **Ask first:** what happens to existing profile
+keys? 2.5.0 (with Sign In) is now live, but people only move once VS Code updates the extension.
+Options: (A, recommended) stop issuing keys and remove the UI/commands, keep accepting existing keys
+until a cleanup script runs once most uploads come from device keys; (B) hard cutoff now (401);
+(C) reject after a date, extension shows "please sign in" on rejection.
+Touchpoints (2026-10-04 grep):
+- Backend: `routes/user.js` (`hasApiKey`/`apiKeyHint`/`legacyApiKey`, `POST /regenerate-api-key`);
+  `middleware/auth.js:78` issues a key at login; `findUserByApiKey` checks `users` then
+  `devicetokens`; `models/user.js` key fields + `issueApiKey`/`apiKeyHint`;
+  `scripts/migrate-hash-api-keys.js`; tests `tests/apiKeys.test.js` + integration "regenerate/legacy".
+- Frontend: `pages/Profile.tsx` `ApiKeySection`; `pages/Onboarding.tsx` fallback link to it.
+- Extension: command `codetrackr.setupApiKey` + setting `codetrackr.apiKey`; `src/extension.ts`
+  `setupApiKey()`, its prompts, the settings→SecretStorage move, the config listener; `secretKey.test.js`.
+- Docs after: DECISIONS, ARCHITECTURE §4, README, RELEASE, CHANGELOG, interview prep, resume bullet 1.
 
-Touchpoints found (2026-10-04 grep):
-- Backend: `routes/user.js` (profile fields `hasApiKey`/`apiKeyHint`/`legacyApiKey`, route
-  `POST /regenerate-api-key`); `middleware/auth.js:78` issues a key to new users at login, and
-  `findUserByApiKey` checks `users` (id+hash, legacy hash, plaintext) before `devicetokens`;
-  `models/user.js` fields `apiKey`, `legacyApiKeyHash`, `apiKeyId/Hash/Last4/CreatedAt`, methods
-  `issueApiKey`/`apiKeyHint`; `scripts/migrate-hash-api-keys.js` (becomes moot under A/B); tests
-  in `tests/apiKeys.test.js`, integration "regenerate/legacy" cases.
-- Frontend: `pages/Onboarding.tsx` (auto-creates and shows a key → replace with Sign In steps),
-  `pages/Profile.tsx` (key box, Copy, Regenerate → keep only Connected devices).
-- Extension: `package.json` command `codetrackr.setupApiKey` + setting `codetrackr.apiKey`;
-  `src/extension.ts` `setupApiKey()` (~l.642), prompts at l.350 and l.775, settings→SecretStorage
-  migration (l.90), config listener (l.850); tests `secretKey.test.js`.
-- Docs after: DECISIONS (new entry), ARCHITECTURE §4, README setup steps, RELEASE, CHANGELOG,
-  interview prep (key answers mention "Profile page"), resume bullet 1.
+## What this project is
 
-## Offers still open (not started)
+CodeTrackr: VS Code extension (TypeScript) → Express 5 / Mongoose 8 / MongoDB Atlas API on Render
+(`codetrackr-backend-uckp.onrender.com`) → React 19 + Vite website on Vercel
+(`code-trackr-frontend.vercel.app`, which forwards `/api` + `/auth` to Render). Built for friendly
+competition in a college friend group. Team of 3; the user (Soham) owns extension + backend.
+Repo remote: `PratikJambhule/CodeTrackr`.
 
-- Make local/Docker mode check extension keys (bypass only the web login) so key revocation
-  can be tested locally.
-- Make Sign In the main option on Profile/Onboarding; move the copy-paste key to "Advanced".
-- Remaining weaknesses: M-5 dead files, M-7 root package.json, L-4 big pages, L-6 extension
-  strict TS, L-7 idle ≤2 min counted, L-10 cold start, no frontend tests, React Query on
-  Groups/Goals/Profile, `SameSite=Lax` once all browsers use the proxy, userId contract step.
+## User decisions on record
+
+- Resume: ownership = extension + backend (team of 3); keep those bullets as they are and add the
+  frontend bullets below them (2026-10-04).
+- Redesign (2026-10-04, "go with all recommended options"): "the weekly race" direction; three small
+  backend additions; 28 themes → dark + light (+ system); Vitest frontend tests.
+- Private groups stay visible in Discover (password-protected). External services built
+  off-by-default; the user switches them on. Login fix: Vercel rewrites (not a custom domain).
+- Docker: Compose with the frontend dev server.
+- Standing rule: keep every doc current with every change, the interview-prep folder first
+  (CLAUDE.md §3). The user commits and pushes (pushed `13569e7` on request).
 
 ## Gotchas
 
 - `backend/.env` = LIVE settings (Atlas). Tests/bench/dev scripts set their own env first;
   migration + usage scripts DO use it (user's action only).
-- Windows: stopping a background `npm run …` orphans the `node` child (held port 5050 and served
-  stale code). Start `node scripts/dev-local.js` directly; check `Get-CimInstance Win32_Process`.
+- Windows: stopping a background `npm run …` orphans the `node` child (holds port 5050, serves stale
+  code). Start `node scripts/dev-local.js` directly. This session left the local API (5050) and Vite
+  (5173) running — check `netstat -ano | grep -E ':(5050|5173)'` before starting new ones.
 - Never stage `THEME_USER_GUIDE.md`, `extension/extension.js`, `extension/index.html`.
 - `supertest(app)` starts a server per request — listen once for bulk requests.
-- Docker containers from this session may still be running: `docker compose down` to stop.
+- Bash `curl` is blocked by a context-mode hook — use `ctx_execute` with JS `fetch`.
+- Render logs are JSON lines with `requestId`; the `id` in an error body equals it.
 - Python heredocs in bash mangle `\n` escapes; write scripts to the scratchpad with Write instead.
+- `build_pdfs.sh` needs `cygpath -m` for its temp dir under Git Bash (already in the script).

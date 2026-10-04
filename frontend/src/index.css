@@ -2,131 +2,162 @@
 @tailwind components;
 @tailwind utilities;
 
-* {
-  margin: 0;
-  padding: 0;
-  box-sizing: border-box;
+/*
+ * Design tokens (spec docs/specs/2026-10-04-frontend-redesign.md §4).
+ * Dark is the default; [data-theme] is set in index.html before first paint.
+ * Every colour has one meaning on every page:
+ *   accent (purple) = best in the group / you / focus   good (green) = personal best, gains
+ *   warn (yellow)   = activity, warnings                 bad (red)    = failures only
+ */
+:root,
+[data-theme='dark'] {
+  color-scheme: dark;
+  --bg: #12101c;
+  --surface: #1c1929;
+  --surface-2: #241f35;
+  --line: #2e2a40;
+  --line-strong: #3a3550;
+  --ink: #f2f0fa;
+  --muted: #a9a3c2;
+  --faint: #6e6888;
+  --accent: #b26bff;
+  --accent-ink: #c99bff;
+  --accent-soft: #2a2140;
+  --good: #35d07f;
+  --good-ink: #4fdb8e;
+  --warn: #f2c94c;
+  --warn-ink: #f2c94c;
+  --bad: #ff5c7a;
+  --bad-ink: #ff7a93;
+  --bad-soft: #3a1d2a;
+  --gold: #f2c14e;
+  --silver: #c9ccd8;
+  --bronze: #d18f5f;
+  --me: #2a2140;
+  --cell-off: #3a3550;
+  --cell-future: #221f33;
+  --heat-0: #221f33;
+  --heat-1: #3b2a66;
+  --heat-2: #5b3a9e;
+  --heat-3: #8b4fe0;
+  --heat-4: #c08bff;
+  --muted-line: #5e5878;
+  --bg-glass: rgba(18, 16, 28, 0.88);
+  --surface-glass: rgba(28, 25, 41, 0.95);
+  --brand-a: #7c3aed;
+  --brand-b: #db2777;
+  --shadow: 0 1px 0 rgba(255, 255, 255, 0.03) inset, 0 10px 30px rgba(0, 0, 0, 0.25);
 }
 
-:root {
-  /* Theme Colors - These are dynamically set by ThemeContext */
-  --color-primary: #3b82f6;
-  --color-secondary: #1e40af;
-  --color-accent: #60a5fa;
-  --color-background: #000000;
-  --color-surface: #1f2937;
-  --color-text: #f9fafb;
-  --color-text-secondary: #9ca3af;
-  --color-border: #374151;
-  --orb-hue: 220;
-  
-  --background: 222.2 84% 4.9%;
-  --foreground: 210 40% 98%;
-  --primary: 217.2 91.2% 59.8%;
-  --primary-foreground: 222.2 47.4% 11.2%;
+[data-theme='light'] {
+  color-scheme: light;
+  --bg: #f6f4fb;
+  --surface: #ffffff;
+  --surface-2: #efecf7;
+  --line: #e2ddee;
+  --line-strong: #cfc8e0;
+  --ink: #1a1630;
+  --muted: #5c5675;
+  --faint: #8a84a3;
+  --accent: #7c3aed;
+  --accent-ink: #6d28d9;
+  --accent-soft: #efe7ff;
+  --good: #1fa35f;
+  --good-ink: #13804a;
+  --warn: #e0a800;
+  --warn-ink: #8a6100;
+  --bad: #e0355b;
+  --bad-ink: #c8264b;
+  --bad-soft: #fde8ee;
+  --gold: #c9971f;
+  --silver: #8e95a6;
+  --bronze: #b06a3b;
+  --me: #f1eafe;
+  --cell-off: #ddd8ea;
+  --cell-future: #eeebf5;
+  --heat-0: #ece8f4;
+  --heat-1: #d9c8fa;
+  --heat-2: #b794f6;
+  --heat-3: #8b5cf6;
+  --heat-4: #6d28d9;
+  --muted-line: #b9b2cc;
+  --bg-glass: rgba(246, 244, 251, 0.88);
+  --surface-glass: rgba(255, 255, 255, 0.95);
+  --shadow: 0 1px 2px rgba(26, 22, 48, 0.06), 0 10px 30px rgba(26, 22, 48, 0.06);
 }
 
-body {
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
-    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
-    sans-serif;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
-  background-color: var(--color-background);
-  color: var(--color-text);
-  transition: background-color 0.3s ease, color 0.3s ease;
+@layer base {
+  html {
+    background: var(--bg);
+    color: var(--ink);
+    -webkit-text-size-adjust: 100%;
+  }
+  body {
+    @apply font-sans antialiased;
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-size: 16px;
+    line-height: 1.5;
+  }
+  :focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+  ::selection {
+    background: var(--accent-soft);
+  }
+  a {
+    color: var(--accent-ink);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
 }
 
-/* Global Theme-aware Utilities */
-.theme-bg {
-  background-color: var(--color-background);
+@layer components {
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 16px;
+  }
+  /* Condensed scoreboard face: titles, positions and big numbers only. */
+  .display {
+    font-family: 'Big Shoulders Display', 'Arial Narrow', sans-serif;
+    font-weight: 900;
+    text-transform: uppercase;
+    letter-spacing: 0.01em;
+    line-height: 0.92;
+  }
+  .eyebrow {
+    font-family: 'Martian Mono', ui-monospace, monospace;
+    font-size: 12px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+  .num {
+    font-variant-numeric: tabular-nums;
+  }
+  .brand-gradient {
+    background-image: linear-gradient(90deg, var(--brand-a), var(--brand-b));
+  }
+  .skeleton {
+    background: linear-gradient(90deg, var(--surface-2), var(--line), var(--surface-2));
+    background-size: 200% 100%;
+    animation: skeleton 1.4s ease-in-out infinite;
+    border-radius: 10px;
+  }
 }
 
-.theme-surface {
-  background-color: var(--color-surface);
+@keyframes skeleton {
+  0% { background-position: 100% 0; }
+  100% { background-position: -100% 0; }
 }
-
-.theme-text {
-  color: var(--color-text);
-}
-
-.theme-text-secondary {
-  color: var(--color-text-secondary);
-}
-
-.theme-border {
-  border-color: var(--color-border);
-}
-
-.theme-primary {
-  color: var(--color-primary);
-}
-
-.theme-accent {
-  color: var(--color-accent);
-}
-
-/* Card styling with theme colors */
-.theme-card {
-  background-color: rgba(var(--color-surface-rgb), 0.5);
-  backdrop-filter: blur(16px);
-  border: 1px solid var(--color-border);
-  transition: all 0.3s ease;
-}
-
-.theme-card:hover {
-  border-color: var(--color-primary);
-}
-
-/* Button styling */
-.theme-button-primary {
-  background: linear-gradient(to right, var(--color-primary), var(--color-accent));
-  color: white;
-  transition: all 0.2s ease;
-}
-
-.theme-button-primary:hover {
-  opacity: 0.9;
-  transform: scale(1.02);
-}
-
-.theme-button-secondary {
-  background-color: var(--color-surface);
-  color: var(--color-text);
-  border: 1px solid var(--color-border);
-  transition: all 0.2s ease;
-}
-
-.theme-button-secondary:hover {
-  border-color: var(--color-primary);
-  background-color: rgba(var(--color-primary-rgb), 0.1);
-}
-
-/* Input styling */
-.theme-input {
-  background-color: rgba(var(--color-surface-rgb), 0.5);
-  color: var(--color-text);
-  border: 1px solid var(--color-border);
-  transition: all 0.2s ease;
-}
-
-.theme-input:focus {
-  border-color: var(--color-primary);
-  outline: none;
-  box-shadow: 0 0 0 3px rgba(var(--color-primary-rgb), 0.1);
-}
-
-.theme-input::placeholder {
-  color: var(--color-text-secondary);
-}
-
-/* Chart text colors */
-.chartjs-render-monitor {
-  color: var(--color-text) !important;
-}
-
-/* Smooth transitions for theme changes */
-*:not(.animate-pulse):not([class*="animate-"]):not([class*="transition-transform"]) {
-  transition: background-color 0.3s ease, color 0.3s ease, border-color 0.3s ease;
-}
-

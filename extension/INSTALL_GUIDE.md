@@ -212,7 +212,7 @@ Backend should be running on port 5050.
 
 ## 🆘 Need Help?
 
-- **GitHub Issues:** https://github.com/Soham-Official/CodeTrackr/issues
+- **GitHub Issues:** https://github.com/PratikJambhule/CodeTrackr/issues
 - **Documentation:** See `API_INTEGRATION.md` in project root
 - **Backend Logs:** Check terminal running `npm run dev` in backend folder
 

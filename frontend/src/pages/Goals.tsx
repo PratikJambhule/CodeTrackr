@@ -1,623 +1,238 @@
-import { useState, useEffect } from 'react';
-import { Target, ChevronLeft, ChevronRight, X } from 'lucide-react';
-import { useTheme } from '../contexts/ThemeContext';
-import GradientText from '../components/GradientText';
-import TextType from '../components/TextType';
-import { API_URL } from '../config';
+import { useMemo, useState, type FormEvent } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
+import { ChevronLeft, ChevronRight, Plus, Target } from 'lucide-react';
+import { apiSend, errorText } from '../api';
+import { useGoalProgress, useGoals } from '../hooks/queries';
+import { Ring } from '../components/charts/Ring';
+import { Button, Card, CardTitle, EmptyState, ErrorBox, Modal, PageHeader, Pill, Skeleton, TextArea, TextField, useToast } from '../components/ui';
+import { dayLabel, daysBetween, deadlineKey, hoursHm, localDateKey, monthShort, relativeDay } from '../lib/format';
+import type { Goal, GoalProgress } from '../types';
 
-interface Todo {
-  id: string;
-  text: string;
-  completed: boolean;
+const WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+
+function NewGoalDialog({ open, onClose, deadline }: { open: boolean; onClose: () => void; deadline: string }) {
+  const qc = useQueryClient();
+  const toast = useToast();
+  const todayKey = localDateKey(new Date());
+  const [form, setForm] = useState({ title: '', description: '', targetHours: '10', techStack: '', deadline });
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+  // Re-seed the date when the dialog is opened from a different calendar day.
+  const [seed, setSeed] = useState(deadline);
+  if (open && seed !== deadline) {
+    setSeed(deadline);
+    setForm((f) => ({ ...f, deadline }));
+  }
+  const submit = async (e: FormEvent) => {
+    e.preventDefault();
+    setBusy(true);
+    setError('');
+    try {
+      // The date is sent exactly as picked (YYYY-MM-DD). The old calendar converted
+      // local midnight with toISOString(), which in India made it the day before.
+      await apiSend('POST', '/api/goals/create', { ...form, targetHours: Number(form.targetHours) });
+      await qc.invalidateQueries({ queryKey: ['goals'] });
+      toast(`Goal set: ${form.title}`);
+      setForm({ title: '', description: '', targetHours: '10', techStack: '', deadline });
+      onClose();
+    } catch (err) {
+      setError(errorText(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <Modal open={open} onClose={onClose} title="New goal" description="Hours on a language or project, by a date.">
+      <form onSubmit={submit} className="flex flex-col gap-4">
+        <TextField label="Goal" required maxLength={120} value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} placeholder="Finish the DSA sheet" />
+        <div className="grid grid-cols-2 gap-3">
+          <TextField label="Hours" type="number" required min={0.5} step={0.5} value={form.targetHours} onChange={(e) => setForm({ ...form, targetHours: e.target.value })} />
+          <TextField label="Deadline" type="date" required min={todayKey} value={form.deadline} onChange={(e) => setForm({ ...form, deadline: e.target.value })} />
+        </div>
+        <TextField
+          label="Language or project"
+          value={form.techStack}
+          onChange={(e) => setForm({ ...form, techStack: e.target.value })}
+          placeholder="python"
+          hint="Hours count when the language or the project (folder) name matches, from now until the deadline."
+        />
+        <TextArea label="Notes (optional)" rows={2} value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} />
+        {error && (
+          <p role="alert" className="text-sm text-bad-ink">
+            {error}
+          </p>
+        )}
+        <Button type="submit" variant="primary" disabled={busy}>
+          {busy ? 'Saving…' : 'Set goal'}
+        </Button>
+      </form>
+    </Modal>
+  );
 }
 
-interface Goal {
-  _id: string;
-  title: string;
-  description: string;
-  targetHours: number;
-  techStack: string;
-  deadline: string;
-  status?: 'in-progress' | 'completed';
-  completedAt?: string | null;
-  todos?: Todo[];
+function GoalItem({ goal, progress }: { goal: Goal; progress?: GoalProgress }) {
+  const qc = useQueryClient();
+  const toast = useToast();
+  const key = deadlineKey(goal.deadline);
+  const done = goal.status === 'completed';
+  const ratio = progress ? progress.currentHours / Math.max(goal.targetHours, 0.01) : 0;
+  const late = !done && daysBetween(new Date(), key) < 0;
+  const toggle = async () => {
+    try {
+      await apiSend('PATCH', `/api/goals/${goal._id}/${done ? 'reopen' : 'complete'}`);
+      await qc.invalidateQueries({ queryKey: ['goals'] });
+      toast(done ? `Reopened “${goal.title}”` : `Completed “${goal.title}”`);
+    } catch (err) {
+      toast(errorText(err), 'error');
+    }
+  };
+  return (
+    <Card as="li" className={`flex flex-wrap items-center gap-4 p-5 ${done ? 'opacity-80' : ''}`}>
+      <Ring value={ratio} size={64} stroke={8} tone={done || ratio >= 1 ? 'good' : 'accent'} label={`${Math.round(Math.min(1, ratio) * 100)}% done`}>
+        <span className="font-mono text-[12px]">{Math.round(Math.min(1, ratio) * 100)}%</span>
+      </Ring>
+      <div className="min-w-[200px] flex-1">
+        <div className="flex flex-wrap items-center gap-2">
+          <h3 className="font-semibold text-ink">{goal.title}</h3>
+          {done && <Pill tone="good">completed</Pill>}
+          {late && <Pill tone="bad">overdue</Pill>}
+        </div>
+        {goal.description && <p className="mt-0.5 line-clamp-2 text-sm text-muted">{goal.description}</p>}
+        <p className="mt-1.5 font-mono text-[12px] text-muted">
+          {progress ? `${hoursHm(progress.currentHours)} of ${goal.targetHours}h` : '…'} · due {dayLabel(key)} ({relativeDay(key)})
+          {goal.techStack ? ` · counts: ${goal.techStack}` : ''}
+        </p>
+        {progress && !progress.matched && <p className="mt-1 text-xs text-warn-ink">No language or project set, so no hours are counted for this goal.</p>}
+      </div>
+      <Button size="sm" variant={done ? 'ghost' : 'secondary'} onClick={toggle}>
+        {done ? 'Reopen' : 'Mark complete'}
+      </Button>
+    </Card>
+  );
+}
+
+function MonthCalendar({ goals, onPick }: { goals: Goal[]; onPick: (key: string) => void }) {
+  const [month, setMonth] = useState(() => {
+    const now = new Date();
+    return new Date(now.getFullYear(), now.getMonth(), 1);
+  });
+  const todayKey = localDateKey(new Date());
+  const dueOn = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const g of goals) if (g.status !== 'completed') m.set(deadlineKey(g.deadline), (m.get(deadlineKey(g.deadline)) ?? 0) + 1);
+    return m;
+  }, [goals]);
+  const lead = (month.getDay() + 6) % 7; // Monday-first grid
+  const daysInMonth = new Date(month.getFullYear(), month.getMonth() + 1, 0).getDate();
+  const cells = [...Array.from({ length: lead }, () => null), ...Array.from({ length: daysInMonth }, (_, i) => new Date(month.getFullYear(), month.getMonth(), i + 1))];
+  const shift = (n: number) => setMonth(new Date(month.getFullYear(), month.getMonth() + n, 1));
+
+  return (
+    <Card className="p-5">
+      <div className="mb-4 flex items-center justify-between">
+        <Button size="sm" variant="ghost" aria-label="Previous month" onClick={() => shift(-1)} icon={<ChevronLeft className="h-4 w-4" aria-hidden="true" />} />
+        <h2 className="display text-balance text-[26px]" aria-live="polite">
+          {monthShort(month.getMonth())} {month.getFullYear()}
+        </h2>
+        <Button size="sm" variant="ghost" aria-label="Next month" onClick={() => shift(1)} icon={<ChevronRight className="h-4 w-4" aria-hidden="true" />} />
+      </div>
+      <div className="grid grid-cols-7 gap-1.5 text-center">
+        {WEEKDAYS.map((d) => (
+          <span key={d} aria-hidden="true" className="pb-1 font-mono text-[11px] text-faint">
+            {d.slice(0, 2)}
+          </span>
+        ))}
+        {cells.map((date, i) => {
+          if (!date) return <span key={`blank-${i}`} />;
+          const key = localDateKey(date);
+          const past = key < todayKey;
+          const due = dueOn.get(key);
+          return (
+            <button
+              key={key}
+              type="button"
+              disabled={past}
+              onClick={() => onPick(key)}
+              aria-label={`${dayLabel(key)}${due ? `, ${due} goal${due > 1 ? 's' : ''} due` : ''}${past ? '' : '. Set a goal due this day'}`}
+              className={`relative min-h-[40px] rounded-lg text-sm font-semibold transition disabled:cursor-default disabled:opacity-35 ${
+                key === todayKey ? 'bg-accent text-white' : due ? 'bg-accent-soft text-ink' : 'text-ink hover:bg-surface-2'
+              }`}
+            >
+              {date.getDate()}
+              {due && key !== todayKey && <span aria-hidden="true" className="absolute right-1.5 top-1.5 h-1.5 w-1.5 rounded-full bg-accent" />}
+            </button>
+          );
+        })}
+      </div>
+      <p className="mt-4 text-sm text-muted">Pick a day to set a goal due then.</p>
+    </Card>
+  );
 }
 
 export default function Goals() {
-  const { theme } = useTheme();
-  const [goals, setGoals] = useState<Goal[]>([]);
-  const [currentDate, setCurrentDate] = useState(new Date());
-  const [selectedDate, setSelectedDate] = useState<Date | null>(null);
-  const [showModal, setShowModal] = useState(false);
-  const [formData, setFormData] = useState({
-    title: '',
-    description: '',
-    targetHours: '',
-    techStack: '',
-    deadline: ''
-  });
-
-  useEffect(() => {
-    fetchGoals();
-  }, []);
-
-  const fetchGoals = async () => {
-    try {
-      const res = await fetch(`${API_URL}/api/goals`, {
-        credentials: 'include'
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setGoals(data);
-      }
-    } catch (error) {
-      console.error('Failed to fetch goals:', error);
-    }
+  const goals = useGoals();
+  // A new [] on every render would re-run the sort below each time while loading.
+  const all = useMemo(() => goals.data ?? [], [goals.data]);
+  const sorted = useMemo(
+    () => [...all].sort((a, b) => Number(a.status === 'completed') - Number(b.status === 'completed') || a.deadline.localeCompare(b.deadline)),
+    [all],
+  );
+  const progress = useGoalProgress(sorted);
+  const [dialog, setDialog] = useState<{ open: boolean; deadline: string }>({ open: false, deadline: '' });
+  const openNew = (deadline?: string) => {
+    const fallback = new Date();
+    fallback.setDate(fallback.getDate() + 7);
+    setDialog({ open: true, deadline: deadline ?? localDateKey(fallback) });
   };
-
-  /**
-   * Toggle a goal between in-progress and completed.
-   *
-   * This is the state transition the app was missing entirely: nothing outside
-   * the demo seed script ever set `status: 'completed'`, so the Insights
-   * "estimation accuracy" metric could never have any input.
-   */
-  const toggleGoalCompletion = async (goal: Goal) => {
-    const action = goal.status === 'completed' ? 'reopen' : 'complete';
-    try {
-      const res = await fetch(`${API_URL}/api/goals/${goal._id}/${action}`, {
-        method: 'PATCH',
-        credentials: 'include',
-      });
-      if (!res.ok) {
-        alert('Could not update the goal. Please try again.');
-        return;
-      }
-      fetchGoals();
-    } catch (error) {
-      console.error('Failed to update goal:', error);
-      alert('Could not reach the server.');
-    }
-  };
-
-  const createGoal = async (e: React.FormEvent) => {
-    e.preventDefault();
-    try {
-      const res = await fetch(`${API_URL}/api/goals/create`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify(formData),
-      });
-      if (res.ok) {
-        fetchGoals();
-        setShowModal(false);
-        setSelectedDate(null);
-        setFormData({ title: '', description: '', targetHours: '', techStack: '', deadline: '' });
-      }
-    } catch (error) {
-      console.error('Failed to create goal:', error);
-    }
-  };
-
-  // Calendar logic
-  const getDaysInMonth = (date: Date) => {
-    const year = date.getFullYear();
-    const month = date.getMonth();
-    const firstDay = new Date(year, month, 1);
-    const lastDay = new Date(year, month + 1, 0);
-    const daysInMonth = lastDay.getDate();
-    const startingDayOfWeek = firstDay.getDay();
-    
-    return { daysInMonth, startingDayOfWeek };
-  };
-
-  const { daysInMonth, startingDayOfWeek } = getDaysInMonth(currentDate);
-  
-  const monthNames = [
-    'January', 'February', 'March', 'April', 'May', 'June',
-    'July', 'August', 'September', 'October', 'November', 'December'
-  ];
-  
-  const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-
-  const goToPreviousMonth = () => {
-    setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() - 1, 1));
-  };
-
-  const goToNextMonth = () => {
-    setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 1));
-  };
-
-  const getGoalsForDate = (day: number) => {
-    const dateStr = new Date(currentDate.getFullYear(), currentDate.getMonth(), day).toISOString().split('T')[0];
-    return goals.filter(goal => goal.deadline.startsWith(dateStr));
-  };
-
-  const isToday = (day: number) => {
-    const today = new Date();
-    return (
-      day === today.getDate() &&
-      currentDate.getMonth() === today.getMonth() &&
-      currentDate.getFullYear() === today.getFullYear()
-    );
-  };
-
-  const isPastDate = (day: number) => {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const dateToCheck = new Date(currentDate.getFullYear(), currentDate.getMonth(), day);
-    return dateToCheck < today;
-  };
-
-  // Generate calendar grid
-  const calendarDays = [];
-  
-  // Add empty cells for days before the first day of the month
-  for (let i = 0; i < startingDayOfWeek; i++) {
-    calendarDays.push(
-      <div 
-        key={`empty-${i}`} 
-        className="h-10 rounded-lg"
-        style={{ backgroundColor: `${theme.colors.background}40` }}
-      ></div>
-    );
-  }
-  
-  // Add cells for each day of the month
-  for (let day = 1; day <= daysInMonth; day++) {
-    const dayGoals = getGoalsForDate(day);
-    const isCurrentDay = isToday(day);
-    const isPast = isPastDate(day);
-    const clickedDate = new Date(currentDate.getFullYear(), currentDate.getMonth(), day);
-    const hasGoals = dayGoals.length > 0;
-    
-    calendarDays.push(
-      <button
-        key={day}
-        onClick={() => {
-          if (!isPast) {
-            setSelectedDate(clickedDate);
-            setShowModal(true);
-            setFormData({ 
-              ...formData, 
-              deadline: clickedDate.toISOString().split('T')[0] 
-            });
-          }
-        }}
-        className={`cursor-target h-10 rounded-lg font-semibold text-sm transition-all duration-200 relative ${
-          isPast ? 'cursor-not-allowed opacity-40' : 'hover:scale-110'
-        }`}
-        style={{
-          backgroundColor: isCurrentDay 
-            ? theme.colors.primary
-            : hasGoals 
-              ? `${theme.colors.accent}40`
-              : `${theme.colors.surface}80`,
-          color: isCurrentDay 
-            ? '#ffffff' 
-            : isPast 
-              ? theme.colors.textSecondary 
-              : theme.colors.text,
-          border: isCurrentDay 
-            ? `2px solid ${theme.colors.primary}` 
-            : hasGoals 
-              ? `2px solid ${theme.colors.accent}80`
-              : `1px solid ${theme.colors.border}`,
-        }}
-        disabled={isPast}
-      >
-        {day}
-        {hasGoals && (
-          <span 
-            className="absolute -top-1 -right-1 w-2 h-2 rounded-full"
-            style={{ backgroundColor: theme.colors.accent }}
-          ></span>
-        )}
-      </button>
-    );
-  }
+  const openCount = sorted.filter((g) => g.status !== 'completed').length;
 
   return (
-    <div 
-      className="min-h-screen py-8 px-4 transition-colors duration-300"
-      style={{ backgroundColor: theme.colors.background }}
-    >
-      <div className="max-w-7xl mx-auto">
-        {/* Header */}
-        <div className="mb-8 flex items-center gap-4">
-          <div 
-            className="p-3 rounded-xl"
-            style={{ 
-              background: `linear-gradient(to right, ${theme.colors.primary}, ${theme.colors.accent})` 
-            }}
-          >
-            <Target className="w-6 h-6 text-white" />
-          </div>
-          <div>
-            <h1 className="text-3xl font-bold">
-              <TextType
-                text={["Goals Calendar"]}
-                typingSpeed={75}
-                pauseDuration={1500}
-                showCursor={true}
-                cursorCharacter="|"
-                loop={false}
-                textColors={[theme.colors.primary]}
-                className="inline-block"
-              />
-            </h1>
-            <p className="text-sm" style={{ color: theme.colors.textSecondary }}>
-              Click on any date to set a goal
+    <>
+      <PageHeader
+        eyebrow={openCount ? `${openCount} open` : 'Aim for something'}
+        title="Goals"
+        actions={
+          <Button variant="primary" icon={<Plus className="h-4 w-4" aria-hidden="true" />} onClick={() => openNew()}>
+            New goal
+          </Button>
+        }
+      >
+        A number of hours on a language or project, by a date. You get a reminder before it is due.
+      </PageHeader>
+
+      <div className="flex flex-wrap items-start gap-6">
+        <section aria-label="Your goals" className="min-w-0 flex-[2_1_480px]">
+          {goals.isPending ? (
+            <Skeleton className="h-64" />
+          ) : goals.isError ? (
+            <ErrorBox message={errorText(goals.error)} onRetry={() => goals.refetch()} />
+          ) : sorted.length === 0 ? (
+            <Card>
+              <EmptyState icon={<Target className="h-10 w-10" />} title="No goals yet" action={<Button variant="primary" onClick={() => openNew()}>Set your first goal</Button>}>
+                For example: 20 hours of python before the end of the month.
+              </EmptyState>
+            </Card>
+          ) : (
+            <ul className="flex flex-col gap-3">
+              {sorted.map((g, i) => (
+                <GoalItem key={g._id} goal={g} progress={progress[i]?.data} />
+              ))}
+            </ul>
+          )}
+        </section>
+        <aside className="min-w-0 flex-[1_1_300px]">
+          <MonthCalendar goals={all} onPick={openNew} />
+          <Card className="mt-4 p-5">
+            <CardTitle>How progress is counted</CardTitle>
+            <p className="text-sm text-muted">
+              Hours count from when you create a goal until its deadline, whenever the language or the project name matches what you typed. Marking a goal complete also teaches
+              Insights how well you estimate.
             </p>
-          </div>
-        </div>
-
-        {/* Main Content Grid */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {/* Left & Center: Compact Calendar Card */}
-          <div 
-            className="lg:col-span-2 backdrop-blur-lg rounded-3xl p-8 border shadow-2xl transition-all duration-300"
-            style={{
-              backgroundColor: `${theme.colors.surface}cc`,
-              borderColor: `${theme.colors.primary}40`,
-            }}
-          >
-            <div className="flex gap-6">
-              {/* Left: Large Date Display */}
-              <div 
-                className="flex-shrink-0 w-48 rounded-2xl flex flex-col items-center justify-center py-8 transition-all duration-300"
-                style={{ 
-                  backgroundColor: `${theme.colors.primary}20`,
-                  borderLeft: `4px solid ${theme.colors.primary}`
-                }}
-              >
-                <div 
-                  className="text-sm font-semibold uppercase tracking-wider mb-2"
-                  style={{ color: theme.colors.primary }}
-              >
-                {dayNames[new Date(currentDate.getFullYear(), currentDate.getMonth(), selectedDate?.getDate() || new Date().getDate()).getDay()]}
-              </div>
-              <div className="text-7xl font-bold mb-1">
-                <GradientText animationSpeed={4}>
-                  {selectedDate?.getDate() || new Date().getDate()}
-                </GradientText>
-              </div>
-            </div>              {/* Right: Small Monthly Calendar */}
-              <div className="flex-1">
-              {/* Month Navigation */}
-              <div className="flex items-center justify-between mb-6">
-                <button
-                  onClick={goToPreviousMonth}
-                  className="cursor-target p-2 rounded-lg transition-all duration-200"
-                  style={{ 
-                    backgroundColor: `${theme.colors.surface}80`,
-                    color: theme.colors.text
-                  }}
-                  onMouseEnter={(e) => e.currentTarget.style.backgroundColor = `${theme.colors.primary}20`}
-                  onMouseLeave={(e) => e.currentTarget.style.backgroundColor = `${theme.colors.surface}80`}
-                >
-                  <ChevronLeft className="w-5 h-5" />
-                </button>
-                
-                <h2 
-                  className="text-xl font-bold uppercase tracking-wide"
-                  style={{ color: theme.colors.text }}
-                >
-                  {monthNames[currentDate.getMonth()].toUpperCase()} {currentDate.getFullYear()}
-                </h2>
-                
-                <button
-                  onClick={goToNextMonth}
-                  className="cursor-target p-2 rounded-lg transition-all duration-200"
-                  style={{ 
-                    backgroundColor: `${theme.colors.surface}80`,
-                    color: theme.colors.text
-                  }}
-                  onMouseEnter={(e) => e.currentTarget.style.backgroundColor = `${theme.colors.primary}20`}
-                  onMouseLeave={(e) => e.currentTarget.style.backgroundColor = `${theme.colors.surface}80`}
-                >
-                  <ChevronRight className="w-5 h-5" />
-                </button>
-              </div>
-
-              {/* Day Names Header */}
-              <div className="grid grid-cols-7 gap-2 mb-3">
-                {dayNames.map(day => (
-                  <div 
-                    key={day} 
-                    className="text-center font-semibold text-xs py-1"
-                    style={{ color: theme.colors.textSecondary }}
-                  >
-                    {day.charAt(0)}
-                  </div>
-                ))}
-              </div>
-              
-              {/* Calendar Days Grid */}
-              <div className="grid grid-cols-7 gap-2">
-                {calendarDays}
-              </div>
-            </div>
-          </div>
-        </div>
-
-          {/* Right: Goals List */}
-          <div className="lg:col-span-1">
-            <div 
-              className="backdrop-blur-lg rounded-3xl p-6 border shadow-2xl transition-all duration-300 sticky top-8"
-              style={{
-                backgroundColor: `${theme.colors.surface}cc`,
-                borderColor: `${theme.colors.primary}40`,
-              }}
-            >
-            <h3 className="text-xl font-bold mb-4">
-              <GradientText animationSpeed={7}>
-                Your Goals
-              </GradientText>
-            </h3>
-            <div className="space-y-3 max-h-[600px] overflow-y-auto pr-2">
-              {goals.length === 0 ? (
-                <div 
-                  className="text-center py-8 rounded-xl border"
-                  style={{
-                    backgroundColor: `${theme.colors.surface}80`,
-                    borderColor: theme.colors.border,
-                    color: theme.colors.textSecondary
-                  }}
-                >
-                  <Target className="w-12 h-12 mx-auto mb-3 opacity-50" />
-                  <p className="text-sm">No goals set yet. Click on a date to create your first goal!</p>
-                </div>
-              ) : (
-                goals.map((goal) => (
-                  <div
-                    key={goal._id}
-                    className="p-4 rounded-xl border transition-all duration-200 cursor-target"
-                    style={{
-                      backgroundColor: `${theme.colors.surface}80`,
-                      borderColor: theme.colors.border,
-                    }}
-                    onMouseEnter={(e) => e.currentTarget.style.borderColor = theme.colors.primary}
-                    onMouseLeave={(e) => e.currentTarget.style.borderColor = theme.colors.border}
-                  >
-                    <h4 className="font-semibold text-base mb-1" style={{ color: theme.colors.text }}>
-                      {goal.title}
-                    </h4>
-                    <p className="text-xs mb-2 line-clamp-2" style={{ color: theme.colors.textSecondary }}>
-                      {goal.description}
-                    </p>
-                    <div className="flex flex-col gap-1 text-xs">
-                      <span 
-                        className="px-2 py-1 rounded-full inline-block w-fit"
-                        style={{
-                          backgroundColor: `${theme.colors.primary}20`,
-                          color: theme.colors.primary
-                        }}
-                      >
-                        {goal.techStack}
-                      </span>
-                      <span style={{ color: theme.colors.textSecondary }}>
-                        Target: <GradientText animationSpeed={5}>{goal.targetHours}h</GradientText>
-                      </span>
-                      <span style={{ color: theme.colors.textSecondary }}>
-                        {new Date(goal.deadline).toLocaleDateString()}
-                      </span>
-                    </div>
-                    {/* Completing a goal is what feeds the Insights estimation
-                        accuracy metric — before this button existed nothing in
-                        the app could ever set status to 'completed'. */}
-                    <button
-                      type="button"
-                      onClick={() => toggleGoalCompletion(goal)}
-                      className="cursor-target mt-3 w-full px-3 py-1.5 rounded-lg text-xs font-medium transition-colors"
-                      style={
-                        goal.status === 'completed'
-                          ? {
-                              backgroundColor: `${theme.colors.primary}22`,
-                              color: theme.colors.primary,
-                              border: `1px solid ${theme.colors.primary}55`,
-                            }
-                          : {
-                              color: theme.colors.textSecondary,
-                              border: `1px solid ${theme.colors.border}`,
-                            }
-                      }
-                    >
-                      {goal.status === 'completed' ? '✓ Completed — reopen' : 'Mark complete'}
-                    </button>
-                  </div>
-                ))
-              )}
-            </div>
-          </div>
-        </div>
-        {/* End of grid */}
+          </Card>
+        </aside>
       </div>
-      {/* End of max-w container */}
 
-      {/* Goal Creation Modal */}
-      {showModal && (
-        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-          <div 
-            className="rounded-2xl p-8 max-w-lg w-full border shadow-2xl"
-            style={{
-              backgroundColor: theme.colors.surface,
-              borderColor: `${theme.colors.primary}50`,
-            }}
-          >
-            <div className="flex items-center justify-between mb-6">
-              <div>
-                <h2 className="text-2xl font-bold" style={{ color: theme.colors.text }}>
-                  Set Goal
-                </h2>
-                <p className="text-sm" style={{ color: theme.colors.textSecondary }}>
-                  {selectedDate?.toLocaleDateString('en-US', { 
-                    weekday: 'long', 
-                    year: 'numeric', 
-                    month: 'long', 
-                    day: 'numeric' 
-                  })}
-                </p>
-              </div>
-              <button
-                onClick={() => {
-                  setShowModal(false);
-                  setSelectedDate(null);
-                }}
-                className="cursor-target p-2 rounded-lg transition"
-                style={{ 
-                  backgroundColor: `${theme.colors.surface}80`,
-                  color: theme.colors.textSecondary
-                }}
-                onMouseEnter={(e) => e.currentTarget.style.backgroundColor = `${theme.colors.primary}20`}
-                onMouseLeave={(e) => e.currentTarget.style.backgroundColor = `${theme.colors.surface}80`}
-              >
-                <X className="w-6 h-6" />
-              </button>
-            </div>
-            
-            <form onSubmit={createGoal} className="space-y-4">
-              <div>
-                <label className="block mb-2 font-medium" style={{ color: theme.colors.text }}>
-                  Goal Title
-                </label>
-                <input
-                  type="text"
-                  value={formData.title}
-                  onChange={(e) => setFormData({ ...formData, title: e.target.value })}
-                  className="w-full px-4 py-3 rounded-lg border focus:outline-none focus:ring-2 transition"
-                  style={{
-                    backgroundColor: `${theme.colors.surface}80`,
-                    color: theme.colors.text,
-                    borderColor: theme.colors.border,
-                  }}
-                  onFocus={(e) => {
-                    e.currentTarget.style.borderColor = theme.colors.primary;
-                    e.currentTarget.style.boxShadow = `0 0 0 3px ${theme.colors.primary}20`;
-                  }}
-                  onBlur={(e) => {
-                    e.currentTarget.style.borderColor = theme.colors.border;
-                    e.currentTarget.style.boxShadow = 'none';
-                  }}
-                  placeholder="e.g., Complete React project"
-                  required
-                />
-              </div>
-              
-              <div>
-                <label className="block mb-2 font-medium" style={{ color: theme.colors.text }}>
-                  Description
-                </label>
-                <textarea
-                  value={formData.description}
-                  onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-                  className="w-full px-4 py-3 rounded-lg border focus:outline-none focus:ring-2 transition"
-                  style={{
-                    backgroundColor: `${theme.colors.surface}80`,
-                    color: theme.colors.text,
-                    borderColor: theme.colors.border,
-                  }}
-                  onFocus={(e) => {
-                    e.currentTarget.style.borderColor = theme.colors.primary;
-                    e.currentTarget.style.boxShadow = `0 0 0 3px ${theme.colors.primary}20`;
-                  }}
-                  onBlur={(e) => {
-                    e.currentTarget.style.borderColor = theme.colors.border;
-                    e.currentTarget.style.boxShadow = 'none';
-                  }}
-                  rows={3}
-                  placeholder="Describe your goal..."
-                />
-              </div>
-              
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block mb-2 font-medium" style={{ color: theme.colors.text }}>
-                    Target Hours
-                  </label>
-                  <input
-                    type="number"
-                    value={formData.targetHours}
-                    onChange={(e) => setFormData({ ...formData, targetHours: e.target.value })}
-                    className="w-full px-4 py-3 rounded-lg border focus:outline-none focus:ring-2 transition"
-                    style={{
-                      backgroundColor: `${theme.colors.surface}80`,
-                      color: theme.colors.text,
-                      borderColor: theme.colors.border,
-                    }}
-                    onFocus={(e) => {
-                      e.currentTarget.style.borderColor = theme.colors.primary;
-                      e.currentTarget.style.boxShadow = `0 0 0 3px ${theme.colors.primary}20`;
-                    }}
-                    onBlur={(e) => {
-                      e.currentTarget.style.borderColor = theme.colors.border;
-                      e.currentTarget.style.boxShadow = 'none';
-                    }}
-                    placeholder="10"
-                    required
-                  />
-                </div>
-                
-                <div>
-                  <label className="block mb-2 font-medium" style={{ color: theme.colors.text }}>
-                    Tech Stack
-                  </label>
-                  <input
-                    type="text"
-                    value={formData.techStack}
-                    onChange={(e) => setFormData({ ...formData, techStack: e.target.value })}
-                    className="w-full px-4 py-3 rounded-lg border focus:outline-none focus:ring-2 transition"
-                    style={{
-                      backgroundColor: `${theme.colors.surface}80`,
-                      color: theme.colors.text,
-                      borderColor: theme.colors.border,
-                    }}
-                    onFocus={(e) => {
-                      e.currentTarget.style.borderColor = theme.colors.primary;
-                      e.currentTarget.style.boxShadow = `0 0 0 3px ${theme.colors.primary}20`;
-                    }}
-                    onBlur={(e) => {
-                      e.currentTarget.style.borderColor = theme.colors.border;
-                      e.currentTarget.style.boxShadow = 'none';
-                    }}
-                    placeholder="React, Node.js"
-                  />
-                </div>
-              </div>
-              
-              <div className="flex gap-3 pt-4">
-                <button
-                  type="submit"
-                  className="cursor-target flex-1 px-6 py-3 rounded-lg font-semibold transition shadow-lg text-white"
-                  style={{
-                    background: `linear-gradient(to right, ${theme.colors.primary}, ${theme.colors.accent})`,
-                  }}
-                >
-                  Create Goal
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setShowModal(false);
-                    setSelectedDate(null);
-                  }}
-                  className="cursor-target px-6 py-3 rounded-lg font-semibold transition"
-                  style={{
-                    backgroundColor: `${theme.colors.surface}80`,
-                    color: theme.colors.text,
-                  }}
-                  onMouseEnter={(e) => e.currentTarget.style.backgroundColor = `${theme.colors.primary}20`}
-                  onMouseLeave={(e) => e.currentTarget.style.backgroundColor = `${theme.colors.surface}80`}
-                >
-                  Cancel
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-    </div>
-    </div>
+      <NewGoalDialog open={dialog.open} deadline={dialog.deadline} onClose={() => setDialog({ ...dialog, open: false })} />
+    </>
   );
 }

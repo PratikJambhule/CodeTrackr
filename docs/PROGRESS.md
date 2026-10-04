@@ -6,6 +6,141 @@ engineering narrative for August–September is in `docs/SESSION-LOG-2026-08-27.
 
 ---
 
+## 2026-10-04 — Website tooling moved to Node 24
+
+`docker compose up --build` printed `npm warn EBADENGINE`: Vitest 5 wants Node `^22.12 || ^24 ||
+>=26` and jest-dom 7 wants `>=22`, while the website's dev image and its CI job used Node 20 (the
+laptop runs 24, so it never showed here). **Checked** by running the CI frontend steps (clean
+`npm ci`, lint, 51 tests, build) in throwaway `node:20-alpine` and `node:24-alpine` containers:
+both pass, so nothing was broken yet. Moved the frontend CI job and `frontend/Dockerfile.dev` to
+Node 24 anyway (D-38): Node 20 is end-of-life and the tools no longer promise to run on it. The API
+still runs Node 20, logged as L-15. Also fixed the last places that called extension 2.5.0
+"unreleased" (IMPROVEMENT_PLAN M-30, CODETRACKR_PROJECT_CONTEXT, ROADMAP).
+
+## 2026-10-04 — Frontend lint clean; sign-out bug found and fixed
+
+**Lint.** `npm run lint` in `frontend/` reported 13 problems (12 errors, 1 warning); none broke the
+build or a test.
+- 11 × `react-refresh/only-export-components`. React Fast Refresh can only hot-swap a file that
+  exports nothing but components; a file that also exports a helper reloads the whole page on every
+  edit. Helpers moved into plain `.ts` files: `components/ui/buttonClass.ts`,
+  `components/ui/toastContext.ts` (`useToast`), `themeContext.ts` (`useTheme`),
+  `components/charts/tone.ts` (chart colours), and `cellsSummary` into `lib/standings.ts` (now with
+  a test). `NAV`, `CELL_BG` and `resolveTheme` were only used in their own file and are no longer
+  exported. `components/ui/index` became a `.ts` file that only re-exports (the components moved to
+  `Primitives.tsx`), so pages import from the same place as before.
+- `Groups` received a `user` prop it never used (removed). `Goals` built a new `[]` on every render
+  while loading, so its sorted list was recomputed each time (now memoised).
+
+Now 0 problems, and CI runs `npm run lint` so it stays clean.
+
+**Bug: signing out landed on the sign-in page.** Checking every moved piece in the browser (local
+`dev-local` API + Vite), signing out from a group board ended on `/login`, with that board remembered
+as the page to return to after the next sign-in. Cause: sign-out cleared the signed-in user and then
+navigated to `/`, but React drew the current page first with no user, and its guard did its job
+(remember the page, go to sign-in). Fix: sign-out ends the session and loads `/` fresh (D-37). A
+routing test reproduces it (failed before the fix, passes after); in the browser, signing out from
+Goals now lands on the landing page with nothing remembered.
+
+**Tested (2026-10-04):** frontend lint 0 problems, `tsc -b` clean, Vitest 51 (6 files: +1
+`cellsSummary`, +1 sign-out), `npm run build` green (entry chunk 306.54 kB, gzip 97.20 kB); backend
+unit 27 suites / 375, integration 39, extension 6 suites / 70. Seen in the browser: dashboard, groups,
+group board (screen-reader row summaries), a toast, theme switch, goals, profile, sign-out.
+
+## 2026-10-04 — Extension 2.5.0 is live on the Marketplace
+
+The user published 2.5.0 with `vsce publish` early on 2026-10-04 (IST); the Marketplace kept showing
+2.4.0 while it verified the upload. **Checked later the same day:** `npx vsce show
+CodeTrackr-ext.codetrackr-vscode` lists 2.5.0 (uploaded 2026-10-03 22:00 UTC) as the newest version,
+and the listing page shows the 2.5.0 README with **94 installs** (an install count, not active users).
+So Sign In, the offline outbox and the keychain are now live for everyone whose VS Code updates the
+extension. Docs that still said "submitted" or "unpublished" were corrected: README, ARCHITECTURE,
+CODETRACKR_PROJECT_CONTEXT, INTERVIEW_PREP, RELEASE (§4 marked done), the update box of each long
+interview guide, the cheat sheet, Q&A, Quick Wins and the resume notes; PDFs rebuilt. Not done:
+Open VSX (optional, `docs/RELEASE.md` §4).
+
+## 2026-10-04 — Website redesign: "the weekly race"
+
+**Why.** The user did not like the site: flashy effects, confusing layouts, a dated look, and no page
+explaining the product. A proposal (5 boards: direction, chart kit, landing, dashboard, group board)
+was approved before any code changed; spec `docs/specs/2026-10-04-frontend-redesign.md`, decisions
+D-31 to D-36.
+
+**Backend (test first).** `GET /api/analytics/history/:userId` (year of local days, hours of day,
+top projects, commits; one `$facet`, `services/historyView.js`); group details gained `daily`
+(seconds per member per local day, viewer's time zone, `services/groupDaily.js`); `GET
+/api/groups/:id/preview` for invite links. 3 integration tests (39 total), `tests/localDays.test.js`
+(6). `scripts/dev-local.js` now seeds a year of demo data, five friends, four groups, goals and
+notifications, so every page can be checked locally.
+
+**Frontend.** Design tokens as CSS variables (dark default, light, system); three Google typefaces;
+UI kit (Button, Modal with focus trap, Toast replacing `alert()`, fields, Segmented); chart kit
+(StandingsTower with a FLIP slide, RaceChart with non-overlapping end labels, Bars, YearHeatmap,
+HourStrip, Ring, Sparkline); AppShell (sidebar; bottom tab bar on phones) and PublicLayout. Pages:
+landing (animated example week), guide, privacy, sign-in, 404, dashboard (race strip, stat tiles,
+week/today charts with the old two-hour drill-down kept, year heatmap, languages and projects, when
+you code, build health, goals, top insight), groups, group board (own route; tower, race chart,
+highlights, contest dates in the URL, admin rename/remove, leave), invite page, leaderboard (podium +
+tower), goals (rings + calendar), insights, profile (devices, preferences, API key under Advanced),
+onboarding checklist that ticks itself, device approval, notifications. Every page lazy-loaded.
+Removed three, ogl, postprocessing, gsap, chart.js, react-chartjs-2, chartjs-plugin-datalabels,
+axios, clsx, tailwind-merge, the 28-theme context and the effect components.
+
+**Bug found in the old code (fixed): the Goals calendar created goals a day early in India.** It
+built the deadline from local midnight with `toISOString()`, which is the previous day in UTC
+before 05:30 IST, so clicking 10 Oct saved 9 Oct. Now dates are local keys (`lib/format.ts`
+`localDateKey`); a test pins `TZ=Asia/Kolkata` and asserts both the old and new behaviour. Checked
+in the browser: clicking 20 Oct saved a goal due Tue 20 Oct. (M-34)
+
+**Found while checking in the browser (all fixed before hand-over):** tower names squeezed to zero
+width beside the race chart (board now stacks; names have a minimum width); race chart text too
+small when the chart is narrow (it now lays out in real pixels from its measured width); a hidden
+data table widened the page (tables ignore the screen-reader-only width; wrapped in a div); dense
+bar labels and the notifications panel overflowed on phones; card grids overflowed at 320 px
+(`minmax(min(300px,100%),1fr)`); a wrong group password showed "Your session has ended" because
+every 401 was treated as signed out (`errorText` now uses the server's message; unit test added).
+
+**Verified.** Desktop: every page screenshotted with headless Chrome against the local API. Phone:
+every page at 307-375 px, no horizontal scroll anywhere, dark and light. Flows: join a private group
+(wrong password, then right), approve a device code, collect the key, see it under Connected
+computers, disconnect it; create a goal from the calendar; set contest dates (URL updates, 10 day
+cells, race chart redraws); open an hour of today; notifications; theme switch. Keyboard: Escape
+closes dialogs and focus returns to the control that opened them.
+
+**Measured** (`npm run build`, gzip level 9 via Node zlib): first visit to the landing page 358,681
+bytes (114,167 gzipped) against 747,989 (231,590) for the old single bundle: about 52% / 51% less.
+First visit to the dashboard 367,411 (116,774). Largest chunk (React, router, React Query, shared
+UI) 306.55 kB, 97.04 kB gzipped.
+
+**Tested.** Frontend Vitest 49 (6 files); backend unit 27 suites / 375; integration 39; extension
+6 / 70; frontend build green. CI now runs the frontend tests.
+
+**Not done / not verifiable here.** Real Google sign-in and the Vercel proxy (local mode bypasses
+login); Safari/iOS rendering (checked in Chromium only); the change is not deployed.
+
+---
+
+## 2026-10-04 — Extension 2.5.0 packaged for the Marketplace
+
+`npm ci` + tests (6 / 70) + `vsce package` → `extension/codetrackr-vscode-2.5.0.vsix` (99.7 KB).
+Before packaging, checked what the Marketplace page would show and fixed it:
+- **README** was 2.0-era (v2.0.11 badge, Teams, "copy the key from Profile", a duplicated second
+  half) and claimed file names are tracked — they are not. Rewritten for Sign In, with an accurate
+  sent / never-sent list taken from the trackers and `sanitizeCommand`.
+- **Icon** was a 35-byte blank placeholder (also in 2.4.0). New 256×256 icon generated with Pillow
+  (stopwatch + `</>` on a violet→pink tile), checked at 256 and 32 px; matching `galleryBanner`.
+- **Links:** `repository`/`author`/`homepage` pointed at `Soham-Official/CodeTrackr`; the real
+  repo is `PratikJambhule/CodeTrackr` (added `bugs`); homepage is now the dashboard.
+- CHANGELOG 2.5.0 dated 2026-10-04.
+
+The website got the same icon as its favicon (it showed Vite's default), and its tab title is now
+"CodeTrackr" instead of "frontend". Frontend build green.
+
+**Not done (user's step):** `npx vsce login CodeTrackr-ext` + `npx vsce publish --packagePath
+codetrackr-vscode-2.5.0.vsix`.
+
+---
+
 ## 2026-10-04 — Error reporting covers every error (L-13)
 
 **Why:** while explaining Sentry to the user I found it was only called from the central error
