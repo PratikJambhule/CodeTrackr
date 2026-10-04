@@ -3,7 +3,7 @@
 @tailwind utilities;
 
 /*
- * Design tokens (spec docs/specs/2026-10-04-frontend-redesign.md §4).
+ * Design tokens for "the weekly race" redesign (2026-10-04).
  * Dark is the default; [data-theme] is set in index.html before first paint.
  * Every colour has one meaning on every page:
  *   accent (purple) = best in the group / you / focus   good (green) = personal best, gains

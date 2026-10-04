@@ -1,131 +1,133 @@
 # CodeTrackr
 
-CodeTrackr tracks your coding activity in VS Code and turns it into a dashboard, goals, a
-global leaderboard and private groups where friends can compare hours, commits and how often
-their builds and commands fail. It started as a way to keep friendly competition going in a
-college friend group: because every editor is tracked automatically, nobody has to log time
-by hand.
+**Your coding hours, on the scoreboard.** A VS Code extension tracks your coding time on its own,
+and a website turns it into a dashboard, goals, a global leaderboard and groups where friends race
+each other week by week.
 
-- **Live site:** https://code-trackr-frontend.vercel.app (backend on Render's free tier: the
-  first request after ~15 idle minutes takes ~22 s)
-- **Extension:** `CodeTrackr-ext.codetrackr-vscode` on the VS Code Marketplace (2.5.0 live since
-  2026-10-04: Sign In, uploads kept safe offline, key in the OS keychain)
+[![CI](https://github.com/PratikJambhule/CodeTrackr/actions/workflows/ci.yml/badge.svg)](https://github.com/PratikJambhule/CodeTrackr/actions/workflows/ci.yml)
+[![VS Code Marketplace](https://img.shields.io/visual-studio-marketplace/v/CodeTrackr-ext.codetrackr-vscode?label=VS%20Code%20Marketplace)](https://marketplace.visualstudio.com/items?itemName=CodeTrackr-ext.codetrackr-vscode)
 
-## What it does
+- **Website:** https://code-trackr-frontend.vercel.app
+- **Extension:** [CodeTrackr for VS Code](https://marketplace.visualstudio.com/items?itemName=CodeTrackr-ext.codetrackr-vscode)
 
-| Part | What the user sees |
-|---|---|
-| VS Code extension | Runs in the background. Every ~2 minutes of active coding it sends one summary: time, language, project, edit counts, terminal commands and their exit codes, commits, focus time. Never file contents, diffs or full paths. |
-| Website (public) | A landing page that explains the product with an animated example week, a step-by-step guide, a plain-language privacy page, and group invite links (`/join/:id`). |
-| Dashboard | This week's race in your group (your position and the gap to the person above you), today/this week, a year heatmap, languages and projects, when you code, build health, goals and the top insight. Click an hour of today for a two-hour detail. |
-| Sign-in for the extension | **CodeTrackr: Sign In** shows a code; approve it on the website and that VS Code gets its own revocable key (or paste a key from Profile). |
-| Insights | Statistics over your own data (deep-work ratio, peak 2-hour window, cadence, churn, ...) plus a "What stands out" panel from 13 threshold rules. Each number shows "—" when there is not enough data. **Not machine learning.** |
-| Goals | "Spend N hours on X by date". Progress comes from tracked time whose language or project matches X. Deadline reminders run hourly. |
-| Leaderboard + Groups | Global ranking by hours. Groups (public, or private with a password) each have a board: a standings tower with one cell per day, a race chart of running totals, highlights, and contest dates you can share as a link. |
+![Landing page](.github/assets/landing.png)
+
+## Features
+
+- **Automatic tracking.** After about two minutes of real activity the extension sends one small
+  summary: active time, language, project name, edit counts, commits, and terminal commands with
+  their exit codes. Never file contents, diffs or full paths.
+- **Weekly race.** Every group has a board: an F1-style standings tower (one cell per day, gap to the
+  leader), a race chart of running totals, highlights, and contest dates you can share as a link.
+- **Dashboard.** Your race, today and this week, a year heatmap, languages and projects, when you
+  code, build health, goals and the top insight.
+- **Leaderboard.** Everyone ranked by hours, all time or the last 7 / 30 days.
+- **Goals.** "N hours of X by a date", with progress from matching time and one reminder per goal.
+- **Insights.** Plain statistics over your own data (deep-work ratio, peak hours, cadence, rework)
+  and 13 threshold rules. Every number shows "—" until there is enough data. Not machine learning.
+- **One-click sign-in for VS Code.** *CodeTrackr: Sign In* shows a code; approve it on the website
+  and that computer gets its own revocable key, stored in the OS keychain.
+
+![Dashboard](.github/assets/dashboard.png)
+
+![Group board](.github/assets/group-board.png)
+
+## How it works
+
+```mermaid
+flowchart LR
+  subgraph VSCode["VS Code extension"]
+    T["5 trackers: editor, focus, git, terminal, debug"] --> Q["persisted outbox<br/>(survives restarts)"]
+  end
+  Q -- "POST /api/extension/track<br/>per-device key" --> API
+  B["React website (Vercel)"] -- "/api, /auth via Vercel proxy<br/>httpOnly JWT cookie" --> API
+  GH["GitHub Actions cron"] -- "hourly reminders, nightly rollup" --> API
+  subgraph API["Express API (Render)"]
+    I["validate → credit → 10-minute bucket"]
+    R["analytics, leaderboard, groups, goals"]
+  end
+  API --> DB[("MongoDB Atlas")]
+```
+
+- **Credited, not trusted, time.** An upload counts only as far as window-focus time vouches for it,
+  capped at 600 s per user per 10-minute window with an atomic counter, so a script cannot farm hours.
+- **Ten-minute buckets.** Uploads are merged with one atomic `$inc` upsert per (user, project,
+  language, 10 minutes): about 5× fewer documents and 13× less data than one document per upload
+  (local benchmark at the 2-minute upload cadence).
+- **Idempotent uploads.** Each upload carries an id; a retry after a dropped connection is applied once.
+- **Running totals.** The all-time leaderboard reads one stats row per user instead of scanning all
+  activity: 6.7 s → 62 ms at 1M rows in a local benchmark (`backend/bench/`).
+- **One site for the browser.** Vercel forwards `/api` and `/auth` to the API, so the login cookie is
+  first-party, which browsers that block third-party cookies (Safari, private windows) require.
 
 ## Tech stack
 
 | Layer | Stack |
 |---|---|
-| Extension | TypeScript, esbuild, axios, VS Code API (shell integration, Git extension API) |
-| Backend | Node 20, Express 5, Mongoose 8, Passport (Google OAuth 2.0), JWT in an httpOnly cookie, helmet, express-rate-limit |
+| Extension | TypeScript, esbuild, VS Code API (shell integration, Git API, SecretStorage) |
+| Backend | Node.js, Express 5, Mongoose 8, Passport (Google OAuth 2.0), JWT cookie, helmet, express-rate-limit |
 | Database | MongoDB Atlas |
-| Frontend | React 19, Vite 7, TypeScript, Tailwind 3 with CSS-variable design tokens (dark + light), react-router 7, React Query 5, small hand-made SVG/HTML charts, lucide icons; Vitest + Testing Library |
-| Hosting | Backend on Render, frontend on Vercel, scheduled jobs from GitHub Actions |
-| CI / CD | GitHub Actions: backend unit + integration tests, extension tests, frontend lint + tests + build, Docker image health check; optional deploy-on-green (`deploy.yml`) |
-| Ops | JSON logs with request ids, optional Sentry, `backend/Dockerfile` |
+| Frontend | React 19, Vite 7, TypeScript, Tailwind CSS (dark + light design tokens), React Router 7, TanStack Query 5, hand-made SVG charts |
+| Testing | `node:assert` unit tests, supertest + mongodb-memory-server integration tests, Vitest + Testing Library |
+| Hosting & CI | Render (API), Vercel (website), GitHub Actions (CI, scheduled jobs), Docker |
 
-## Run it locally
+## Getting started
 
-You need Node 22.12 or newer (24 recommended; the website's test tools need it, the API also runs
-on 20), a MongoDB connection string and a Google OAuth client
-(redirect URI `http://localhost:5050/auth/google/callback`).
+### Run everything with Docker
+
+Needs Docker Desktop (running). From the project folder:
 
 ```bash
-cd backend && npm install && cp .env.example .env
+docker compose up --build
 ```
 
-Fill in `MONGO_URI`, `JWT_SECRET`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` and
-`GOOGLE_CALLBACK_URL` in `backend/.env`. The API refuses to start without them.
+Open http://localhost:5173. This starts MongoDB 7, the API (seeded with demo data) and the website
+with live reload. You are signed in as a demo user; Google sign-in is replaced by a local-only
+bypass that the API refuses in production. Stop with `Ctrl+C`; `docker compose down -v` also deletes
+the local data.
+
+### Run without Docker or any accounts
+
+Needs Node.js 22.12 or newer (24 recommended).
 
 ```bash
-cd backend && npm run dev
+cd backend && npm install && npm run dev:local
 ```
 
 ```bash
 cd frontend && npm install && npm run dev
 ```
 
-The dashboard opens on http://localhost:5173 and talks to http://localhost:5050 unless
-`VITE_API_URL` is set (development only: the production build calls its own address and Vercel
-forwards `/api` and `/auth` to Render). For the extension, run `npm install && npm run build` in `extension/`, then
-either `npm run package` and install the `.vsix`, or open the folder in VS Code and start an
-Extension Development Host (there is no committed `launch.json`, so VS Code offers to create one).
-Then set `codetrackr.apiBase` to `http://localhost:5050` and paste the API key from the
-Profile page with the **CodeTrackr: Setup API Key** command.
+The API runs on an in-memory MongoDB with demo data for every page (about ten months of activity,
+friends, groups, goals). Data is gone when the process stops. To run it next to Docker, use
+`DEV_PORT=5051 node scripts/dev-local.js` and `VITE_API_URL=http://localhost:5051 npx vite --port 5174`.
 
-### Run everything with Docker (easiest)
-
-Install Docker Desktop and start it (wait for "Engine running"). Then, from the project folder:
+### Run against your own MongoDB and Google sign-in
 
 ```bash
-docker compose up --build
+cd backend && cp .env.example .env
 ```
 
-Open http://localhost:5173. Three containers start together:
+Fill in `MONGO_URI`, `JWT_SECRET`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` and
+`GOOGLE_CALLBACK_URL` (`http://localhost:5050/auth/google/callback`), then `npm run dev` in
+`backend/` and `npm run dev` in `frontend/`.
 
-| Container | What it is | Address |
-|---|---|---|
-| `mongo` | a real MongoDB 7; your data is kept between runs | `mongodb://localhost:27018/codetrackr` from your laptop |
-| `backend` | the API, built from `backend/Dockerfile`; seeds demo data on first start | http://localhost:5050 |
-| `frontend` | the website's dev server; edits in `frontend/src` reload the page | http://localhost:5173 |
-
-You are signed in as the demo user "Soham (local)" (Google sign-in is replaced by `AUTH_BYPASS`,
-local only). Nothing reads `backend/.env` or touches the live database. Stop with `Ctrl+C`, or
-`docker compose down`; add `-v` to also delete the local data. Point the extension at
-`http://localhost:5050` to send it real activity (see below).
-
-### Run everything locally without any accounts
+### Try the extension locally
 
 ```bash
-cd backend && npm run dev:local
-```
-
-```bash
-cd frontend && npm run dev
-```
-
-`dev:local` starts the real API on an in-memory MongoDB with `AUTH_BYPASS` on (refused in
-production) and seeds demo data for every page: you ("Soham (local)") with about ten months of
-activity, five friends with three weeks of it, four groups (the private one's password is
-`squad`), goals and notifications. Open http://localhost:5173. Data is gone when the process stops. On Windows start it with
-`node scripts/dev-local.js` if you will stop it from a script: stopping `npm run` can leave the
-server running on port 5050.
-
-To try the extension against this local API without touching your normal VS Code, build it and
-open a separate test window with its own profile:
-
-```bash
-cd extension && npm run build
+cd extension && npm install && npm run build
 ```
 
 ```bash
 code --new-window --user-data-dir ./.vscode-test-profile --extensions-dir ./.vscode-test-ext --extensionDevelopmentPath "$(pwd)/extension" path/to/any/folder
 ```
 
-In that window set `codetrackr.apiBase` to `http://localhost:5050` (optionally
-`codetrackr.flushIntervalSeconds: 10` and `codetrackr.minFlushMinutes: 0.5` to see uploads
-quickly), then run **CodeTrackr: Sign In**. With `AUTH_BYPASS` every upload is credited to the
-demo user shown on the dashboard.
+In that window set `codetrackr.apiBase` to `http://localhost:5050` and run **CodeTrackr: Sign In**.
 
-## Test it
+## Tests
 
 ```bash
-cd backend && npm test
-```
-
-```bash
-cd backend && npm run test:int
+cd backend && npm test && npm run test:int
 ```
 
 ```bash
@@ -136,31 +138,27 @@ cd extension && npm test
 cd frontend && npm run lint && npm test && npm run build
 ```
 
-Current results (2026-10-04): backend unit 27 suites / 375 assertions, backend integration
-41 tests (the real Express app over HTTP against an in-memory MongoDB), extension 6 suites /
-70 assertions, frontend 52 Vitest tests (formatting and standings logic, chart components,
-routing, sign-out), lint + type-check + build green. Benchmarks: `docs/BENCHMARKS.md`. Backend unit tests are plain
-`node:assert` scripts; integration tests use `supertest` + `mongodb-memory-server`; frontend tests
-run in jsdom in the India time zone (`TZ=Asia/Kolkata`, where the date bugs were).
+375 backend unit assertions, 42 API integration tests (the real Express app over HTTP against an
+in-memory MongoDB), 70 extension assertions and 54 frontend tests. Frontend tests run in the India
+time zone, where the date bugs showed up. CI runs all of them, plus a Docker build with a health
+check, on every push.
 
-## Documentation
+## Project structure
 
-| File | Read it for |
-|---|---|
-| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Components, data flow, diagrams |
-| [docs/DECISIONS.md](docs/DECISIONS.md) | Why each major choice was made, and what was rejected |
-| [docs/PROGRESS.md](docs/PROGRESS.md) | Dated log of what was built, tested and fixed |
-| [docs/INTERVIEW_PREP.md](docs/INTERVIEW_PREP.md) | Likely interview questions with short answers |
-| [docs/IMPROVEMENT_PLAN.md](docs/IMPROVEMENT_PLAN.md) | Every known weakness (H/M/L findings), fixed or open |
-| [docs/BENCHMARKS.md](docs/BENCHMARKS.md) | Measured leaderboard and ingest numbers, with how to re-run them |
-| [docs/RELEASE.md](docs/RELEASE.md) | Deploy order, live migrations, publishing the extension |
-| [docs/ROADMAP_2026-10.md](docs/ROADMAP_2026-10.md) | The October 2026 improvement plan and its status |
-| [docs/specs/2026-10-04-frontend-redesign.md](docs/specs/2026-10-04-frontend-redesign.md) | The website redesign: direction, design tokens, pages, API additions |
-| [CODETRACKR_PROJECT_CONTEXT.md](CODETRACKR_PROJECT_CONTEXT.md) | Long-form reference of the whole implementation |
-| [docs/INSIGHTS_METRICS.md](docs/INSIGHTS_METRICS.md), [docs/RULES_ENGINE.md](docs/RULES_ENGINE.md) | Every Insights formula and rule |
-| [docs/ML_INTEGRATION_PLAN.md](docs/ML_INTEGRATION_PLAN.md) | The machine-learning plan (designed, **not built**, blocked on data) |
-| [docs/interview-preparation/](docs/interview-preparation/) | Full interview guide, Q&A bank, cheat sheet |
+```
+backend/     Express API: routes/, services/, models/, middleware/, tests/, scripts/, bench/
+frontend/    React website: src/pages, src/components (ui, charts, layout), src/lib, src/hooks
+extension/   VS Code extension: src/ (trackers, outbox, sign-in), tests/
+.github/     CI, scheduled jobs, deploy workflow
+```
+
+## Privacy
+
+The extension sends counts and durations, the language, the project (folder) name, and terminal
+commands by type with their exit codes. A command that fails repeatedly is sent with anything that
+looks like a password, token or key replaced by `***`. File contents, diffs and full paths are never
+sent. The website's privacy page explains it in full.
 
 ## Team
 
-Pratik Jambhule, Kartik Kharat, Soham Budhewar.
+Pratik Jambhule, Kartik Kharat, Soham Budhewar. The extension is MIT-licensed (`extension/LICENSE`).

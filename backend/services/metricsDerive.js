@@ -5,9 +5,8 @@
  * unit tested without a database. metricsService.js does the querying and
  * calls into these.
  *
- * Definitions originate in docs/TRACKING_ROADMAP.md Part 3. Where a formula
- * diverges from that document, the reason is recorded here and in
- * docs/INSIGHTS_METRICS.md (which is the reference doc for these).
+ * Each function's comment states its formula; where a formula diverges from
+ * the obvious definition, the reason is recorded next to it.
  *
  * Audit note (2026-09-10): several formulas were measuring something other
  * than their name. Each fix is commented at its function.

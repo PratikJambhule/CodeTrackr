@@ -437,6 +437,26 @@ async function main() {
       assert.strictEqual(await Notification.countDocuments({ userId: me.user._id }), 1);
     }],
 
+    ['goals: the owner can delete a goal and its notifications; nobody else can', async () => {
+      const Goal = require('../../models/Goal');
+      const Notification = require('../../models/Notification');
+      const me = await h.makeUser();
+      const other = await h.makeUser('Other');
+      const goal = await Goal.create({ userId: me.user._id, title: 'Old', techStack: 'js', targetHours: 1, deadline: new Date(Date.now() - 300 * 864e5) });
+      await Notification.create({ userId: me.user._id, goalId: goal._id, type: 'deadline_missed', title: 't', message: 'm' });
+
+      const stolen = await request(app).delete(`/api/goals/${goal._id}`).set('Cookie', other.cookie);
+      assert.strictEqual(stolen.status, 404);
+      assert.ok(await Goal.exists({ _id: goal._id }));
+
+      const del = await request(app).delete(`/api/goals/${goal._id}`).set('Cookie', me.cookie);
+      assert.strictEqual(del.status, 200, JSON.stringify(del.body));
+      assert.strictEqual(await Goal.countDocuments({ _id: goal._id }), 0);
+      assert.strictEqual(await Notification.countDocuments({ goalId: goal._id }), 0);
+      const again = await request(app).delete(`/api/goals/${goal._id}`).set('Cookie', me.cookie);
+      assert.strictEqual(again.status, 404);
+    }],
+
     ['userstats: a ?days window still answers from the activity scan', async () => {
       const me = await h.makeUser();
       await request(app).post('/api/extension/track').set('x-api-key', me.apiKey).send(flush());

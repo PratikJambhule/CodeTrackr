@@ -5,7 +5,7 @@
  * tested without installing or booting the server.
  *
  * Every normaliser must tolerate a payload from an older extension version
- * that omits its sub-document entirely — see docs/TRACKING_ROADMAP.md.
+ * that omits its sub-document entirely (older extensions send fewer fields).
  */
 
 const MAX_FLOW_BLOCKS = 200;

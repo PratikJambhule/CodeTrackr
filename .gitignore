@@ -15,3 +15,14 @@ backend/scripts/*-backup-*.json
 # Local VS Code test window (README: run the extension against dev-local)
 .vscode-test-profile/
 .vscode-test-ext/
+
+# Personal working notes and assistant context: kept locally, not part of the public repo
+docs/
+CLAUDE.md
+CODETRACKR_PROJECT_CONTEXT.md
+.claude/
+
+# Old files that still have local edits; no longer part of the project
+THEME_USER_GUIDE.md
+extension/extension.js
+extension/index.html

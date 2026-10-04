@@ -162,8 +162,13 @@ function history(userId, days, now, { codeChance, evening = 0.7, intensity = 1 }
   const portfolio = await Goal.create({ userId: me._id, title: 'Ship portfolio v2', description: 'New projects section and dark mode.', targetHours: 8, techStack: 'portfolio', deadline: at(3), createdAt: at(-12) });
   await Goal.create({ userId: me._id, title: 'Finish the DSA sheet', description: 'Arrays to graphs, one topic a day.', targetHours: 20, techStack: 'python', deadline: at(10), createdAt: at(-20) });
   const rust = await Goal.create({ userId: me._id, title: 'OS shell assignment', description: 'Pipes, redirection and job control.', targetHours: 6, techStack: 'c', deadline: at(-4), createdAt: at(-30), status: 'completed', completedAt: at(-5) });
+  // A goal left over from last year: it belongs under "Older goals", not at the top of the page.
+  await Goal.create({ userId: me._id, title: 'Learn Rust basics', description: 'Never got to it.', targetHours: 10, techStack: 'rust', deadline: at(-320), createdAt: at(-340) });
   await Notification.create({ userId: me._id, goalId: portfolio._id, type: 'deadline_reminder', title: 'Deadline in 3 days', message: '“Ship portfolio v2” is due in 3 days.' });
   await Notification.create({ userId: me._id, goalId: rust._id, type: 'goal_completed', title: 'Goal completed', message: 'You completed “OS shell assignment”.', read: true });
 
-  app.listen(5050, () => console.log(`DEV API on http://localhost:5050 (AUTH_BYPASS, in-memory DB, ${unique.length} activity buckets)`));
+  // DEV_PORT lets this run next to `docker compose` (which holds 5050); pair it with
+  // VITE_API_URL=http://localhost:<port> and Vite on 5174 (allowed by CORS).
+  const port = Number(process.env.DEV_PORT) || 5050;
+  app.listen(port, () => console.log(`DEV API on http://localhost:${port} (AUTH_BYPASS, in-memory DB, ${unique.length} activity buckets)`));
 })().catch((e) => { console.error(e); process.exit(1); });

@@ -1,4 +1,5 @@
 import { Link } from 'react-router-dom';
+import { splitGoals } from '../../lib/goals';
 import { Sparkles, Target } from 'lucide-react';
 import { useGoalProgress, useGoals, useMetrics } from '../../hooks/queries';
 import { Bars, RankedBars, SplitBar } from '../../components/charts/Bars';
@@ -100,7 +101,8 @@ export function BuildHealth({ view, period }: { view: PeriodView; period: 'today
 /** Up to three open goals as rings, soonest deadline first. */
 export function GoalsMini() {
   const goals = useGoals();
-  const open = (goals.data ?? []).filter((g) => g.status !== 'completed').sort((a, b) => a.deadline.localeCompare(b.deadline)).slice(0, 3);
+  // Same rule as the Goals page: long-overdue goals are not "current".
+  const open = splitGoals(goals.data ?? []).current.filter((g) => g.status !== 'completed').slice(0, 3);
   const progress = useGoalProgress(open);
   return (
     <Card className="min-w-0 p-5">

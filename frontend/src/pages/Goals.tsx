@@ -1,11 +1,12 @@
 import { useMemo, useState, type FormEvent } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { ChevronLeft, ChevronRight, Plus, Target } from 'lucide-react';
+import { ChevronDown, ChevronLeft, ChevronRight, Plus, Target, Trash2 } from 'lucide-react';
 import { apiSend, errorText } from '../api';
 import { useGoalProgress, useGoals } from '../hooks/queries';
 import { Ring } from '../components/charts/Ring';
 import { Button, Card, CardTitle, EmptyState, ErrorBox, Modal, PageHeader, Pill, Skeleton, TextArea, TextField, useToast } from '../components/ui';
 import { dayLabel, daysBetween, deadlineKey, hoursHm, localDateKey, monthShort, relativeDay } from '../lib/format';
+import { OVERDUE_DAYS, splitGoals } from '../lib/goals';
 import type { Goal, GoalProgress } from '../types';
 
 const WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
@@ -77,6 +78,20 @@ function GoalItem({ goal, progress }: { goal: Goal; progress?: GoalProgress }) {
   const done = goal.status === 'completed';
   const ratio = progress ? progress.currentHours / Math.max(goal.targetHours, 0.01) : 0;
   const late = !done && daysBetween(new Date(), key) < 0;
+  const [confirm, setConfirm] = useState(false);
+  const remove = async () => {
+    try {
+      await apiSend('DELETE', `/api/goals/${goal._id}`);
+      setConfirm(false);
+      toast(`Deleted “${goal.title}”`);
+      // Drop it from the cache first, so nothing refetches the deleted goal's progress (a 404).
+      qc.removeQueries({ queryKey: ['goals', 'progress', goal._id] });
+      qc.setQueryData<Goal[]>(['goals'], (list) => list?.filter((g) => g._id !== goal._id));
+      void qc.invalidateQueries({ queryKey: ['notifications'] });
+    } catch (err) {
+      toast(errorText(err), 'error');
+    }
+  };
   const toggle = async () => {
     try {
       await apiSend('PATCH', `/api/goals/${goal._id}/${done ? 'reopen' : 'complete'}`);
@@ -104,9 +119,20 @@ function GoalItem({ goal, progress }: { goal: Goal; progress?: GoalProgress }) {
         </p>
         {progress && !progress.matched && <p className="mt-1 text-xs text-warn-ink">No language or project set, so no hours are counted for this goal.</p>}
       </div>
-      <Button size="sm" variant={done ? 'ghost' : 'secondary'} onClick={toggle}>
-        {done ? 'Reopen' : 'Mark complete'}
-      </Button>
+      <div className="flex items-center gap-2">
+        <Button size="sm" variant={done ? 'ghost' : 'secondary'} onClick={toggle}>
+          {done ? 'Reopen' : 'Mark complete'}
+        </Button>
+        <Button size="sm" variant="ghost" onClick={() => setConfirm(true)} aria-label={`Delete “${goal.title}”`} icon={<Trash2 className="h-4 w-4" aria-hidden="true" />} />
+      </div>
+      <Modal open={confirm} onClose={() => setConfirm(false)} title="Delete this goal?" description={`“${goal.title}” and its reminders are removed. This cannot be undone.`}>
+        <div className="flex justify-end gap-2">
+          <Button onClick={() => setConfirm(false)}>Keep it</Button>
+          <Button variant="danger" onClick={remove}>
+            Delete goal
+          </Button>
+        </div>
+      </Modal>
     </Card>
   );
 }
@@ -173,18 +199,18 @@ export default function Goals() {
   const goals = useGoals();
   // A new [] on every render would re-run the sort below each time while loading.
   const all = useMemo(() => goals.data ?? [], [goals.data]);
-  const sorted = useMemo(
-    () => [...all].sort((a, b) => Number(a.status === 'completed') - Number(b.status === 'completed') || a.deadline.localeCompare(b.deadline)),
-    [all],
-  );
-  const progress = useGoalProgress(sorted);
+  // Current goals on the page; long-overdue and long-completed ones fold into "Older goals".
+  const { current, older } = useMemo(() => splitGoals(all), [all]);
+  const [showOlder, setShowOlder] = useState(false);
+  const progress = useGoalProgress(current);
+  const olderProgress = useGoalProgress(showOlder ? older : []);
   const [dialog, setDialog] = useState<{ open: boolean; deadline: string }>({ open: false, deadline: '' });
   const openNew = (deadline?: string) => {
     const fallback = new Date();
     fallback.setDate(fallback.getDate() + 7);
     setDialog({ open: true, deadline: deadline ?? localDateKey(fallback) });
   };
-  const openCount = sorted.filter((g) => g.status !== 'completed').length;
+  const openCount = current.filter((g) => g.status !== 'completed').length;
 
   return (
     <>
@@ -206,18 +232,47 @@ export default function Goals() {
             <Skeleton className="h-64" />
           ) : goals.isError ? (
             <ErrorBox message={errorText(goals.error)} onRetry={() => goals.refetch()} />
-          ) : sorted.length === 0 ? (
-            <Card>
-              <EmptyState icon={<Target className="h-10 w-10" />} title="No goals yet" action={<Button variant="primary" onClick={() => openNew()}>Set your first goal</Button>}>
-                For example: 20 hours of python before the end of the month.
-              </EmptyState>
-            </Card>
           ) : (
-            <ul className="flex flex-col gap-3">
-              {sorted.map((g, i) => (
-                <GoalItem key={g._id} goal={g} progress={progress[i]?.data} />
-              ))}
-            </ul>
+            <>
+              {current.length === 0 ? (
+                <Card>
+                  <EmptyState
+                    icon={<Target className="h-10 w-10" />}
+                    title={older.length ? 'No current goals' : 'No goals yet'}
+                    action={<Button variant="primary" onClick={() => openNew()}>{older.length ? 'Set a new goal' : 'Set your first goal'}</Button>}
+                  >
+                    For example: 20 hours of python before the end of the month.
+                  </EmptyState>
+                </Card>
+              ) : (
+                <ul className="flex flex-col gap-3">
+                  {current.map((g, i) => (
+                    <GoalItem key={g._id} goal={g} progress={progress[i]?.data} />
+                  ))}
+                </ul>
+              )}
+              {older.length > 0 && (
+                <div className="mt-6">
+                  <button
+                    type="button"
+                    onClick={() => setShowOlder(!showOlder)}
+                    aria-expanded={showOlder}
+                    className="flex items-center gap-2 rounded-lg px-1 py-1 text-sm font-semibold text-muted hover:text-ink"
+                  >
+                    <ChevronDown className={`h-4 w-4 transition-transform ${showOlder ? 'rotate-180' : ''}`} aria-hidden="true" />
+                    Older goals ({older.length})
+                    <span className="font-normal text-faint">more than {OVERDUE_DAYS} days past their deadline, or completed over a month ago</span>
+                  </button>
+                  {showOlder && (
+                    <ul className="mt-3 flex flex-col gap-3">
+                      {older.map((g, i) => (
+                        <GoalItem key={g._id} goal={g} progress={olderProgress[i]?.data} />
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              )}
+            </>
           )}
         </section>
         <aside className="min-w-0 flex-[1_1_300px]">

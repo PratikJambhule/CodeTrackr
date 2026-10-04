@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const Goal = require('../models/Goal');
+const Notification = require('../models/Notification');
 const Activity = require('../models/Activity');
 const { isAuthenticated } = require('../middleware/auth');
 const { exactRegex } = require('../services/textQuery');
@@ -146,6 +147,22 @@ router.patch('/:goalId/reopen', isAuthenticated, async (req, res, next) => {
         await goal.save();
 
         res.json({ success: true, goal });
+    } catch (error) {
+        return next(error);
+    }
+});
+
+/**
+ * Delete a goal and its notifications (2026-10-04). Owner-scoped: someone
+ * else's goal id answers 404, the same as a missing one. Old test goals had
+ * no way out of the list before this.
+ */
+router.delete('/:goalId', isAuthenticated, async (req, res, next) => {
+    try {
+        const goal = await Goal.findOneAndDelete({ _id: req.params.goalId, userId: req.user.id });
+        if (!goal) return res.status(404).json({ message: 'Goal not found' });
+        await Notification.deleteMany({ goalId: goal._id, userId: req.user.id });
+        res.json({ success: true });
     } catch (error) {
         return next(error);
     }
