@@ -137,8 +137,8 @@ cd frontend && npm run lint && npm test && npm run build
 ```
 
 Current results (2026-10-04): backend unit 27 suites / 375 assertions, backend integration
-40 tests (the real Express app over HTTP against an in-memory MongoDB), extension 6 suites /
-70 assertions, frontend 51 Vitest tests (formatting and standings logic, chart components,
+41 tests (the real Express app over HTTP against an in-memory MongoDB), extension 6 suites /
+70 assertions, frontend 52 Vitest tests (formatting and standings logic, chart components,
 routing, sign-out), lint + type-check + build green. Benchmarks: `docs/BENCHMARKS.md`. Backend unit tests are plain
 `node:assert` scripts; integration tests use `supertest` + `mongodb-memory-server`; frontend tests
 run in jsdom in the India time zone (`TZ=Asia/Kolkata`, where the date bugs were).

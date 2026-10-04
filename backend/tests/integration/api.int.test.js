@@ -411,6 +411,32 @@ async function main() {
       assert.deepStrictEqual(groupAfter.body.leaderboard.map((r) => [r.userName, r.codingHours]), [['Oldtimer', 1], ['Newcomer', 0.17]]);
     }],
 
+    ['notifications: each goal gets one reminder and one missed notice, even after deleting it or with two sweeps at once (regression)', async () => {
+      const Goal = require('../../models/Goal');
+      const Notification = require('../../models/Notification');
+      const { checkUpcomingDeadlines, checkOverdueGoals } = require('../../services/notificationScheduler');
+      const me = await h.makeUser();
+      const hour = 3600e3;
+      const goal = (title, offset) => Goal.create({ userId: me.user._id, title, techStack: 'js', targetHours: 5, deadline: new Date(Date.now() + offset) });
+      const missed = await goal('Missed', -2 * hour);
+      const soon = await goal('Soon', 6.5 * hour);
+      await goal('Long overdue', -10 * 24 * hour); // its notice was handled long ago
+
+      // The in-process cron and the GitHub Actions call can run at the same minute.
+      await Promise.all([checkUpcomingDeadlines(), checkUpcomingDeadlines(), checkOverdueGoals(), checkOverdueGoals()]);
+      const rows = await Notification.find({ userId: me.user._id }).lean();
+      assert.deepStrictEqual(rows.map((n) => `${n.type}:${String(n.goalId)}`).sort(),
+        [`deadline_missed:${missed._id}`, `deadline_reminder:${soon._id}`].sort());
+
+      // Deleting the missed notice must not bring it back on the next sweep.
+      const notice = rows.find((n) => n.type === 'deadline_missed');
+      const del = await request(app).delete(`/api/notifications/${notice._id}`).set('Cookie', me.cookie);
+      assert.strictEqual(del.status, 200);
+      await checkOverdueGoals();
+      await checkUpcomingDeadlines();
+      assert.strictEqual(await Notification.countDocuments({ userId: me.user._id }), 1);
+    }],
+
     ['userstats: a ?days window still answers from the activity scan', async () => {
       const me = await h.makeUser();
       await request(app).post('/api/extension/track').set('x-api-key', me.apiKey).send(flush());

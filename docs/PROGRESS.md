@@ -6,6 +6,26 @@ engineering narrative for August–September is in `docs/SESSION-LOG-2026-08-27.
 
 ---
 
+## 2026-10-04 — Notifications sent once (M-37); wide-screen layout
+
+**Notifications (found by the user).** Deleted "deadline missed" notices came back every hour; the
+user saw them again on every sign-in. A read-only count of the live data: 8 missed-deadline notices,
+4 re-created at 07:00 UTC, no true duplicates yet. Cause: the sweep checked for the notification row
+instead of recording that it had sent one, and two schedulers (in-process cron + GitHub Actions) run
+each hour with find-then-create. **Fix (D-41):** flags on the goal claimed with one atomic update;
+missed notices only for deadlines in the last 48 hours; opening the bell marks what it shows as read
+(the badge no longer greets you each visit; new rows stay highlighted until the panel closes).
+**Tested:** integration test (two parallel sweeps, delete, sweep again), frontend bell test; both
+failed before the fix.
+
+**Layout (user feedback with a 1920 px screenshot, D-42).** Page width 1240 → 1600 px; the dashboard
+is a 12-column grid from 1280 px that pairs cards by height; group board tower and race chart side by
+side from 1536 px; leaderboard podium beside the table. Checked with headless-Chrome screenshots at
+1920 and 1150 px and in the browser at 375 px (no sideways scroll).
+
+**Tests (2026-10-04):** backend unit 27 suites / 375, integration 41; extension 6 / 70; frontend 52,
+lint clean, build green.
+
 ## 2026-10-04 — Live leaderboard bug fixed (H-24); top navigation bar
 
 **Bug (found by the user on the live site).** The all-time leaderboard listed only the user, while

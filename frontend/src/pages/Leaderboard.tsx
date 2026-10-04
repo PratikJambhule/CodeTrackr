@@ -12,7 +12,10 @@ const PODIUM = ['var(--gold)', 'var(--silver)', 'var(--bronze)'];
 
 function Podium({ rows, meId }: { rows: LeaderRow[]; meId: string }) {
   return (
-    <ol aria-label="Top three" className="mb-6 grid gap-4 [grid-template-columns:repeat(auto-fit,minmax(min(200px,100%),1fr))]">
+    <ol
+      aria-label="Top three"
+      className="col-span-12 grid gap-4 [grid-template-columns:repeat(auto-fit,minmax(min(200px,100%),1fr))] xl:sticky xl:top-20 xl:col-span-4 xl:grid-cols-1"
+    >
       {rows.slice(0, 3).map((r, i) => (
         <Card as="li" key={r.userId} className={`flex items-center gap-4 p-5 ${r.userId === meId ? 'bg-me' : ''}`}>
           <span className="display text-balance w-10 text-[56px]" style={{ color: PODIUM[i] }} aria-hidden="true">
@@ -84,9 +87,11 @@ export default function Leaderboard({ user }: { user: Me }) {
           </EmptyState>
         </Card>
       ) : (
-        <>
+        // Wide screens: the podium in a left column (it stays in view while the table scrolls),
+        // the full table beside it. Narrower: podium above the table.
+        <div className="grid grid-cols-12 items-start gap-4">
           <Podium rows={rows} meId={user.id} />
-          <Card className="p-4 sm:p-5">
+          <Card className="col-span-12 min-w-0 p-4 sm:p-5 xl:col-span-8">
             <CardTitle aside={`average ${hoursHm(average)} across ${plural(active.length, 'person', 'people')}`}>
               {me ? (
                 <span>
@@ -100,7 +105,7 @@ export default function Leaderboard({ user }: { user: Me }) {
             <StandingsTower rows={tower} dense valueHeader="Hours" label="Leaderboard" columns={[{ label: 'Commits' }, { label: 'Lines', title: 'Lines added plus lines removed' }]} />
             {q.isFetching && <p className="mt-3 font-mono text-xs text-muted">updating…</p>}
           </Card>
-        </>
+        </div>
       )}
     </>
   );

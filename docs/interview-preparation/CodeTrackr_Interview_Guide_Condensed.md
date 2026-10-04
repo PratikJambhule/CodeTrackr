@@ -21,14 +21,14 @@ the project was described.*
 > | Duplicates / offline | no idempotency; memory-only buffer, lost on restart | `flushId` receipts (applied once); persisted outbox in `globalState`, FIFO, survives restart (M-30 fixed) |
 > | Analytics | `find()` then JS reduce (M-1) | daily/weekly from one `$facet` pipeline, proven equal to the old code by an oracle test |
 > | Write reduction | "~10× fewer writes" | **measured**: 4.9× fewer documents, 12.7× less data at the 2-minute cadence (19.6× / 51× vs the old 30 s); same throughput |
-> | Tests | 18 suites / 296; nothing against a real DB | unit **27 suites / 375**, **40 integration tests** (supertest + in-memory MongoDB, incl. CORS preflight), extension **6 / 70**, **frontend 51** (Vitest + Testing Library, run in IST) |
+> | Tests | 18 suites / 296; nothing against a real DB | unit **27 suites / 375**, **41 integration tests** (supertest + in-memory MongoDB, incl. CORS preflight), extension **6 / 70**, **frontend 52** (Vitest + Testing Library, run in IST) |
 > | `userId` type | String on activities (M-6) | ObjectId migration in progress (reads accept both; script converts) |
 > | Teams | orphaned page + live API | deleted |
 > | Groups | no admin powers | creator can rename / remove members; ownership passes on when the creator leaves |
 > | Ops | no Docker, no CD, console logs | Dockerfile + CI health check; **`docker compose up` runs MongoDB + API + website locally** (verified); deploy-on-green (off until a secret), JSON logs with request ids, optional Sentry that receives **every** `log.error` (requests, route 500s, jobs, crashes) |
-> | Bugs found while building | — | **H-23** CORS lacked PATCH → goal completion and mark-as-read never worked in a browser; M-31 goal window; M-32 weekly window; H-22 IST "today"; email leaks M-28/M-29; **H-24** (found live 2026-10-04) the all-time boards trusted running totals before the backfill had run, so they listed only people who had uploaded since the deploy |
+> | Bugs found while building | — | **H-23** CORS lacked PATCH → goal completion and mark-as-read never worked in a browser; M-31 goal window; M-32 weekly window; H-22 IST "today"; email leaks M-28/M-29; **H-24** (found live 2026-10-04) the all-time boards trusted running totals before the backfill had run, so they listed only people who had uploaded since the deploy; **M-37** deleted "deadline missed" notices came back every hour (now recorded on the goal and claimed atomically) |
 > | Web login / API address | SPA calls Render directly (`VITE_API_URL`); login cookie is cross-site (`SameSite=None`); rate limits per IP | **Vercel forwards `/api` + `/auth` to Render**; the production site calls its own address (`config.ts`: `API_URL = ''`), so the cookie is first-party (still `SameSite=None` during the switch); Google's callback goes through the website; browser-facing limits per user/session (`rateLimitKeys.js`). **Live 2026-10-03** |
-> | Website (redesigned 2026-10-04, **built, not deployed**) | 3D background, glitch text, custom cursor, 28 themes; 1,150-line Dashboard; Chart.js; no public page; no frontend tests | "The weekly race": an F1-style **standings tower** (position, one cell per day, gap), race chart, landing + guide + privacy pages, invite links `/join/:id`, dark + light themes as CSS variables; hand-made SVG charts (no chart library); every page lazy-loaded: landing first visit **748 → 359 kB (232 → 114 kB gzip)**; 51 Vitest tests; found + fixed: goals saved a day early in India (M-34); sign-out landed on the sign-in page (D-37). Spec `docs/specs/2026-10-04-frontend-redesign.md`, D-31..D-36 |
+> | Website (redesigned 2026-10-04, **built, not deployed**) | 3D background, glitch text, custom cursor, 28 themes; 1,150-line Dashboard; Chart.js; no public page; no frontend tests | "The weekly race": an F1-style **standings tower** (position, one cell per day, gap), race chart, landing + guide + privacy pages, invite links `/join/:id`, dark + light themes as CSS variables; hand-made SVG charts (no chart library); every page lazy-loaded: landing first visit **748 → 359 kB (232 → 114 kB gzip)**; 52 Vitest tests; found + fixed: goals saved a day early in India (M-34); sign-out landed on the sign-in page (D-37). Spec `docs/specs/2026-10-04-frontend-redesign.md`, D-31..D-36 |
 > | Still open | — | H-19 login fix **live** (Vercel forwards `/api` + `/auth`; Google login works on the deployed site; Safari/private-window check pending); a failed Google sign-in shows raw JSON (M-33); goal progress misses the deadline day (M-35); no self-serve data deletion (L-14); client-chosen timestamps, no web refresh token; the API still runs end-of-life Node 20 (L-15). H-20 fixed (limits per user/session) |
 
 > **Changed 2026‑09‑08:** the extension still flushes counters every ~30s, but the backend now
@@ -570,7 +570,7 @@ the fix is a per-user running-totals table updated on write, turning a full-tabl
 
 **What's missing:**
 - **No integration tests** — nothing starts the server and hits a real database.
-- **No frontend tests at all.** *(Fixed 2026-10-04: 51 Vitest tests.)*
+- **No frontend tests at all.** *(Fixed 2026-10-04: 52 Vitest tests.)*
 - Nothing has ever run against a real database — the queries are only reasoned about.
 
 **BETTER:** add `supertest` + an in-memory MongoDB for API tests; React Testing Library for
@@ -743,7 +743,7 @@ document store?"**
 
 **Fixed in October 2026 (be ready to explain how):** plaintext API keys → hashed + per-device
 sign-in; full-scan leaderboard → running totals (6.7 s → 62 ms at 1M rows); JS analytics →
-`$facet` pipeline; no integration tests → 40; no frontend tests → 51 (Vitest); a 1,150-line
+`$facet` pipeline; no integration tests → 41; no frontend tests → 52 (Vitest); a 1,150-line
 dashboard and 3D effects → a redesigned, code-split website (landing first visit −51% gzipped); memory-only offline buffer → persisted outbox;
 replay double-counting → idempotency key; leaderboard inflation → credited time with a window cap;
 dead Teams code → deleted; all-time-only group boards → contest windows; browsers blocking PATCH
@@ -759,7 +759,7 @@ student project right now*.
 - Don't say the leaderboard can't be gamed — it's bounded, not impossible.
 - Don't quote "~10× fewer writes" — measured is ~5× fewer documents (13× less data) at the
   2-minute cadence; always add "local benchmark".
-- Frontend tests exist (51, Vitest) and integration tests (40, in-memory MongoDB); there are no
+- Frontend tests exist (52, Vitest) and integration tests (41, in-memory MongoDB); there are no
   end-to-end browser tests. The redesigned website is not deployed yet.
 - The ML work-type classifier is designed, not built.
 - There are 3 contributors — you owned the extension and the backend.

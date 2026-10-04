@@ -16,8 +16,9 @@ function browserNotificationsSupported() {
 
 /**
  * Goal reminders. The unread count is polled every 30 s; the list loads when
- * the panel opens. If the person allows it, new reminders also appear as
- * browser notifications.
+ * the panel opens, and opening it counts as reading: the badge clears, and the
+ * rows that were new stay highlighted until the panel closes. If the person
+ * allows it, new reminders also appear as browser notifications.
  */
 export function NotificationBell() {
   const qc = useQueryClient();
@@ -28,6 +29,22 @@ export function NotificationBell() {
   const [permissionNote, setPermissionNote] = useState('');
   const shown = useRef(new Set<string>());
   const lastCount = useRef<number | null>(null);
+  const [fresh, setFresh] = useState<Set<string>>(() => new Set());
+
+  // Opening the panel marks what it shows as read (it used to need a click per
+  // row, so the same count greeted people on every visit).
+  useEffect(() => {
+    if (!open) {
+      setFresh(new Set());
+      return;
+    }
+    const unreadIds = (list.data ?? []).filter((n) => !n.read).map((n) => n._id);
+    if (!unreadIds.length) return;
+    setFresh((prev) => new Set([...prev, ...unreadIds]));
+    apiSend('PATCH', '/api/notifications/mark-all-read')
+      .then(() => qc.invalidateQueries({ queryKey: ['notifications', 'unread'], exact: true }))
+      .catch(() => {});
+  }, [open, list.data, qc]);
 
   // When the count goes up and the browser allows it, show the new reminders.
   useEffect(() => {
@@ -49,17 +66,8 @@ export function NotificationBell() {
   const refresh = () => {
     void qc.invalidateQueries({ queryKey: ['notifications'] });
   };
-  const markRead = async (n: AppNotification) => {
-    if (n.read) return;
-    await apiSend('PATCH', `/api/notifications/${n._id}/read`).catch(() => {});
-    refresh();
-  };
   const remove = async (n: AppNotification) => {
     await apiSend('DELETE', `/api/notifications/${n._id}`).catch(() => {});
-    refresh();
-  };
-  const markAll = async () => {
-    await apiSend('PATCH', '/api/notifications/mark-all-read').catch(() => {});
     refresh();
   };
   const askPermission = async () => {
@@ -94,11 +102,6 @@ export function NotificationBell() {
         <div className="card fixed inset-x-4 top-[68px] z-40 shadow-card sm:absolute sm:inset-x-auto sm:right-0 sm:top-[52px] sm:w-[360px]">
           <div className="flex items-center justify-between border-b border-line px-4 py-3">
             <h2 className="font-semibold text-ink">Notifications</h2>
-            {count > 0 && (
-              <button type="button" onClick={markAll} className="rounded-md px-2 py-1 text-sm font-semibold text-accent-ink hover:bg-surface-2">
-                Mark all as read
-              </button>
-            )}
           </div>
           <div className="max-h-[360px] overflow-y-auto">
             {list.isPending && <p className="px-4 py-6 text-sm text-muted">Loading…</p>}
@@ -107,17 +110,18 @@ export function NotificationBell() {
             <ul>
               {list.data?.map((n) => {
                 const Icon = ICON[n.type] ?? Bell;
+                const isNew = fresh.has(n._id) || !n.read;
                 return (
-                  <li key={n._id} className={`flex items-start gap-3 border-b border-line px-4 py-3 last:border-0 ${n.read ? '' : 'bg-accent-soft'}`}>
+                  <li key={n._id} className={`flex items-start gap-3 border-b border-line px-4 py-3 last:border-0 ${isNew ? 'bg-accent-soft' : ''}`}>
                     <Icon className={`mt-0.5 h-5 w-5 flex-none ${TONE[n.type] ?? 'text-muted'}`} aria-hidden="true" />
-                    <button type="button" onClick={() => markRead(n)} className="min-w-0 flex-1 text-left">
+                    <div className="min-w-0 flex-1">
                       <span className="block text-sm font-semibold text-ink">
                         {n.title}
-                        {!n.read && <span className="sr-only"> (unread)</span>}
+                        {isNew && <span className="sr-only"> (new)</span>}
                       </span>
                       <span className="block text-sm text-muted">{n.message}</span>
                       <span className="mt-1 block font-mono text-[11px] text-faint">{timeAgo(n.createdAt)}</span>
-                    </button>
+                    </div>
                     <button type="button" onClick={() => remove(n)} aria-label={`Delete “${n.title}”`} className="rounded-md p-1.5 text-muted hover:bg-surface-2 hover:text-ink">
                       <X className="h-4 w-4" aria-hidden="true" />
                     </button>

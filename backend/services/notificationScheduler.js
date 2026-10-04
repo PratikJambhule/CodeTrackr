@@ -4,33 +4,28 @@ const Notification = require('../models/Notification');
 const { rollupDaily } = require('./dailyRollup');
 const { log } = require('./logger');
 
-// Run every hour to check for goals with deadlines in 6 hours
+const HOUR = 60 * 60 * 1000;
+
+// Each notice is sent once per goal. The goal records that it was sent, and
+// the sweep claims that flag with one atomic update before creating the
+// notification: the in-process cron and the GitHub Actions call can run at the
+// same minute, and only one of them may win. Deleting a notice never re-arms it.
+
+// "Due in about 6 hours": goals whose deadline is 6-7 hours away.
 const checkUpcomingDeadlines = async () => {
   try {
-    
     const now = new Date();
-    const sixHoursFromNow = new Date(now.getTime() + 6 * 60 * 60 * 1000);
-    const sevenHoursFromNow = new Date(now.getTime() + 7 * 60 * 60 * 1000);
-
-    // Find goals that:
-    // 1. Have deadlines between 6-7 hours from now
-    // 2. Are still in-progress
-    // 3. Haven't had a reminder sent yet
-    const upcomingGoals = await Goal.find({
-      deadline: {
-        $gte: sixHoursFromNow,
-        $lt: sevenHoursFromNow
-      },
+    const due = await Goal.find({
+      deadline: { $gte: new Date(now.getTime() + 6 * HOUR), $lt: new Date(now.getTime() + 7 * HOUR) },
       status: 'in-progress',
-      reminderSent: false
-    });
+      reminderSent: false,
+    }).select('_id').lean();
 
-    log.info('deadline sweep', { upcoming: upcomingGoals.length });
-
-    // Create notifications for each goal
-    for (const goal of upcomingGoals) {
-      const hoursRemaining = Math.round((new Date(goal.deadline) - now) / (1000 * 60 * 60));
-      
+    let sent = 0;
+    for (const { _id } of due) {
+      const goal = await Goal.findOneAndUpdate({ _id, reminderSent: false }, { $set: { reminderSent: true } }, { new: true });
+      if (!goal) continue; // another sweep claimed it
+      const hoursRemaining = Math.round((new Date(goal.deadline) - now) / HOUR);
       await Notification.create({
         userId: goal.userId,
         goalId: goal._id,
@@ -38,45 +33,40 @@ const checkUpcomingDeadlines = async () => {
         title: '⏰ Goal Deadline Approaching!',
         message: `Your goal "${goal.title}" is due in ${hoursRemaining} hours! Time to wrap it up.`
       });
-
-      // Mark reminder as sent
-      await Goal.findByIdAndUpdate(goal._id, { reminderSent: true });
-      
+      sent += 1;
     }
+    log.info('deadline sweep', { upcoming: due.length, sent });
   } catch (error) {
     log.error('deadline sweep failed', { err: error });
   }
 };
 
-// Check for overdue goals (run every hour)
+// "Deadline missed": in-progress goals whose deadline passed in the last
+// 48 hours. Older ones were handled when they happened (or by the previous
+// code, which kept no flag), so they are not revisited.
+const MISSED_WINDOW = 48 * HOUR;
+
 const checkOverdueGoals = async () => {
   try {
-    
     const now = new Date();
+    const overdue = await Goal.find({
+      deadline: { $lt: now, $gte: new Date(now.getTime() - MISSED_WINDOW) },
+      status: 'in-progress',
+      missedNotified: { $ne: true },
+    }).select('_id').lean();
 
-    // Find goals that are overdue and still in-progress
-    const overdueGoals = await Goal.find({
-      deadline: { $lt: now },
-      status: 'in-progress'
-    });
-
-    for (const goal of overdueGoals) {
-      // Check if we already sent an overdue notification
-      const existingNotification = await Notification.findOne({
+    for (const { _id } of overdue) {
+      const goal = await Goal.findOneAndUpdate({ _id, missedNotified: { $ne: true } }, { $set: { missedNotified: true } }, { new: true });
+      if (!goal) continue; // another sweep claimed it
+      // Sent before the flag existed: keep the one the user already has.
+      if (await Notification.exists({ goalId: goal._id, type: 'deadline_missed' })) continue;
+      await Notification.create({
+        userId: goal.userId,
         goalId: goal._id,
-        type: 'deadline_missed'
+        type: 'deadline_missed',
+        title: '❌ Goal Deadline Missed',
+        message: `The deadline for "${goal.title}" has passed. Consider updating or completing it.`
       });
-
-      if (!existingNotification) {
-        await Notification.create({
-          userId: goal.userId,
-          goalId: goal._id,
-          type: 'deadline_missed',
-          title: '❌ Goal Deadline Missed',
-          message: `The deadline for "${goal.title}" has passed. Consider updating or completing it.`
-        });
-        
-      }
     }
   } catch (error) {
     log.error('overdue sweep failed', { err: error });

@@ -124,7 +124,7 @@ M-28/29, L-11.
 | `userinsights` | cached 90-day baseline per user | Refreshed on read, at most daily |
 | `users` | `googleId`, `email`, `apiKeyId` + `apiKeyHash` (select:false), `apiKeyLast4` | The plain key is never stored; legacy keys keep only a hash until converted |
 | `groups`, `groupmembers` | group + join table with a unique `(groupId, userId)` index | Last member leaving deletes the group |
-| `goals`, `notifications` | owner-scoped | Notifications created by the hourly sweep |
+| `goals`, `notifications` | owner-scoped; goals carry `reminderSent` / `missedNotified` so each notice is sent once (D-41) | Notifications created by the hourly sweep |
 
 `activities.userId` is moving from String to ObjectId (M-6, roadmap item 10): new writes are
 ObjectIds, reads match both forms through `services/activityUser.js`, and
@@ -141,7 +141,9 @@ ObjectIds, reads match both forms through `services/activityUser.js`, and
   sees one site and the login cookie is first-party (H-19). The extension still calls Render
   directly. Behind the proxy Render sees Vercel's IPs, so browser-facing rate limits key by user or
   session (`services/rateLimitKeys.js`).
-- **Scheduler:** GitHub Actions, hourly + 03:30 UTC, with the same secret in GitHub and Render.
+- **Scheduler:** GitHub Actions, hourly + 03:30 UTC, with the same secret in GitHub and Render. The
+  in-process cron runs the same sweep, so each notice is claimed on its goal with one atomic
+  update and sent once (D-41).
 - **CI:** `.github/workflows/ci.yml` on every push and PR: backend unit tests + an import smoke
   of `app.js`, backend integration tests (in-memory MongoDB), extension tests, frontend lint,
   tests (Vitest) and build (the website job on Node 24, the rest on Node 20: L-15),
@@ -201,6 +203,8 @@ frontend/src/
   app pages remember the address, go to sign-in, and come back (invite links, device codes).
   Signing out ends the session and reloads `/` (a full page load), so nothing from the session
   stays in memory (D-37).
+- **Layout:** pages are up to 1600 px wide; from 1280 px the dashboard is a 12-column grid that pairs
+  cards by height, and from 1536 px the group board and leaderboard go two-column (D-42).
 - **Files:** a `.tsx` file exports only components, so React Fast Refresh can hot-swap it; hooks
   and helpers (`useToast`, `useTheme`, `buttonClass`, chart colours) live in `.ts` files, and
   `components/ui/index.ts` re-exports the kit. Lint enforces this in CI.

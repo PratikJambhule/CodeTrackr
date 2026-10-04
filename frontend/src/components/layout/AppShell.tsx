@@ -27,7 +27,7 @@ export function AppShell({ user }: { user: Me }) {
         Skip to content
       </a>
       <header className="sticky top-0 z-30 border-b border-line bg-bg-glass backdrop-blur">
-        <div className="mx-auto flex h-16 w-full max-w-[1240px] items-center gap-3 px-4 sm:px-6 lg:gap-8 lg:px-8">
+        <div className="mx-auto flex h-16 w-full max-w-[1600px] items-center gap-3 px-4 sm:px-6 lg:gap-8 lg:px-8">
           <NavLink to="/dashboard" className="flex-none no-underline" aria-label="CodeTrackr dashboard">
             <span className="lg:hidden">
               <Logo size={28} showName={false} />
@@ -62,7 +62,7 @@ export function AppShell({ user }: { user: Me }) {
         </div>
       </header>
 
-      <main id="main" className="mx-auto w-full max-w-[1240px] px-4 pb-28 pt-6 sm:px-6 lg:px-8 lg:pb-12">
+      <main id="main" className="mx-auto w-full max-w-[1600px] px-4 pb-28 pt-6 sm:px-6 lg:px-8 lg:pb-12">
         <Suspense fallback={<div aria-busy="true" aria-label="Loading" className="skeleton h-[60vh]" />}>
           <Outlet />
         </Suspense>

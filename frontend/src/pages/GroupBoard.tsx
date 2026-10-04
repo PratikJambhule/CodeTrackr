@@ -129,6 +129,7 @@ export default function GroupBoard({ user }: { user: Me }) {
   const ranked = rank(racers);
   const dayNames = keys.map((k) => (keys.length <= 7 ? weekdayShort(k) : dayLabel(k)));
   const isAll = period === 'all';
+  const showRace = Boolean(d.daily) && !isAll && keys.length > 1;
   const rows: TowerRow[] = ranked.map(({ racer, pos, gap }) => {
     const row = d.leaderboard.find((r) => r.userId === racer.id)!;
     const cmd = row.commandFailureRate === null ? '—' : `${Math.round(row.commandFailureRate * 100)}%`;
@@ -226,8 +227,9 @@ export default function GroupBoard({ user }: { user: Me }) {
         {q.isFetching && <span className="font-mono text-xs text-muted">updating…</span>}
       </div>
 
-      <div className="mb-6 flex flex-col gap-4">
-        <Card className="min-w-0 p-4 sm:p-5">
+      {/* Wide screens: the tower and the race chart side by side; otherwise stacked. */}
+      <div className="mb-6 grid grid-cols-12 gap-4">
+        <Card className={`col-span-12 min-w-0 p-4 sm:p-5 ${showRace ? '2xl:col-span-7' : ''}`}>
           <CardTitle aside={isAll ? 'cells: last 7 days' : periodLabel}>Standings</CardTitle>
           {ranked.length === 0 ? (
             <EmptyState title="No members yet" />
@@ -246,8 +248,8 @@ export default function GroupBoard({ user }: { user: Me }) {
           )}
           {d.daily && <CellLegend className="mt-4 px-3" />}
         </Card>
-        {d.daily && !isAll && keys.length > 1 && (
-          <Card className="min-w-0 p-4 sm:p-5">
+        {showRace && (
+          <Card className="col-span-12 min-w-0 p-4 sm:p-5 2xl:col-span-5">
             <CardTitle aside="running total of hours">How it unfolded</CardTitle>
             <RaceChart
               title={`${d.group.name}: running total of hours, ${periodLabel}`}

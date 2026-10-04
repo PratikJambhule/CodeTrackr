@@ -19,7 +19,7 @@ data migrations (`docs/RELEASE.md` §3). Extension 2.5.0 is live on the Marketpl
 earlier design, this list wins; the dated detail is in `docs/PROGRESS.md`.
 
 - Integration tests (`npm run test:int`, in-memory MongoDB) — 40 tests; unit 27 suites / 375;
-  extension 6 suites / 70; frontend 51 (Vitest).
+  extension 6 suites / 70; frontend 52 (Vitest).
 - **Website redesign (2026-10-04, built and tested, NOT deployed):** "the weekly race". Landing,
   guide, privacy, invite links (`/join/:id`), group board as its own route (standings tower with day
   cells, race chart, contest dates in the URL), dashboard rebuilt from small SVG chart components,
@@ -143,7 +143,7 @@ workspace; each is installed and deployed independently.
 | Auth | Google OAuth 2.0 → JWT in httpOnly cookie (web); random API key in `x-api-key` header (extension) |
 | ML/Insights | **None built.** Pure deterministic JavaScript statistics (`metricsDerive.js`) plus a 13-rule threshold engine. No Python, no trained model, no LLM. A work-type classifier (logistic regression over 18 session attributes, learned from one-tap user labels) feeding rule-based personas and group titles is designed in `docs/ML_INTEGRATION_PLAN.md` (redesigned 2026-09-17) and blocked on data. |
 | Deploy | Backend: Render (`codetrackr-backend-uckp.onrender.com`, per extension default) — also has a Vercel serverless config. Frontend: Vercel (`code-trackr-frontend.vercel.app`). DB: MongoDB Atlas. |
-| Testing | Plain `node:assert` scripts: **27 backend suites (375 assertions)**, 6 extension suites (70). **40 integration tests** (`supertest` + `mongodb-memory-server`, real HTTP and real queries, incl. CORS preflight). **51 frontend tests** (Vitest, jsdom, `TZ=Asia/Kolkata`). CI runs all of it, the frontend build and a Docker health check on every push. |
+| Testing | Plain `node:assert` scripts: **27 backend suites (375 assertions)**, 6 extension suites (70). **41 integration tests** (`supertest` + `mongodb-memory-server`, real HTTP and real queries, incl. CORS preflight). **52 frontend tests** (Vitest, jsdom, `TZ=Asia/Kolkata`). CI runs all of it, the frontend build and a Docker health check on every push. |
 
 ---
 
@@ -599,7 +599,7 @@ Plus, since 2026-09-10: `metrics` rewritten (37), `metricsService` (35), `sessio
 Plus, since 2026-09-12: four more assertions in `metricsService` and `quickWins` (the cadence
 regression, the email projection, and the two new rate limiters).
 
-**Total (2026-10-04): 375 backend unit assertions across 27 suites, 40 backend integration tests, 70 extension assertions across 6, 51 frontend tests (Vitest).** *(The paragraph below describes the state before the integration suite existed.)* No test framework, **no
+**Total (2026-10-04): 375 backend unit assertions across 27 suites, 41 backend integration tests, 70 extension assertions across 6, 52 frontend tests (Vitest).** *(The paragraph below describes the state before the integration suite existed.)* No test framework, **no
 integration/API/DB/e2e tests, no frontend tests.** Nothing has been run against a real
 database — the bucketing/rollup/wiring logic is proven at the pure-function / source-scan
 level only (a `supertest` + `mongodb-memory-server` integration test is the tracked next step,

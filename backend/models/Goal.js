@@ -43,6 +43,13 @@ const goalSchema = new mongoose.Schema({
     reminderSent: {
         type: Boolean,
         default: false
+    },
+    // Set when the "deadline missed" notice is sent, so deleting the notice
+    // does not make the hourly sweep send it again (it used to look for the
+    // notification row instead).
+    missedNotified: {
+        type: Boolean,
+        default: false
     }
 }, { timestamps: true });
 

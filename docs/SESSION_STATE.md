@@ -10,13 +10,23 @@ then `docs/RELEASE.md` §2b checks on the live site, then flip "built, not deplo
 for the website in every doc, the interview-prep boxes, cheat sheet and resume notes; rebuild PDFs.
 The notes below describe what that commit contains.
 
-**After `f462444` (uncommitted, 2026-10-04):** (1) **H-24 fixed** — the live all-time leaderboard and
-group boards showed only people who uploaded since the deploy, because they switched to `userstats`
-once it had any row; now `rebuildAll({apply:true})` records `userstats-backfill` in a new `migrations`
-collection and the boards switch only then (D-39; `models/Migration.js`, `services/userStats.js`
-`statsComplete()`, regression test; integration 40). Needs a push to go live; the backfill (user's step)
-then turns on the fast path. (2) **Top navigation bar** replaces the sidebar on desktop, phones keep
-bottom tabs (D-40, `components/layout/AppShell.tsx`), checked at desktop + 375 px.
+**Pushed after `f462444`:** `8d61ec7` (2026-10-04) — H-24 all-time boards wait for the backfill
+(D-39) + top navigation bar (D-40). Deploys automatically.
+
+**Uncommitted (2026-10-04), ready to commit:** (1) **M-37 notifications sent once** — goal flags
+`reminderSent` / `missedNotified` claimed with one atomic update (D-41); missed notices only for
+deadlines in the last 48 h; opening the bell marks what it shows as read. Integration 41, frontend 52.
+(2) **Wide-screen layout (D-42)** — pages up to 1600 px; dashboard 12-column grid from 1280 px;
+group board + leaderboard two-column from 1536 px. Seen at 1920 / 1150 / 375 px.
+
+**Next task, decided by the user 2026-10-04: remove the profile API key, option 2 = cut off now.**
+Existing profile keys are rejected as soon as it deploys; extension 2.5.0 shows a Sign In prompt on
+401 and keeps unsent time for 24 h. Work: backend (no key at login, drop regenerate route + key
+fields, `findUserByApiKey` checks only device tokens, cleanup script for old key fields = user's
+action), website (Profile/Onboarding/guide), extension 2.6.0 (drop `setupApiKey`, the `apiKey`
+setting, the "Set API Key" button; better 401 text; user publishes), tests (harness `makeUser` must
+issue a device key), docs + interview prep + resume bullet 1. Not started; user interrupted the
+first grep.
 
 **Live:** commit `13569e7` on Render + Vercel (the OLD website; Google login works; the Sentry hook is
 in and switches on once `SENTRY_DSN` is set on Render). **Extension 2.5.0 is live on the Marketplace**

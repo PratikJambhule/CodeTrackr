@@ -24,12 +24,12 @@ export function RaceStrip({ user }: { user: Me }) {
   const details = useGroupDetails(group?._id, { from: monday.toISOString() });
 
   if (groups.isPending || (group && details.isPending)) {
-    return <Skeleton className="mb-6 h-[180px]" />;
+    return <Skeleton className="h-[180px]" />;
   }
 
   if (!group) {
     return (
-      <section className="card mb-6 flex flex-wrap items-center gap-6 p-6">
+      <section className="card flex flex-wrap items-center gap-6 p-6">
         <Users className="h-10 w-10 flex-none text-accent" aria-hidden="true" />
         <div className="min-w-[220px] flex-1">
           <h2 className="text-xl font-semibold">Race your friends this week</h2>
@@ -86,7 +86,7 @@ export function RaceStrip({ user }: { user: Me }) {
   const posColor = me?.pos === 1 ? 'var(--gold)' : me?.pos === 2 ? 'var(--silver)' : me?.pos === 3 ? 'var(--bronze)' : 'var(--ink)';
 
   return (
-    <section aria-labelledby="race-title" className="card mb-6 p-5 sm:p-6">
+    <section aria-labelledby="race-title" className="card flex flex-col justify-center p-5 sm:p-6">
       <div className="flex flex-wrap items-start gap-x-8 gap-y-5">
         <div className="min-w-[240px] flex-[1_1_260px]">
           <div className="flex flex-wrap items-center gap-2">

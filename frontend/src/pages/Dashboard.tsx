@@ -98,9 +98,15 @@ export default function Dashboard({ user }: { user: Me }) {
         </section>
       )}
 
-      <RaceStrip user={user} />
+      {/* One 12-column grid, cards paired by height on wide screens (xl): race + insight; the five
+          numbers; chart + languages/when-you-code + build health; year + goals. Smaller screens
+          stack in reading order. */}
+      <div className="grid grid-cols-12 gap-4 xl:grid-flow-row-dense">
+      <div className="col-span-12 grid min-w-0 xl:col-span-8">
+        <RaceStrip user={user} />
+      </div>
 
-      <section aria-label="Your numbers" className="mb-6 grid gap-4 [grid-template-columns:repeat(auto-fit,minmax(min(180px,100%),1fr))]">
+      <section aria-label="Your numbers" className="col-span-12 grid gap-4 [grid-template-columns:repeat(auto-fit,minmax(min(180px,100%),1fr))]">
         {day.isPending || week.isPending || history.isPending ? (
           Array.from({ length: 5 }, (_, i) => <Skeleton key={i} className="h-[150px]" />)
         ) : (
@@ -131,8 +137,7 @@ export default function Dashboard({ user }: { user: Me }) {
         )}
       </section>
 
-      <div className="mb-6 flex flex-wrap gap-4">
-        <Card className="min-w-0 flex-[2_1_440px] p-5">
+        <Card className="col-span-12 min-w-0 p-5 lg:col-span-8 xl:col-span-5">
           {period === 'week' ? (
             <>
               <CardTitle
@@ -201,7 +206,8 @@ export default function Dashboard({ user }: { user: Me }) {
           )}
         </Card>
 
-        <Card className="min-w-0 flex-[1_1_300px] p-5">
+        <div className="col-span-12 flex min-w-0 flex-col gap-4 lg:col-span-4 xl:col-span-3 [&>*:last-child]:flex-1">
+        <Card className="min-w-0 p-5">
           <CardTitle aside={period === 'today' ? 'today' : 'last 7 days'}>Languages</CardTitle>
           {view.isPending ? (
             <Skeleton className="h-32" />
@@ -218,27 +224,33 @@ export default function Dashboard({ user }: { user: Me }) {
             <RankedBars empty="No projects in the last 7 days." items={(history.data?.projects ?? []).slice(0, 5).map((p) => ({ label: p.name, value: p.seconds, display: hm(p.seconds) }))} />
           )}
         </Card>
-      </div>
 
-      <Card className="mb-6 p-5">
-        <CardTitle aside={`${derived.yearDays} days coded`}>Your year</CardTitle>
-        {history.isPending ? (
-          <Skeleton className="h-[150px]" />
-        ) : (
-          <YearHeatmap days={history.data?.days ?? []} today={today} summary={`${plural(derived.yearDays, 'day')} coded in the last year · longest streak ${plural(derived.streak.longest, 'day')}`} />
-        )}
-      </Card>
-
-      <div className="grid items-start gap-4 [grid-template-columns:repeat(auto-fit,minmax(min(300px,100%),1fr))]">
-        <div className="flex flex-col gap-4">
           <Card className="min-w-0 p-5">
             <CardTitle aside="last 7 days">When you code</CardTitle>
             {history.isPending ? <Skeleton className="h-24" /> : <HourStrip hours={history.data?.hourOfDay ?? new Array(24).fill(0)} />}
           </Card>
+        </div>
+
+        <div className="col-span-12 grid min-w-0 xl:col-span-4">
+          {view.data ? <BuildHealth view={view.data} period={period} /> : <Skeleton className="h-80" />}
+        </div>
+
+        <Card className="col-span-12 min-w-0 p-5 xl:col-span-8">
+          <CardTitle aside={`${derived.yearDays} days coded`}>Your year</CardTitle>
+          {history.isPending ? (
+            <Skeleton className="h-[150px]" />
+          ) : (
+            <YearHeatmap days={history.data?.days ?? []} today={today} summary={`${plural(derived.yearDays, 'day')} coded in the last year · longest streak ${plural(derived.streak.longest, 'day')}`} />
+          )}
+        </Card>
+
+        <div className="col-span-12 grid min-w-0 lg:col-span-6 xl:col-span-4 xl:col-start-9 xl:row-start-1">
           <InsightTeaser />
         </div>
-        {view.data ? <BuildHealth view={view.data} period={period} /> : <Skeleton className="h-80" />}
-        <GoalsMini />
+
+        <div className="col-span-12 grid min-w-0 lg:col-span-6 xl:col-span-4">
+          <GoalsMini />
+        </div>
       </div>
 
       <TimeSlotDialog userId={user.id} slot={slot} onClose={() => setSlot(null)} />

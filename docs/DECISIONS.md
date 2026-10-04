@@ -2,7 +2,7 @@
 
 One entry per decision: **what** was chosen, **why**, the **alternatives** rejected, and the
 **trade-offs** accepted. Numbers follow the order decisions were made (D-01 is the oldest); from
-D-40 down to D-16 the October 2026 entries are listed newest first. Created 2026-10-03 by collecting
+D-42 down to D-16 the October 2026 entries are listed newest first. Created 2026-10-03 by collecting
 decisions that were previously spread across the session log, specs and interview docs; dates
 are when the decision was made.
 
@@ -178,6 +178,34 @@ are when the decision was made.
   yet); OpenTelemetry tracing (one service, no downstream calls to trace).
 - **Trade-off:** synchronous `stdout.write` per line; fine at this traffic, the first thing to
   swap for pino if log volume grows.
+
+## D-41. Each goal notification is sent once, recorded on the goal and claimed atomically (2026-10-04)
+
+- **What:** the goal carries `reminderSent` and `missedNotified`. The hourly sweep claims a flag with
+  one `findOneAndUpdate({ _id, flag: false }, { $set: { flag: true } })` and creates the
+  notification only if it won. "Deadline missed" covers deadlines missed in the last 48 hours.
+- **Why:** the missed-deadline sweep decided "already sent?" by looking for the notification row, so
+  deleting a notice made the next hourly run send it again (found live: four came back at 07:00 UTC).
+  And two sweeps run every hour (the in-process cron and the GitHub Actions call), so find-then-create
+  could send twice. An atomic claim is the standard fix for "exactly one worker does this".
+- **Rejected:** a unique index on `(goalId, type)` (deleting the row would still re-arm it); turning
+  off one of the two schedulers (the in-process one covers GitHub outages, the external one covers a
+  sleeping server); a distributed lock (more moving parts than one conditional update).
+- **Trade-off:** a goal whose deadline passes while the server is down for more than 48 hours gets no
+  missed notice; the 48-hour window also stops old deleted notices from returning after this deploy.
+
+## D-42. Wide screens: a 1600 px page and a 12-column dashboard (2026-10-04)
+
+- **What:** signed-in pages are up to 1600 px wide (was 1240). From 1280 px the dashboard is a
+  12-column grid that pairs cards of similar height: race + insight; the five numbers; last 7 days +
+  languages/when-you-code + build health; your year + goals. From 1536 px the group board puts the
+  standings tower beside the race chart, and the leaderboard puts the podium beside the table.
+  Narrower screens keep the stacked layout.
+- **Why:** on a 1920 px screen a third of the page was empty margin (the user's feedback, with a
+  screenshot). Pairing by height avoids cards that stretch around empty space.
+- **Rejected:** a fluid full-width page (lines of text and table rows get too long to read on 2560 px
+  screens); only widening the container without regrouping (cards stretched across half-empty rows).
+- **Trade-off:** the card order on wide screens differs a little from the reading order on phones.
 
 ## D-39. The all-time boards switch to running totals only after the backfill says it finished (2026-10-04)
 

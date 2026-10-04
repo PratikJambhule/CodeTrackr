@@ -131,6 +131,13 @@ run yet. Now the backfill writes a "finished" record and the boards switch on th
 they scan the raw data, slower but correct. A test rebuilds the exact situation (H-24). The
 lesson: ask the migration whether it is done; don't guess from the data it is filling.
 
+**Q: How do you make sure a scheduled job sends a notification only once?**
+Record the fact on the thing it is about and claim it atomically. My hourly sweep used to check
+whether a "deadline missed" notification existed, so deleting it made the sweep send it again,
+and two schedulers run each hour, so both could send. Now the goal has a `missedNotified` flag and
+the sweep does one conditional update, `{ _id, missedNotified: false } → true`; only the run that
+wins creates the notification. A test runs two sweeps in parallel and then deletes the notice (M-37).
+
 ## Scaling
 
 **Q: What breaks first with 10,000 users?**
@@ -167,9 +174,9 @@ device-sign-in routes still see real IPs because the extension calls Render dire
 
 **Q: How did you test it?**
 Four layers, all in GitHub Actions on every push: 375 backend unit assertions in 27 plain
-`node:assert` suites (logic refactored into pure functions), 40 integration tests that run the
+`node:assert` suites (logic refactored into pure functions), 41 integration tests that run the
 real Express app over HTTP against an in-memory MongoDB (including real CORS preflights), 70
-extension assertions against the built bundle, and 51 frontend tests in Vitest; plus the frontend
+extension assertions against the built bundle, and 52 frontend tests in Vitest; plus the frontend
 build and a Docker health check. The frontend tests run in India's time zone on purpose, because
 both date bugs in this project only happen east of UTC. What I still check by hand: layout at
 phone width and the animation, which jsdom cannot see. The integration suite paid off on its first
@@ -225,7 +232,7 @@ see no movement, and nothing scrolls sideways even at 320 px.
 
 | Number | Source |
 |---|---|
-| unit 27 suites / 375; integration 40; extension 6 / 70; frontend 51 | `npm test`, `npm run test:int`, 2026-10-04 |
+| unit 27 suites / 375; integration 41; extension 6 / 70; frontend 52 | `npm test`, `npm run test:int`, 2026-10-04 |
 | landing page first visit 359 kB (114 kB gzip), was 748 kB (232 kB) | `npm run build`, measured 2026-10-04 |
 | leaderboard 6.72 s → 62 ms p50 at 1M rows | `bench/leaderboard.bench.js` (local) |
 | ingest 4.9× fewer docs, 12.7× less data | `bench/ingest.bench.js` (local) |
