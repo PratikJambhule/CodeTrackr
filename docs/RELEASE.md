@@ -86,6 +86,9 @@ cd backend && node scripts/backfill-userstats.js
 
 Then with `--apply`, when uploads are quiet. Until this runs the leaderboard keeps the old scan
 (correct, just slow); afterwards it reads running totals (`X-Leaderboard-Source: userstats`).
+The applied run records `userstats-backfill` in the `migrations` collection, and the all-time
+boards switch only then (D-39). Before 2026-10-04 they switched as soon as any running-total row
+existed, which showed only recent uploaders (H-24).
 
 ## 4. Publish extension 2.5.0
 

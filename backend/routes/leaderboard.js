@@ -5,6 +5,7 @@ const User = require('../models/user');
 const UserStats = require('../models/UserStats');
 const { USER_KEY } = require('../services/activityUser');
 const { isAuthenticated } = require('../middleware/auth');
+const { statsComplete } = require('../services/userStats');
 
 /**
  * Global leaderboard.
@@ -17,7 +18,8 @@ const { isAuthenticated } = require('../middleware/auth');
  *
  * All-time requests read the `userstats` running totals (H-7 fixed 2026-10-03):
  * three indexed reads instead of aggregating every activity. A `?days=` window,
- * or an install where the backfill has not run yet, still scans `activities`.
+ * or an install where the backfill has not finished yet (`statsComplete()`), still
+ * scans `activities`.
  * The `X-Leaderboard-Source` header says which path answered.
  */
 
@@ -196,7 +198,7 @@ router.get('/', isAuthenticated, async (req, res, next) => {
             ? Math.min(requestedLimit, MAX_LIMIT)
             : DEFAULT_LIMIT;
 
-        const useStats = !windowDays && (await UserStats.estimatedDocumentCount()) > 0;
+        const useStats = !windowDays && (await statsComplete());
         const { rows: leaderboardData, maxima } = useStats
             ? await rowsFromStats(limit)
             : await rowsFromScan(windowDays, limit);

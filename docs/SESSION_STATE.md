@@ -3,7 +3,20 @@
 _Snapshot for the next session. Read this first. History is in `docs/PROGRESS.md`._
 _Last updated: 2026-10-04 (frontend lint clean, sign-out bug fixed; ready for the user to commit)._
 
-## 🟡 Right now: website redesign built, tested and documented — NOT committed, NOT deployed
+## 🟡 Right now: website redesign PUSHED 2026-10-04 as `f462444` (deploying); live checks pending
+
+Pushed by me at the user's request. Render + Vercel deploy `main` automatically. Next: CI result,
+then `docs/RELEASE.md` §2b checks on the live site, then flip "built, not deployed" → "deployed"
+for the website in every doc, the interview-prep boxes, cheat sheet and resume notes; rebuild PDFs.
+The notes below describe what that commit contains.
+
+**After `f462444` (uncommitted, 2026-10-04):** (1) **H-24 fixed** — the live all-time leaderboard and
+group boards showed only people who uploaded since the deploy, because they switched to `userstats`
+once it had any row; now `rebuildAll({apply:true})` records `userstats-backfill` in a new `migrations`
+collection and the boards switch only then (D-39; `models/Migration.js`, `services/userStats.js`
+`statsComplete()`, regression test; integration 40). Needs a push to go live; the backfill (user's step)
+then turns on the fast path. (2) **Top navigation bar** replaces the sidebar on desktop, phones keep
+bottom tabs (D-40, `components/layout/AppShell.tsx`), checked at desktop + 375 px.
 
 **Live:** commit `13569e7` on Render + Vercel (the OLD website; Google login works; the Sentry hook is
 in and switches on once `SENTRY_DSN` is set on Render). **Extension 2.5.0 is live on the Marketplace**
@@ -27,7 +40,7 @@ entries of 2026-10-04.
   update boxes + cheat sheet + Q&A + guides, resume frontend bullets).
 
 **Verified 2026-10-04 (latest run):** frontend lint 0 problems, `tsc -b` clean, Vitest 51 (6 files),
-`npm run build` green; backend unit 27 suites / 375, integration 39, extension 6 suites / 70. Every
+`npm run build` green; backend unit 27 suites / 375, integration 40, extension 6 suites / 70. Every
 page seen in a browser on desktop and at 307–375 px, light + dark; flows tested by hand are listed in
 PROGRESS. Landing first visit 358,681 B raw / 114,167 B gzip vs 747,989 / 231,590 before.
 

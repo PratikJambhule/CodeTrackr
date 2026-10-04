@@ -49,11 +49,11 @@ changed). Short Q&A: `docs/INTERVIEW_PREP.md`. Numbers: `docs/BENCHMARKS.md`.*
 |---|---|---|
 | Extension | TypeScript, esbuild, axios, VS Code API | 5 trackers; outbox in `globalState`; key in **SecretStorage**; `CodeTrackr: Sign In` |
 | Backend | Node 20, **Express 5**, **Mongoose 8**, passport-google-oauth20, jsonwebtoken, helmet, express-rate-limit | services: `apiKeys`, `ingestCredit`, `userStats`, `analyticsViews`, `activityUser`, `logger` |
-| DB | MongoDB Atlas | 13 collections; `activities` is the big one, bucketed |
+| DB | MongoDB Atlas | 14 collections; `activities` is the big one, bucketed |
 | Frontend | **React 19**, Vite 7, TS, Tailwind (CSS-variable tokens, dark + light), react-router 7, **React Query**, hand-made SVG charts | every read through typed hooks; pages lazy-loaded; landing, guide, privacy, `/join/:id`, `/device` |
 | "ML" | pure JS statistics + rules | no model, no LLM; ML work-type classifier is **designed, not built** |
 | Ops | GitHub Actions CI, `Dockerfile`, `docker-compose.yml`, `deploy.yml`, JSON logs, optional Sentry | `docker compose up` = Mongo + API + website locally; CD off until `RENDER_DEPLOY_HOOK_URL` |
-| Tests | `node:assert` + **supertest + mongodb-memory-server** + **Vitest** | backend unit **27 suites / 375**, integration **39**, extension **6 / 70**, frontend **51** (run in IST) |
+| Tests | `node:assert` + **supertest + mongodb-memory-server** + **Vitest** | backend unit **27 suites / 375**, integration **40**, extension **6 / 70**, frontend **51** (run in IST) |
 
 **Why MongoDB:** self-contained, schema-evolving activity documents; per-user time-window
 queries; no hot-path joins. **Where SQL wins:** groups/goals integrity and the leaderboard
@@ -158,7 +158,7 @@ leaderboard email leak (M-23), helmet + rate limits, `JWT_SECRET` required, cent
 |---|---|---|
 | Leaderboard at 1M rows | p50 **6.72 s → 62 ms**, p99 7.17 s → 111 ms, 1.3 → 156 req/s | `bench/leaderboard.bench.js` (local) |
 | Bucketing | **4.9× fewer docs, 12.7× less data** at the 2-min cadence (19.6× / 51× vs old 30 s); same throughput | `bench/ingest.bench.js` (local) |
-| Tests | unit 27 / 375, integration 39, extension 6 / 70, frontend 51 | 2026-10-04 runs |
+| Tests | unit 27 / 375, integration 40, extension 6 / 70, frontend 51 | 2026-10-04 runs |
 | Website size | landing first visit **748 → 359 kB** (232 → 114 kB gzip), about half | `npm run build`, 2026-10-04 |
 | Insights | 11 metrics, 13 rules | `metricsDerive.js`, `rulesEngine.js` |
 
@@ -203,6 +203,9 @@ Never quote the old "~10× fewer writes": it was a guess. Always say "local benc
     .toISOString()` is the previous UTC day before 05:30 IST. Now local `YYYY-MM-DD` keys + a test
     pinned to `Asia/Kolkata`. Also a sign-out race: clearing the user redrew the current page as
     signed out → `/login`, remembering the page; now sign-out reloads `/` (D-37, test added).
+15g. **A bug found live?** → all-time leaderboard showed only me. It switched to the running-totals
+    table once the table had any row, but before the backfill only new uploaders had rows. Now the
+    backfill records "finished" and the boards switch on that (H-24, D-39, regression test).
 15a. **Safari login?** → cookie was third-party (`vercel.app` vs `onrender.com`); Vercel now
     forwards `/api` + `/auth`, site calls its own address → first-party. Separate Vercel project
     wouldn't help (`vercel.app` is a public suffix). Limits moved to per-user (Vercel hides IPs).

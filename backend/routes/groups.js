@@ -10,6 +10,7 @@ const { containsRegex } = require('../services/textQuery');
 const { parseBoardWindow } = require('../services/boardWindow');
 const { groupDaily } = require('../services/groupDaily');
 const UserStats = require('../models/UserStats');
+const { statsComplete } = require('../services/userStats');
 const { matchActivityUsers, USER_KEY } = require('../services/activityUser');
 const rateLimit = require('express-rate-limit');
 const { userKey } = require('../services/rateLimitKeys');
@@ -168,7 +169,7 @@ router.get('/:groupId/details', isAuthenticated, async (req, res, next) => {
         // feature (M-21). Three sources:
         //   ?from=&to=  a contest window: aggregate members' activity in it
         //   all-time    members' `userstats` running totals: O(members), no scan (H-8)
-        //   all-time before the userstats backfill: the old full aggregate
+        //   all-time before the userstats backfill has finished: the old full aggregate
         const board = parseBoardWindow(req.query);
         if (!board.ok) {
             return res.status(400).json({ message: board.error });
@@ -176,7 +177,7 @@ router.get('/:groupId/details', isAuthenticated, async (req, res, next) => {
 
         const activityMap = {};
         let source;
-        if (!board.from && (await UserStats.estimatedDocumentCount()) > 0) {
+        if (!board.from && (await statsComplete())) {
             source = 'userstats';
             const stats = await UserStats.find({ userId: { $in: members.map(m => m.userId._id) } }).lean();
             for (const st of stats) {

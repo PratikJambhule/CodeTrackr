@@ -2,7 +2,7 @@
 
 One entry per decision: **what** was chosen, **why**, the **alternatives** rejected, and the
 **trade-offs** accepted. Numbers follow the order decisions were made (D-01 is the oldest); from
-D-38 down to D-16 the October 2026 entries are listed newest first. Created 2026-10-03 by collecting
+D-40 down to D-16 the October 2026 entries are listed newest first. Created 2026-10-03 by collecting
 decisions that were previously spread across the session log, specs and interview docs; dates
 are when the decision was made.
 
@@ -178,6 +178,35 @@ are when the decision was made.
   yet); OpenTelemetry tracing (one service, no downstream calls to trace).
 - **Trade-off:** synchronous `stdout.write` per line; fine at this traffic, the first thing to
   swap for pino if log volume grows.
+
+## D-39. The all-time boards switch to running totals only after the backfill says it finished (2026-10-04)
+
+- **What:** `rebuildAll({ apply: true })` (`scripts/backfill-userstats.js`) writes a row
+  `{ _id: 'userstats-backfill', completedAt }` to a small `migrations` collection when it finishes.
+  The all-time leaderboard and group boards read `userstats` only when that row exists
+  (`statsComplete()` in `services/userStats.js`); until then they scan `activities` as before.
+- **Why:** the old switch was "the `userstats` collection is not empty". Ingest creates a row for
+  everyone who uploads, so after the deploy the first upload flipped the switch while the table held
+  only the people who had uploaded since. Live, the all-time board showed one person (H-24). Whether
+  a one-off job has finished is a fact the job should record, not something to guess from the data.
+- **Rejected:** "count of userstats rows = count of users with activity" (a full scan on every
+  request, and wrong for users with no activity); an environment variable flipped by hand after the
+  backfill (easy to forget, differs between Render and local); running the backfill inside the
+  deploy (it should run when uploads are quiet, by the operator).
+- **Trade-off:** one extra indexed read by `_id` per all-time request; the boards stay on the slower
+  scan until someone runs the backfill.
+
+## D-40. A top navigation bar instead of a left sidebar (2026-10-04)
+
+- **What:** signed-in pages have one sticky top bar: logo, the five sections in a row (Dashboard,
+  Groups, Leaderboard, Goals, Insights), notifications and the account menu. Phones keep the bottom
+  tab bar. The sidebar's "Tracking from VS Code" box is gone; Profile → Connected devices is in the
+  account menu.
+- **Why:** the user asked for it after using the site. Five sections fit comfortably in a row, and
+  pages (the group board's tower and race chart especially) get the sidebar's 248 px back.
+- **Rejected:** a top bar on phones too (five labels do not fit at 375 px; a scrolling tab strip hides
+  sections); keeping the sidebar collapsible (more code for the same result).
+- **Trade-off:** adding a sixth or seventh section would need a "More" menu.
 
 ## D-38. The website's tooling runs on Node 24; the API stays on Node 20 for now (2026-10-04)
 

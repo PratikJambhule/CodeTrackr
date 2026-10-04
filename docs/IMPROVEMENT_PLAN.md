@@ -116,6 +116,8 @@ removed the `date` field and its index from every activity document, and every r
 
 **H-23 (2026-10-03, found while building item 12):** browsers blocked every PATCH (goal completion, notification read) — fixed.
 
+**H-24 (2026-10-04, found live by the user):** the all-time boards listed only people who had uploaded since the deploy — fixed (D-39).
+
 **Full re-audit — 2026-10-03.** Every backend route, the ingest path and the extension's flush
 logic were re-read against these entries; backend 18 suites / 296 assertions, extension 3 / 52 and
 the frontend build all pass. New: **H-22** (the Dashboard's "today" is the wrong day for 5½ hours
@@ -232,6 +234,12 @@ is added (this closes Quick-Wins #5). Live migration: `node backend/scripts/migr
 **Fix:** `maxOf(rows, pick)` folds instead of spreading, floors at 1 so it is always a safe divisor, and skips non-finite values.
 **Files:** `backend/routes/leaderboard.js`. **Verified:** `tests/leaderboardScore.test.js` (11), including a 200k-row case and an assertion that the old spread really does throw at that size.
 
+### H-24. All-time leaderboard and group boards showed only recent uploaders — ✅ FIXED 2026-10-04 (deploys with the next push)
+**Problem:** the all-time boards chose their data source with `UserStats.estimatedDocumentCount() > 0`. Ingest upserts a `userstats` row for every upload, so right after the October deploy the first upload made the collection non-empty while it held only the people who had uploaded since. The live backfill (`scripts/backfill-userstats.js --apply`) had not been run yet.
+**Found:** by the user on the live site, 2026-10-04: "All time" listed only them, while "Last 7 days" and "Last 30 days" (which scan `activities`) listed 35 people.
+**Fix:** the backfill records that it finished (`migrations` row `userstats-backfill`), and both boards use running totals only when that row exists (D-39). **Verified:** a new integration test builds the exact situation (an older user with activity but no running-total row, a new uploader with one) and checks the leaderboard and a group board list both, from the scan before the backfill and from `userstats` after it; it failed before the fix. Two existing tests now record the marker first.
+**Lesson:** decide "is the migration done?" from a record the migration writes, never from the shape of the data it is filling.
+
 ### H-23. Browsers blocked every PATCH request — ✅ FIXED 2026-10-03
 **Problem:** the CORS config in `app.js` allowed `GET, POST, PUT, DELETE, OPTIONS` — not PATCH. Every PATCH from the dashboard failed at the browser's preflight: goal **Mark complete / Reopen** (shipped 2026-09-10, M-17), notification **mark as read** and **mark all read**. The handlers worked, and every test passed, because server-side tests (and `supertest`) never send a CORS preflight. This is a likely reason the live database had **0 completed goals** (2026-09-16 check), which in turn kept `estimationCalibration` empty.
 **Found:** building the group-rename button (item 12), when the browser console showed "Method PATCH is not allowed by Access-Control-Allow-Methods".
@@ -320,7 +328,7 @@ is added (this closes Quick-Wins #5). Live migration: `node backend/scripts/migr
 - **L-2. ✅ FIXED 2026-08-27.** Extension settings `flushIntervalSeconds` and `minFlushMinutes` are declared in `package.json` but hardcoded (30 / 0.1) in `getCfg()` — the user's configuration is silently ignored.
 - **L-3. ✅ FIXED 2026-10-03.** Was ~40 `console.log` calls on hot paths, including per-request user ids. Now `services/logger.js` (JSON lines, `LOG_LEVEL`), one access-log line per request with `X-Request-Id` (`middleware/requestId.js`), errors logged with the same id the client sees; no `console.*` remains in app code.
 - **L-4. ✅ FIXED 2026-10-04 (redesign) — Big page files.** Was `Dashboard.tsx` 1,217 lines, `Groups.tsx` 789, `Goals.tsx` 623. Now the largest page is `GroupBoard.tsx` at 393 lines; the dashboard is 247 lines plus `pages/dashboard/` cards, charts are shared components and data hooks live in `hooks/queries.ts`.
-- **L-5. ✅ ADDRESSED 2026-10-04.** Was "no tests of any kind". Now backend unit 27 suites (375 assertions), an integration suite (39 tests, real Express app + in-memory MongoDB over HTTP), extension 6 suites (70), and since 2026-10-04 frontend Vitest tests (51: date and standings logic, chart components, routing), all in CI. **Still open:** no end-to-end browser tests (Playwright is the next step, D-34).
+- **L-5. ✅ ADDRESSED 2026-10-04.** Was "no tests of any kind". Now backend unit 27 suites (375 assertions), an integration suite (40 tests, real Express app + in-memory MongoDB over HTTP), extension 6 suites (70), and since 2026-10-04 frontend Vitest tests (51: date and standings logic, chart components, routing), all in CI. **Still open:** no end-to-end browser tests (Playwright is the next step, D-34).
 - **L-6.** `tsconfig` has `strict: false` in the extension; several `as any` casts hide real bugs (e.g. the stub context in H-12).
 - **L-7. Partially addressed 2026-08-27** (activity now stamped with interval start; idle-counting unchanged). Idle time under 2 minutes counts as coding time, so totals skew high. Consider counting only intervals containing a real edit event.
 - **L-8. ✅ FIXED 2026-09-09.** `GET /` returned `{status:'ok'}` even with Mongo down. Added `GET /health` returning 503 when `mongoose.connection.readyState !== 1`; `GET /` stays the liveness ping. Point the platform health check at `/health`.

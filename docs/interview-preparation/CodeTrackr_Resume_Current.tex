@@ -8,7 +8,7 @@
     \resumeItem{Co-built (team of 3) and published a \textbf{TypeScript VS Code extension}, owning its \textbf{5 event-driven trackers} and an \textbf{offline-safe persisted upload queue} with per-upload idempotency keys; users connect through a \textbf{device-code sign-in} that issues hashed, per-device, expiring keys kept in the OS keychain.}
     \resumeItem{Owned the \textbf{Express + Mongoose} backend: atomic \texttt{\$inc} upserts into 10-minute buckets store \textbf{5$\times$ fewer documents and 13$\times$ less data} at no throughput cost, and an \textbf{anti-cheat credit layer} (focus corroboration, an atomic 600\,s-per-window cap) bounds leaderboard inflation to real time.}
     \resumeItem{Replaced a full-collection leaderboard scan with \textbf{write-time running totals}, cutting median latency from \textbf{6.7\,s to 62\,ms at 1M activity rows}; moved dashboard aggregation into MongoDB pipelines, proven equal to the old code by an oracle test, and shipped contest-week group boards.}
-    \resumeItem{Built a \textbf{confidence-gated} insights engine (11 metrics, 13 threshold rules) and the quality bar around it: \textbf{375 unit assertions and 39 API integration tests} on an in-memory MongoDB, Docker image health check and deploy-on-green in \textbf{GitHub Actions}, JSON logs with request ids.}
+    \resumeItem{Built a \textbf{confidence-gated} insights engine (11 metrics, 13 threshold rules) and the quality bar around it: \textbf{375 unit assertions and 40 API integration tests} on an in-memory MongoDB, Docker image health check and deploy-on-green in \textbf{GitHub Actions}, JSON logs with request ids.}
     \resumeItem{Redesigned the \textbf{React + TypeScript} web app around a live, F1-style group standings board, a race chart and a year heatmap built as small SVG components instead of a chart library; lazy-loaded every page and removed the 3D and animation libraries, \textbf{halving first-load JavaScript (748\,kB to 359\,kB)}.}
     \resumeItem{Added \textbf{51 frontend tests} (Vitest, Testing Library) run in the India time zone, which caught a date bug that saved goals a day early; made the site keyboard- and screen-reader-usable and responsive down to 320\,px.}
   \resumeItemListEnd
@@ -31,7 +31,7 @@
 %   bullets don't use it; prefer weekly active users from backend/scripts/usage-report.js.
 % - "Mar 2026": git history on this branch starts 2026-08; be ready to say the work began earlier.
 % - Test counts as of 2026-10-04: backend unit 27 suites / 375 assertions (a few are source scans),
-%   integration 39, extension 6 suites / 70, frontend 51 (Vitest). Update whenever tests are added.
+%   integration 40, extension 6 suites / 70, frontend 51 (Vitest). Update whenever tests are added.
 % - FRONTEND BULLETS (added 2026-10-04 at the user's request, below the extension/backend ones): the redesign
 %   is BUILT and TESTED but NOT DEPLOYED as of 2026-10-04. Until it ships, say "built", and expect "is it
 %   live?". 748 kB -> 359 kB = landing page first visit (raw bytes, `npm run build`); gzip 232 -> 114 kB.

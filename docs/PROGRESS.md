@@ -6,6 +6,23 @@ engineering narrative for August–September is in `docs/SESSION-LOG-2026-08-27.
 
 ---
 
+## 2026-10-04 — Live leaderboard bug fixed (H-24); top navigation bar
+
+**Bug (found by the user on the live site).** The all-time leaderboard listed only the user, while
+"Last 7 days" and "Last 30 days" listed 35 people. Cause: the all-time boards switched to the new
+`userstats` running totals as soon as that collection had any row. Ingest creates a row for whoever
+uploads, so the first upload after the deploy flipped the switch while the table held only that
+person; the live backfill has not been run. Group boards' "All time" had the same flaw. **Fix
+(D-39):** `rebuildAll({ apply: true })` records `userstats-backfill` in a new `migrations` collection
+when it finishes, and both boards read running totals only once that record exists; until then they
+scan `activities` (correct, slower). **Tested:** a new integration test reproduces the live situation
+(failed before, passes after); integration 40, unit 27 suites / 375. Running the backfill is still the
+user's step (`docs/RELEASE.md` §3); afterwards the boards switch to the fast path by themselves.
+
+**Navigation (user request, D-40).** The left sidebar is replaced by a top bar with the five sections
+in a row; phones keep the bottom tabs. Checked in the browser at desktop width and 375 px (no sideways
+scroll). Frontend lint clean, 51 tests, type-check green.
+
 ## 2026-10-04 — Website tooling moved to Node 24
 
 `docker compose up --build` printed `npm warn EBADENGINE`: Vitest 5 wants Node `^22.12 || ^24 ||

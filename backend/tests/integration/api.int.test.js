@@ -357,10 +357,14 @@ async function main() {
       assert.strictEqual(live[0].s, 1500);
       assert.strictEqual(live[0].c, 2);
 
+      // Pretend the backfill has run, so the all-time board trusts the running totals.
+      const Migration = require('../../models/Migration');
+      await Migration.create({ _id: 'userstats-backfill', completedAt: new Date() });
       const viaStats = await request(app).get('/api/leaderboard').set('Cookie', a.cookie);
       assert.strictEqual(viaStats.headers['x-leaderboard-source'], 'userstats');
 
       await UserStats.deleteMany({});
+      await Migration.deleteMany({});
       const viaScan = await request(app).get('/api/leaderboard').set('Cookie', a.cookie);
       assert.strictEqual(viaScan.headers['x-leaderboard-source'], 'scan');
       const strip = (rows) => rows.filter((r) => r.totalHours > 0).map(({ userId, profilePictureUrl, ...r }) => r);
@@ -369,9 +373,42 @@ async function main() {
       const dry = await rebuildAll({ apply: false });
       assert.strictEqual(dry.written, 0);
       assert.strictEqual(await UserStats.countDocuments(), 0);
+      assert.strictEqual(await Migration.countDocuments(), 0, 'a dry run records nothing');
       await rebuildAll({ apply: true });
       const rebuilt = (await UserStats.find({}).sort({ totalSeconds: -1 }).lean()).map(pick);
       assert.deepStrictEqual(rebuilt, live, JSON.stringify({ rebuilt, live }));
+      assert.ok(await Migration.exists({ _id: 'userstats-backfill' }), 'an applied rebuild records that it finished');
+    }],
+
+    ['userstats: all-time boards keep scanning until the backfill has run (regression: one new uploader filled the whole board)', async () => {
+      const UserStats = require('../../models/UserStats');
+      const { rebuildAll } = require('../../services/userStats');
+      const old = await h.makeUser('Oldtimer');
+      const fresh = await h.makeUser('Newcomer');
+      const created = await request(app).post('/api/groups/create').set('Cookie', fresh.cookie)
+        .send({ groupName: 'Squad', groupDescription: 'x', visibility: 'public' });
+      const id = created.body.group._id;
+      await request(app).post(`/api/groups/${id}/join`).set('Cookie', old.cookie).send({});
+      // Oldtimer's history predates running totals: activity exists, no userstats row.
+      await request(app).post('/api/extension/track').set('x-api-key', old.apiKey).send(flush({ duration: 3600 }));
+      await UserStats.deleteMany({ userId: old.user.id });
+      // Newcomer uploads after the deploy, which creates a userstats row.
+      await request(app).post('/api/extension/track').set('x-api-key', fresh.apiKey).send(flush({ duration: 600 }));
+
+      const before = await request(app).get('/api/leaderboard').set('Cookie', fresh.cookie);
+      assert.strictEqual(before.headers['x-leaderboard-source'], 'scan');
+      assert.deepStrictEqual(before.body.filter((r) => r.totalHours > 0).map((r) => r.name), ['Oldtimer', 'Newcomer']);
+      const groupBefore = await request(app).get(`/api/groups/${id}/details`).set('Cookie', fresh.cookie);
+      assert.strictEqual(groupBefore.body.source, 'scan');
+      assert.deepStrictEqual(groupBefore.body.leaderboard.map((r) => [r.userName, r.codingHours]), [['Oldtimer', 1], ['Newcomer', 0.17]]);
+
+      await rebuildAll({ apply: true });
+      const after = await request(app).get('/api/leaderboard').set('Cookie', fresh.cookie);
+      assert.strictEqual(after.headers['x-leaderboard-source'], 'userstats');
+      assert.deepStrictEqual(after.body.filter((r) => r.totalHours > 0).map((r) => r.name), ['Oldtimer', 'Newcomer']);
+      const groupAfter = await request(app).get(`/api/groups/${id}/details`).set('Cookie', fresh.cookie);
+      assert.strictEqual(groupAfter.body.source, 'userstats');
+      assert.deepStrictEqual(groupAfter.body.leaderboard.map((r) => [r.userName, r.codingHours]), [['Oldtimer', 1], ['Newcomer', 0.17]]);
     }],
 
     ['userstats: a ?days window still answers from the activity scan', async () => {
@@ -397,6 +434,7 @@ async function main() {
       await request(app).post('/api/extension/track').set('x-api-key', rival.apiKey).send(flush({ duration: 1800, timestamp: at(180) }));
       await request(app).post('/api/extension/track').set('x-api-key', owner.apiKey).send(flush({ duration: 600, timestamp: at(181) }));
 
+      await require('../../services/userStats').rebuildAll({ apply: true }); // the backfill has run
       const allTime = await request(app).get(`/api/groups/${id}/details`).set('Cookie', owner.cookie);
       assert.strictEqual(allTime.body.source, 'userstats');
       assert.strictEqual(allTime.body.window, null);

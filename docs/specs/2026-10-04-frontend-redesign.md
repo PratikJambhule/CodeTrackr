@@ -51,7 +51,8 @@ coded; grey = day off; dim = not yet happened.
 
 Public: `/` landing · `/guide` · `/privacy` · `/login` · `/join/:groupId` (signed out → login, then
 back) · `/device` (same).
-Signed in (sidebar on desktop, bottom tabs on phones): `/dashboard` · `/leaderboard` · `/groups` ·
+Signed in (a top bar on desktop, which replaced the first version's sidebar on 2026-10-04 at the
+user's request, D-40; bottom tabs on phones): `/dashboard` · `/leaderboard` · `/groups` ·
 `/groups/:groupId` (board, was a modal) · `/goals` · `/insights` · `/profile` · `/onboarding` ·
 `/device`. Signed-in visitors to `/` see the landing page with an "Open dashboard" button.
 

@@ -97,7 +97,31 @@ async function rebuildAll({ apply = false } = {}) {
         await UserStats.updateOne({ userId: _id }, { $set: totals }, { upsert: true });
         written += 1;
     }
+    if (apply) {
+        const Migration = require('../models/Migration');
+        await Migration.updateOne(
+            { _id: BACKFILL_ID },
+            { $set: { completedAt: new Date(), details: { users: rows.length, written } } },
+            { upsert: true },
+        );
+    }
     return { users: rows.length, written };
 }
 
+const BACKFILL_ID = 'userstats-backfill';
+
+/**
+ * True once `rebuildAll({ apply: true })` has finished. Until then the
+ * userstats rows hold only what ingest added since the deploy (the people who
+ * uploaded since), so all-time boards must keep scanning `activities`. "The
+ * collection is not empty" was the old test, and one new upload passed it
+ * (D-39). One indexed read by _id.
+ */
+async function statsComplete() {
+    const Migration = require('../models/Migration');
+    return Boolean(await Migration.exists({ _id: BACKFILL_ID }));
+}
+
 module.exports.rebuildAll = rebuildAll;
+module.exports.statsComplete = statsComplete;
+module.exports.BACKFILL_ID = BACKFILL_ID;

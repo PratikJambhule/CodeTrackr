@@ -12,7 +12,7 @@ unauthenticated analytics, all of which are gone. For line-level detail see
 |---|---|---|
 | VS Code extension (2.5.0 live since 2026-10-04) | `extension/src/*.ts` → `dist/extension.js` | Five trackers collect counters; a 30 s timer decides when to upload one summary. |
 | Express API | `backend/app.js`, `routes/`, `services/`, `models/` | One process (a modular monolith). Feature routers, a thin service layer for ingest and insights, a central error handler. |
-| MongoDB Atlas | 13 collections | `activities` is the only high-volume one. |
+| MongoDB Atlas | 14 collections | `activities` is the only high-volume one. |
 | React SPA | `frontend/src/` | Public: landing, guide, privacy, sign-in, invite links. Signed in: Dashboard, Groups + group board, Leaderboard, Goals, Insights, Profile, Onboarding, Device approval. Redesigned 2026-10-04 (section 8). |
 | Scheduler | `.github/workflows/cron.yml` | Calls two secret-protected internal routes: hourly goal-deadline sweep, nightly daily-summary rollup. |
 
@@ -78,8 +78,8 @@ upload. Setting `ACTIVITY_BUCKET_MS=0` restores one document per upload.
 | `GET /api/analytics/summary/:userId` | `$group` pipeline by day and language | All of the user's history |
 | `GET /api/analytics/history/:userId` (2026-10-04) | one `$facet` pipeline over the last 365 local days: seconds per day (heatmap), per hour of day and per project over the last 7 days, commits in the last 7 | One user, one year |
 | `GET /api/metrics` | `metricsService` runs `$group` pipelines → `metricsDerive` (pure functions) → `sessionize` → `insightsBaseline` (90-day baseline cached once a day in `userinsights`) → `rulesEngine` | Measured 239 ms cold, 44 ms warm |
-| `GET /api/leaderboard` | Top N `userstats` rows + two indexed maxima; `?days=` windows scan activities | O(N) all-time (H-7 fixed); windowed scan bounded by the window |
-| `GET /api/groups/:id/details` | Members' `userstats`; `?from=&to=` scans that window. Also `daily`: seconds per member per local day of the window (or the last 7 days), for the day cells and race chart (`services/groupDaily.js`, up to 62 days) | O(members) all-time (H-8 fixed); daily cells bounded by the window |
+| `GET /api/leaderboard` | Top N `userstats` rows + two indexed maxima, once the backfill has recorded that it finished (D-39); before that, and for `?days=` windows, a scan of activities | O(N) all-time (H-7 fixed); windowed scan bounded by the window |
+| `GET /api/groups/:id/details` | Members' `userstats` (once the backfill has finished, D-39; before that a scan); `?from=&to=` scans that window. Also `daily`: seconds per member per local day of the window (or the last 7 days), for the day cells and race chart (`services/groupDaily.js`, up to 62 days) | O(members) all-time (H-8 fixed); daily cells bounded by the window |
 | `GET /api/groups/:id/preview` (2026-10-04) | name, description, visibility, member count, whether the caller is a member: what an invite link shows | Two indexed reads |
 | `GET /api/goals/:id/progress` | `$match` on language or project (case-insensitive, regex-escaped) inside the goal's lifetime, `$sum` duration | One user, one window |
 
@@ -119,6 +119,7 @@ M-28/29, L-11.
 | `dailysummaries` | one per (user, UTC day) | Written by the rollup, not yet read |
 | `windowusages`, `ingestreceipts` | anti-cheat window counters; idempotency receipts | both expire after 48 h |
 | `userstats` | one row of running totals per user | read by the all-time leaderboard and group boards |
+| `migrations` | one row per finished one-off data job (`userstats-backfill`) | the all-time boards trust `userstats` only once its row exists (D-39) |
 | `deviceauths`, `devicetokens` | pending device sign-ins (10 min TTL); issued per-device keys | only hashes of codes and secrets |
 | `userinsights` | cached 90-day baseline per user | Refreshed on read, at most daily |
 | `users` | `googleId`, `email`, `apiKeyId` + `apiKeyHash` (select:false), `apiKeyLast4` | The plain key is never stored; legacy keys keep only a hash until converted |
@@ -187,7 +188,7 @@ frontend/src/
   components/ui          Button, Card, Modal (focus trap), Toast, fields, Segmented, Pill
   components/charts      StandingsTower (FLIP animation), RaceChart, Bars, YearHeatmap,
                          HourStrip, Ring, Sparkline: small SVG/HTML, no chart library
-  components/layout      AppShell (sidebar / phone tab bar), PublicLayout, notifications, account menu
+  components/layout      AppShell (top bar on desktop / tab bar on phones), PublicLayout, notifications, account menu
   pages/                 one file per page; dashboard/ split into cards
   index.css, theme.tsx   design tokens as CSS variables; dark (default), light, or system
 ```

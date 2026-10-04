@@ -122,6 +122,15 @@ Now a test sends real preflights (H-23). Second, the Dashboard's "today" was yes
 midnight and 5:30 AM in India, because the code took the UTC date and shifted it instead of
 taking the local date (H-22); the "today" window had no test. Both are fixed with tests.
 
+**Q: Tell me about a bug a user found in production.**
+After the October deploy my all-time leaderboard showed only me, while the 7- and 30-day views
+showed 35 people. The all-time board reads a running-totals table that a one-off backfill fills
+from history, and I had told it to use that table "once it has rows". Every new upload creates a
+row, so my first upload flipped the switch while the table held only me, and the backfill had not
+run yet. Now the backfill writes a "finished" record and the boards switch on that; until then
+they scan the raw data, slower but correct. A test rebuilds the exact situation (H-24). The
+lesson: ask the migration whether it is done; don't guess from the data it is filling.
+
 ## Scaling
 
 **Q: What breaks first with 10,000 users?**
@@ -158,7 +167,7 @@ device-sign-in routes still see real IPs because the extension calls Render dire
 
 **Q: How did you test it?**
 Four layers, all in GitHub Actions on every push: 375 backend unit assertions in 27 plain
-`node:assert` suites (logic refactored into pure functions), 39 integration tests that run the
+`node:assert` suites (logic refactored into pure functions), 40 integration tests that run the
 real Express app over HTTP against an in-memory MongoDB (including real CORS preflights), 70
 extension assertions against the built bundle, and 51 frontend tests in Vitest; plus the frontend
 build and a Docker health check. The frontend tests run in India's time zone on purpose, because
@@ -216,7 +225,7 @@ see no movement, and nothing scrolls sideways even at 320 px.
 
 | Number | Source |
 |---|---|
-| unit 27 suites / 375; integration 39; extension 6 / 70; frontend 51 | `npm test`, `npm run test:int`, 2026-10-04 |
+| unit 27 suites / 375; integration 40; extension 6 / 70; frontend 51 | `npm test`, `npm run test:int`, 2026-10-04 |
 | landing page first visit 359 kB (114 kB gzip), was 748 kB (232 kB) | `npm run build`, measured 2026-10-04 |
 | leaderboard 6.72 s → 62 ms p50 at 1M rows | `bench/leaderboard.bench.js` (local) |
 | ingest 4.9× fewer docs, 12.7× less data | `bench/ingest.bench.js` (local) |
