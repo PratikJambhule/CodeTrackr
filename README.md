@@ -9,6 +9,7 @@ each other week by week.
 
 - **Website:** https://code-trackr-frontend.vercel.app
 - **Extension:** [CodeTrackr for VS Code](https://marketplace.visualstudio.com/items?itemName=CodeTrackr-ext.codetrackr-vscode)
+- **1-minute demo video:** https://code-trackr-frontend.vercel.app/#demo
 
 ![Landing page](.github/assets/landing.png)
 
@@ -139,7 +140,7 @@ cd frontend && npm run lint && npm test && npm run build
 ```
 
 375 backend unit assertions, 42 API integration tests (the real Express app over HTTP against an
-in-memory MongoDB), 70 extension assertions and 54 frontend tests. Frontend tests run in the India
+in-memory MongoDB), 70 extension assertions and 55 frontend tests. Frontend tests run in the India
 time zone, where the date bugs showed up. CI runs all of them, plus a Docker build with a health
 check, on every push.
 

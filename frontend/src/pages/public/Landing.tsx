@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { ArrowRight, Check, KeyRound, Lock, ShieldCheck, Timer, X as XIcon } from 'lucide-react';
+import { Link } from 'react-router-dom';
+import { ArrowRight, Check, KeyRound, Lock, PlayCircle, ShieldCheck, Timer, X as XIcon } from 'lucide-react';
 import { StandingsTower, type TowerRow } from '../../components/charts/StandingsTower';
 import { CellLegend } from '../../components/charts/DayCells';
 import { RaceChart } from '../../components/charts/RaceChart';
@@ -8,6 +9,7 @@ import { MARKETPLACE_URL } from '../../components/layout/PublicLayout';
 import { gapLabel, hm } from '../../lib/format';
 import { cellsSummary, dayCells, movement, orderOnDay, rank, type Racer } from '../../lib/standings';
 import { SAMPLE_DAYS, SAMPLE_WEEK } from './sampleWeek';
+import { DemoVideo } from './DemoVideo';
 
 const H = 3600;
 
@@ -122,12 +124,37 @@ export default function Landing() {
             <ButtonLink to="/login" size="lg">
               Sign in with Google
             </ButtonLink>
+            <a href="#demo" className="inline-flex min-h-[52px] items-center gap-2 px-2 font-semibold no-underline">
+              <PlayCircle className="h-5 w-5" aria-hidden="true" />
+              Watch the 1-minute demo
+            </a>
           </div>
           <p className="text-sm text-muted">Setup is one command in VS Code and one click on this site. No keys to copy.</p>
         </div>
         <div className="min-w-0 flex-[1_1_520px]">
           <HeroTower />
         </div>
+      </section>
+
+      <section id="demo" aria-labelledby="demo-title" className="mx-auto max-w-[1200px] scroll-mt-20 px-4 pb-20 sm:px-6">
+        <div className="mb-8 flex flex-wrap items-end justify-between gap-x-8 gap-y-4">
+          <div className="flex min-w-0 flex-col gap-3">
+            <span className="eyebrow">See it in action · 1 min</span>
+            <h2 id="demo-title" className="display text-balance text-[clamp(44px,5vw,72px)]">
+              CodeTrackr in one minute
+            </h2>
+            <p className="max-w-[560px] text-lg text-muted">Install it, sign in from VS Code, and race your friends. Captions included, no sound needed.</p>
+          </div>
+          <Link to="/guide" className="inline-flex items-center gap-1.5 font-semibold no-underline">
+            Prefer reading? The step-by-step guide
+            <ArrowRight className="h-4 w-4" aria-hidden="true" />
+          </Link>
+        </div>
+        <DemoVideo />
+        <p className="sr-only">
+          The video shows installing CodeTrackr for VS Code, running CodeTrackr: Sign In, approving the code on this site, then the dashboard, a group board with the
+          standings and race chart, creating a goal, and the leaderboard.
+        </p>
       </section>
 
       <section id="how" className="scroll-mt-20 border-y border-line">

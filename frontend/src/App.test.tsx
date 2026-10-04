@@ -49,6 +49,9 @@ describe('routing', () => {
     expect(screen.getAllByRole('link', { name: /sign in/i }).length).toBeGreaterThan(0);
     // The hero tower is a real list a screen reader can read.
     expect(screen.getByRole('list', { name: 'Example standings' })).toBeInTheDocument();
+    // The one-minute demo: a link in the hero jumps to its section.
+    expect(screen.getByRole('link', { name: /watch the 1-minute demo/i })).toHaveAttribute('href', '#demo');
+    expect(screen.getByRole('heading', { level: 2, name: /codetrackr in one minute/i })).toBeInTheDocument();
   });
 
   it('sends a signed-out visitor from a protected page to sign in, and remembers where they were going', async () => {
