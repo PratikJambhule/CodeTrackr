@@ -334,6 +334,51 @@ async function main() {
       assert.strictEqual(anon.status, 401);
     }],
 
+    ['stale unique index (live 500s, 2026-10-22): a refused write gives its window seconds back; the repair fixes it', async () => {
+      const { apiKey, user } = await h.makeUser();
+      const WindowUsage = require('../../models/WindowUsage');
+      // the index found on the live database, not declared by the schema
+      await Activity.collection.createIndex({ userId: 1, day: 1, source: 1, fileKey: 1, hour: 1, timestamp: 1 },
+        { unique: true, name: 'userId_1_day_1_source_1_fileKey_1_hour_1_timestamp_1' });
+      const win = Math.floor((Date.now() - 3600e3) / 600000) * 600000;
+      const at = new Date(win + 60000).toISOString();
+      const md = flush({ duration: 60, timestamp: at, language: 'markdown', focusAnalytics: { focusedMs: 60000 } });
+      const ts = flush({ duration: 120, timestamp: at, language: 'typescript', focusAnalytics: { focusedMs: 120000 } });
+      assert.strictEqual((await request(app).post('/api/extension/track').set('x-api-key', apiKey).send(md)).status, 201);
+
+      const refused = await request(app).post('/api/extension/track').set('x-api-key', apiKey).send(ts);
+      assert.strictEqual(refused.status, 500, 'the stale index still refuses a second language in the window');
+      const usage = await WindowUsage.findOne({ userId: String(user._id), bucketStart: new Date(win) }).lean();
+      assert.strictEqual(usage.seconds, 60, 'the refused upload gave its 120 s back');
+
+      const { repair } = require('../../scripts/repair-ingest');
+      const dry = await repair({ apply: false });
+      assert.deepStrictEqual(dry.stale.map((i) => i.name), ['userId_1_day_1_source_1_fileKey_1_hour_1_timestamp_1']);
+      assert.strictEqual((await Activity.collection.indexes()).some((i) => i.name.startsWith('userId_1_day_1')), true, 'dry run changes nothing');
+      await repair({ apply: true });
+      assert.strictEqual((await Activity.collection.indexes()).some((i) => i.name.startsWith('userId_1_day_1')), false, 'stale index dropped');
+
+      const ok = await request(app).post('/api/extension/track').set('x-api-key', apiKey).send(ts);
+      assert.strictEqual(ok.status, 201, JSON.stringify(ok.body));
+      assert.strictEqual(ok.body.credited, 120, 'fully credited after the repair');
+      const docs = await Activity.find({ bucketStart: new Date(win) }).lean();
+      assert.deepStrictEqual(docs.map((d) => d.language).sort(), ['markdown', 'typescript']);
+    }],
+
+    ['repair: a window counter inflated by refused uploads is lowered to what was credited', async () => {
+      const { apiKey, user } = await h.makeUser();
+      const WindowUsage = require('../../models/WindowUsage');
+      const win = Math.floor((Date.now() - 2 * 3600e3) / 600000) * 600000;
+      await request(app).post('/api/extension/track').set('x-api-key', apiKey)
+        .send(flush({ duration: 60, timestamp: new Date(win + 60000).toISOString(), focusAnalytics: { focusedMs: 60000 } })).expect(201);
+      // what the live retries did before the fix: claims with nothing stored
+      await WindowUsage.updateOne({ userId: String(user._id), bucketStart: new Date(win) }, { $inc: { seconds: 965 } });
+      const { repair } = require('../../scripts/repair-ingest');
+      const r = await repair({ apply: true });
+      assert.deepStrictEqual(r.windows.map((w) => [w.from, w.to]), [[1025, 60]]);
+      assert.strictEqual((await WindowUsage.findOne({ userId: String(user._id), bucketStart: new Date(win) }).lean()).seconds, 60);
+    }],
+
     ['shadow mode: a labelled 2.6.0 session is saved with the model guess; the report scores it, read-only', async () => {
       const me = await h.makeUser();
       const { promptFor } = require('../../services/sessionSnapshot');

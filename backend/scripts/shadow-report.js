@@ -16,7 +16,7 @@ const pct = (x) => `${Math.round(x * 100)}%`;
 
 (async () => {
   if (!process.env.MONGO_URI) { console.error('MONGO_URI is not set.'); process.exit(1); }
-  await mongoose.connect(process.env.MONGO_URI, { serverSelectionTimeoutMS: 20000 });
+  await mongoose.connect(process.env.MONGO_URI, { serverSelectionTimeoutMS: 20000, autoIndex: false, autoCreate: false }); // maintenance: never build indexes or collections
   const docs = await Session.find({ $or: [{ 'userLabel.type': { $exists: true } }, { 'pickerLabel.type': { $exists: true } }] })
     .select('userId workType modelGuess pickerLabel userLabel').lean();
   const r = shadowReport(docs);

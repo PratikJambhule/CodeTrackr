@@ -86,7 +86,11 @@ async function upsertBucket(filter, update, setOnInsert) {
         });
     } catch (err) {
         if (err && err.code === 11000) {
-            return Activity.findOneAndUpdate(filter, update, { new: true });
+            const doc = await Activity.findOneAndUpdate(filter, update, { new: true });
+            // A race on the bucket index finds the winner's document. Nothing found means another
+            // unique index refused it (the stale live index, 2026-10-22): say which, not "null._id".
+            if (!doc) throw new Error(`bucket write refused by unique index ${JSON.stringify(err.keyPattern || err.keyValue || {})}`);
+            return doc;
         }
         throw err;
     }
@@ -192,7 +196,17 @@ async function persistFlush(normalized, when) {
     }
 
     plan.update.$inc.claimedDuration = claimed;
-    const doc = await upsertBucket(plan.filter, plan.update, plan.setOnInsert);
+    let doc;
+    try {
+        doc = await upsertBucket(plan.filter, plan.update, plan.setOnInsert);
+    } catch (err) {
+        // Nothing was stored: give the windows their claimed seconds back, or every retry of this
+        // upload would use up the 600 s and it would be credited 0 once it finally went through.
+        for (const slice of slices) {
+            if (slice.seconds > 0) await WindowUsage.updateOne({ userId, bucketStart: slice.bucketStart }, { $inc: { seconds: -slice.seconds } });
+        }
+        throw err;
+    }
     for (const { slice, credit, parts } of extraWindows) {
         const t = timeInc(parts);
         const update = { $inc: { duration: credit, ...t.$inc, ...modeInc(normalized.userMode, credit) } };
