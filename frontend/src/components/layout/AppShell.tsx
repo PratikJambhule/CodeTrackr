@@ -27,7 +27,7 @@ export function AppShell({ user }: { user: Me }) {
         Skip to content
       </a>
       <header className="sticky top-0 z-30 border-b border-line bg-bg-glass backdrop-blur">
-        <div className="mx-auto flex h-16 w-full max-w-[1600px] items-center gap-3 px-4 sm:px-6 lg:gap-8 lg:px-8">
+        <div className="mx-auto flex h-16 w-full max-w-[1600px] items-center gap-3 px-4 sm:px-6 lg:gap-4 lg:px-8 xl:gap-8">
           <NavLink to="/dashboard" className="flex-none no-underline" aria-label="CodeTrackr dashboard">
             <span className="lg:hidden">
               <Logo size={28} showName={false} />

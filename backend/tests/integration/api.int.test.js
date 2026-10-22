@@ -61,6 +61,326 @@ async function main() {
       assert.strictEqual(await Activity.countDocuments(), 0);
     }],
 
+    ['privacy: command text from extension 2.5.0 is stored as its kind, never as text', async () => {
+      const { apiKey } = await h.makeUser();
+      const r = await request(app).post('/api/extension/track').set('x-api-key', apiKey).send(flush({
+        terminalAnalytics: {
+          totalCommands: 4, failedCommands: 4, commandUsage: { gcc: 2, misc: 2 },
+          lastCommand: 'curl https://api.site.com/data?token=***',
+          repeatedFailedCommands: [{ command: 'g++ two_sum.cpp', count: 2 }, { command: 'curl https://api.site.com/x', count: 2 }],
+        },
+      }));
+      assert.strictEqual(r.status, 201, JSON.stringify(r.body));
+      const [doc] = await Activity.find({}).lean();
+      const stored = JSON.stringify(doc.terminalAnalytics);
+      for (const leak of ['two_sum', 'curl', 'api.site.com', 'token', 'https']) {
+        assert.ok(!stored.includes(leak), `stored "${leak}"`);
+      }
+      assert.strictEqual(doc.terminalAnalytics.lastCommand, 'other');
+      assert.deepStrictEqual(doc.terminalAnalytics.repeatedFailedCommands.map(({ command, count }) => ({ command, count })),
+        [{ command: 'compile', count: 2 }, { command: 'other', count: 2 }]);
+    }],
+
+    ['track: command kinds from extension 2.6.0 are added up per bucket', async () => {
+      const { apiKey } = await h.makeUser();
+      const body = flush({ terminalAnalytics: { totalCommands: 4, failedCommands: 2, lastCommand: 'run',
+        commandKinds: { compile: 3, run: 1, failed: { compile: 2 } } } });
+      assert.strictEqual((await request(app).post('/api/extension/track').set('x-api-key', apiKey).send(body)).status, 201);
+      assert.strictEqual((await request(app).post('/api/extension/track').set('x-api-key', apiKey).send(body)).status, 201);
+      const [doc] = await Activity.find({}).lean();
+      assert.strictEqual(doc.terminalAnalytics.commandKinds.compile, 6);
+      assert.strictEqual(doc.terminalAnalytics.commandKinds.run, 2);
+      assert.strictEqual(doc.terminalAnalytics.commandKinds.failed.compile, 4);
+      assert.strictEqual(doc.terminalAnalytics.lastCommand, 'run');
+    }],
+
+    ['scrub: stored command text becomes its kind; dry run changes nothing; a re-run finds nothing', async () => {
+      const { scrubCommandText } = require('../../services/commandTextScrub');
+      const { user } = await h.makeUser();
+      const base = { userId: String(user._id), fileName: 'a.cpp', projectName: 'p', language: 'cpp', duration: 60 };
+      const [dirty, clean] = await Activity.insertMany([
+        { ...base, terminalAnalytics: { lastCommand: 'g++ two_sum.cpp', repeatedFailedCommands: [{ command: 'npm test -- --grep x', count: 2 }] } },
+        { ...base, terminalAnalytics: { lastCommand: 'compile', repeatedFailedCommands: [{ command: 'test', count: 1 }] } },
+        { ...base },
+      ]);
+      const dry = await scrubCommandText();
+      assert.deepStrictEqual(dry, { withText: 1, updated: 0, remaining: 1 });
+      assert.strictEqual((await Activity.findById(dirty._id).lean()).terminalAnalytics.lastCommand, 'g++ two_sum.cpp');
+
+      const applied = await scrubCommandText({ apply: true });
+      assert.deepStrictEqual(applied, { withText: 1, updated: 1, remaining: 0 });
+      const d = (await Activity.findById(dirty._id).lean()).terminalAnalytics;
+      assert.strictEqual(d.lastCommand, 'compile');
+      assert.deepStrictEqual(d.repeatedFailedCommands.map(({ command, count }) => ({ command, count })), [{ command: 'test', count: 2 }]);
+      assert.strictEqual((await Activity.findById(clean._id).lean()).terminalAnalytics.lastCommand, 'compile');
+
+      assert.deepStrictEqual(await scrubCommandText({ apply: true }), { withText: 0, updated: 0, remaining: 0 });
+    }],
+
+    ['v3: writing / reading / running and per-file time are stored, and add up per bucket', async () => {
+      const { apiKey } = await h.makeUser();
+      const body = (flushId) => flush({ duration: 150, flushId,
+        focusAnalytics: { focusedMs: 150000 },
+        payloadVersion: 3, writingSec: 100, readingSec: 50, runningSec: 0,
+        perFile: [
+          { name: 'extension.js', language: 'javascript', seconds: 50, writing: 50, reading: 0, running: 0, linesInserted: 4, linesDeleted: 1, edited: true },
+          { name: 'tracker.js', language: 'javascript', seconds: 100, writing: 50, reading: 50, running: 0, linesInserted: 2, linesDeleted: 0, edited: true },
+        ] });
+      for (const id of ['11111111-aaaa', '22222222-bbbb']) {
+        const r = await request(app).post('/api/extension/track').set('x-api-key', apiKey).send(body(id));
+        assert.strictEqual(r.status, 201, JSON.stringify(r.body));
+      }
+      const [doc] = await Activity.find({}).lean();
+      assert.strictEqual(doc.duration, 300);
+      assert.strictEqual(doc.writingSec, 200);
+      assert.strictEqual(doc.readingSec, 100);
+      assert.strictEqual(doc.fileTime['extension%2Ejs'].seconds, 100);
+      assert.strictEqual(doc.fileTime['tracker%2Ejs'].reading, 100);
+      assert.strictEqual(doc.fileTime['extension%2Ejs'].linesInserted, 8);
+      assert.strictEqual(doc.fileTime['tracker%2Ejs'].language, 'javascript');
+      assert.deepStrictEqual([...doc.files].sort(), ['extension.js', 'index.ts', 'tracker.js']);
+      const fileSum = Object.values(doc.fileTime).reduce((a, f) => a + f.seconds, 0);
+      assert.strictEqual(fileSum, doc.duration);
+    }],
+
+    ['v3: credit below the claim scales every part, so the parts still add up', async () => {
+      const { apiKey } = await h.makeUser();
+      // 300 s claimed, 0 s of focus, nothing ran: only the 120 s grace is credited.
+      const r = await request(app).post('/api/extension/track').set('x-api-key', apiKey).send(flush({ duration: 300,
+        focusAnalytics: { focusedMs: 0 }, writingSec: 200, readingSec: 100, runningSec: 0,
+        perFile: [{ name: 'a.js', seconds: 300, writing: 200, reading: 100, running: 0 }] }));
+      assert.strictEqual(r.status, 201, JSON.stringify(r.body));
+      const [doc] = await Activity.find({}).lean();
+      assert.strictEqual(doc.duration, 120);
+      assert.strictEqual(doc.claimedDuration, 300);
+      assert.strictEqual(doc.writingSec + doc.readingSec + (doc.runningSec || 0), 120);
+      assert.strictEqual(doc.writingSec, 80);
+      assert.strictEqual(doc.fileTime['a%2Ejs'].seconds, 120);
+    }],
+
+    ['v3: background running time counts when a command really ran, not otherwise', async () => {
+      const { apiKey } = await h.makeUser();
+      const build = (extra) => flush({ duration: 300, focusAnalytics: { focusedMs: 20000 },
+        writingSec: 20, readingSec: 0, runningSec: 280,
+        perFile: [{ name: 'app.ts', seconds: 300, writing: 20, reading: 0, running: 280 }], ...extra });
+      const ran = await request(app).post('/api/extension/track').set('x-api-key', apiKey)
+        .send(build({ terminalAnalytics: { totalCommands: 1, commandKinds: { build: 1 } } }));
+      assert.strictEqual(ran.body.credited, 300, JSON.stringify(ran.body));
+      const other = await h.makeUser();
+      const fake = await request(app).post('/api/extension/track').set('x-api-key', other.apiKey).send(build({}));
+      assert.strictEqual(fake.body.credited, 140, 'no command ran: focus 20 s + 120 s grace only');
+    }],
+
+    ['v3: a reading-only upload is stored in its own bucket (it is real work)', async () => {
+      const { apiKey } = await h.makeUser();
+      const r = await request(app).post('/api/extension/track').set('x-api-key', apiKey).send(flush({ duration: 90,
+        editorAnalytics: {}, focusAnalytics: { focusedMs: 90000 }, writingSec: 0, readingSec: 90, runningSec: 0,
+        perFile: [{ name: 'README.md', language: 'markdown', seconds: 90, writing: 0, reading: 90, running: 0 }] }));
+      assert.strictEqual(r.status, 201, JSON.stringify(r.body));
+      const [doc] = await Activity.find({}).lean();
+      assert.strictEqual(doc.duration, 90);
+      assert.strictEqual(doc.readingSec, 90);
+    }],
+
+    ['v3: an upload spread over two windows splits its parts; each bucket adds up', async () => {
+      const { apiKey } = await h.makeUser();
+      const windowStart = Math.floor((Date.now() - 3600e3) / 600000) * 600000;
+      const r = await request(app).post('/api/extension/track').set('x-api-key', apiKey).send(flush({ duration: 300,
+        timestamp: new Date(windowStart + 480000).toISOString(),   // 2 min before the boundary
+        focusAnalytics: { focusedMs: 300000 }, writingSec: 200, readingSec: 100, runningSec: 0,
+        perFile: [{ name: 'a.js', seconds: 200, writing: 200, reading: 0, running: 0 }, { name: 'b.md', seconds: 100, writing: 0, reading: 100, running: 0 }] }));
+      assert.strictEqual(r.status, 201, JSON.stringify(r.body));
+      const docs = await Activity.find({}).sort({ bucketStart: 1 }).lean();
+      assert.strictEqual(docs.length, 2);
+      assert.deepStrictEqual(docs.map((d) => d.duration), [120, 180]);
+      for (const d of docs) {
+        assert.strictEqual((d.writingSec || 0) + (d.readingSec || 0) + (d.runningSec || 0), d.duration);
+        assert.strictEqual(Object.values(d.fileTime).reduce((a, f) => a + f.seconds, 0), d.duration);
+      }
+    }],
+
+    ['v3: a path as a file name, or parts that do not add up, are refused with 400', async () => {
+      const { apiKey } = await h.makeUser();
+      const path = await request(app).post('/api/extension/track').set('x-api-key', apiKey).send(flush({
+        perFile: [{ name: 'src/secret/a.js', seconds: 120, writing: 120, reading: 0, running: 0 }] }));
+      assert.strictEqual(path.status, 400);
+      const sum = await request(app).post('/api/extension/track').set('x-api-key', apiKey).send(flush({ writingSec: 10, readingSec: 0, runningSec: 0 }));
+      assert.strictEqual(sum.status, 400);
+      assert.strictEqual(await Activity.countDocuments(), 0);
+    }],
+
+    ['v3 signals: runs, real debugging, reading counts and the project kind are stored; counters only once per upload', async () => {
+      const { apiKey } = await h.makeUser();
+      const windowStart = Math.floor((Date.now() - 3600e3) / 600000) * 600000;
+      const r = await request(app).post('/api/extension/track').set('x-api-key', apiKey).send(flush({ duration: 300,
+        timestamp: new Date(windowStart + 480000).toISOString(),   // spreads over two windows
+        focusAnalytics: { focusedMs: 300000 }, payloadVersion: 3, writingSec: 200, readingSec: 100, runningSec: 0,
+        perFile: [{ name: 'main.cpp', seconds: 300, writing: 200, reading: 100, running: 0 }],
+        runs: { terminal: 2, task: 0, debugNoDebug: 1, codeRunner: 0 },
+        debug: { sessions: 1, breakpointStops: 2, steps: 5 },
+        reading: { scrollEvents: 6, navigations: 3, docFileSec: 40, filesOpenedNotEdited: 1, searches: 9 },
+        filesCreated: 1, filesDeleted: 0,
+        workspace: { sourceFilesBucket: '1', hasPackageJson: false, hasRequirements: false, hasGit: false,
+          ownCommits: null, clonedRecently: false, path: 'C:/Users/me/secret' } }));
+      assert.strictEqual(r.status, 201, JSON.stringify(r.body));
+      const docs = await Activity.find({}).sort({ bucketStart: 1 }).lean();
+      assert.strictEqual(docs.length, 2);
+      const [first, second] = docs;
+      assert.deepStrictEqual(first.runs, { terminal: 2, debugNoDebug: 1 });
+      assert.deepStrictEqual(first.debug, { sessions: 1, breakpointStops: 2, steps: 5 });
+      assert.deepStrictEqual(first.reading, { scrollEvents: 6, navigations: 3, filesOpenedNotEdited: 1 });
+      assert.strictEqual(first.filesCreated, 1);
+      assert.deepStrictEqual(first.workspace, { sourceFilesBucket: '1', hasPackageJson: false,
+        hasRequirements: false, hasGit: false, clonedRecently: false });
+      assert.strictEqual(second.runs, undefined, 'counters are not repeated in the spread window');
+      const raw = JSON.stringify(docs);
+      assert.ok(!raw.includes('secret') && !raw.includes('searches') && !raw.includes('docFileSec'));
+    }],
+
+    ['v3 signals: a run with no typing and no counted time is still stored, not merged away', async () => {
+      const { apiKey } = await h.makeUser();
+      const r = await request(app).post('/api/extension/track').set('x-api-key', apiKey).send(flush({ duration: 60,
+        editorAnalytics: {}, focusAnalytics: { focusedMs: 60000 }, runs: { codeRunner: 1 } }));
+      assert.strictEqual(r.status, 201, JSON.stringify(r.body));
+      const [doc] = await Activity.find({}).lean();
+      assert.strictEqual(doc.runs.codeRunner, 1);
+    }],
+
+    ['userMode: confirmed seconds per mode add up across the windows an upload is spread over', async () => {
+      const { apiKey } = await h.makeUser();
+      const windowStart = Math.floor((Date.now() - 3600e3) / 600000) * 600000;
+      const r = await request(app).post('/api/extension/track').set('x-api-key', apiKey).send(flush({ duration: 300,
+        timestamp: new Date(windowStart + 480000).toISOString(),
+        focusAnalytics: { focusedMs: 300000 }, userMode: { mode: 'dsa', confirmed: true } }));
+      assert.strictEqual(r.status, 201, JSON.stringify(r.body));
+      const docs = await Activity.find({}).sort({ bucketStart: 1 }).lean();
+      assert.strictEqual(docs.length, 2);
+      assert.deepStrictEqual(docs.map((d) => d.modeSec && d.modeSec.dsa), [120, 180]);
+      assert.deepStrictEqual(docs[0].userMode, { mode: 'dsa', confirmed: true });
+    }],
+
+    ['userMode: an unconfirmed or unknown mode never becomes labelled time', async () => {
+      const { apiKey } = await h.makeUser();
+      await request(app).post('/api/extension/track').set('x-api-key', apiKey)
+        .send(flush({ userMode: { mode: 'project', confirmed: false } })).expect(201);
+      await request(app).post('/api/extension/track').set('x-api-key', apiKey)
+        .send(flush({ userMode: { mode: 'gaming', confirmed: true } })).expect(201);
+      const [doc] = await Activity.find({}).lean();
+      assert.strictEqual(doc.modeSec, undefined);
+      assert.deepStrictEqual(doc.userMode, { mode: 'project', confirmed: false });
+    }],
+
+    ['sessions: your sessions with a guess shown as 3 groups; a blind one hides the guess until answered', async () => {
+      const me = await h.makeUser();
+      const { promptFor } = require('../../services/sessionSnapshot');
+      // Hour-apart windows in the last day; find one session that gets a guess and one asked blind.
+      const starts = [];
+      for (let k = 2; k <= 22; k++) starts.push(Math.floor((Date.now() - k * 3600e3) / 600000) * 600000);
+      const uid = String(me.user._id);
+      const guessAt = starts.find((s) => promptFor(uid, s) === 'guess');
+      const blindAt = starts.find((s) => promptFor(uid, s) === 'blind');
+      assert.ok(guessAt && blindAt, 'need one of each');
+      for (const s of [guessAt, blindAt]) {
+        await request(app).post('/api/extension/track').set('x-api-key', me.apiKey).send(flush({ duration: 480,
+          timestamp: new Date(s + 30000).toISOString(), focusAnalytics: { focusedMs: 480000 },
+          editorAnalytics: { charsInserted: 2000, linesInserted: 60, linesDeleted: 5, saveCount: 3 } })).expect(201);
+      }
+      const r = await request(app).get('/api/sessions?days=2').set('Cookie', me.cookie);
+      assert.strictEqual(r.status, 200, JSON.stringify(r.body));
+      const byStart = Object.fromEntries(r.body.sessions.map((x) => [Date.parse(x.startAt), x]));
+      assert.strictEqual(byStart[guessAt].prompt, 'guess');
+      assert.ok(byStart[guessAt].workType && byStart[guessAt].workType.type, 'guess shown');
+      assert.strictEqual(byStart[blindAt].prompt, 'blind');
+      assert.strictEqual(byStart[blindAt].workType, null, 'guess hidden for a blind prompt');
+
+      // answer the blind one, confirm the guessed one
+      const b = await request(app).put('/api/sessions/label').set('Cookie', me.cookie)
+        .send({ startAt: new Date(blindAt).toISOString(), workType: 'learning' });
+      assert.strictEqual(b.status, 200, JSON.stringify(b.body));
+      assert.deepStrictEqual(b.body.userLabel, { type: 'learning', group: 'learning_setup', source: 'blind' });
+      const g = byStart[guessAt].workType.type;
+      const c = await request(app).put('/api/sessions/label').set('Cookie', me.cookie)
+        .send({ startAt: new Date(guessAt).toISOString(), workType: g === 'not_sure' ? 'project' : g });
+      assert.strictEqual(c.body.userLabel.source, 'shown');
+
+      const Session = require('../../models/Session');
+      const saved = await Session.find({ userId: me.user._id }).sort({ startAt: 1 }).lean();
+      assert.strictEqual(saved.length, 2);
+      for (const d of saved) {
+        assert.strictEqual(Object.keys(d.features).length, 18, 'features saved with the label');
+        assert.ok(d.prompt === 'blind' || d.prompt === 'guess');
+      }
+      const after = await request(app).get('/api/sessions?days=2').set('Cookie', me.cookie);
+      const blindNow = after.body.sessions.find((x) => Date.parse(x.startAt) === blindAt);
+      assert.ok(blindNow.workType, 'once answered, the guess may be shown');
+      assert.strictEqual(blindNow.userLabel.type, 'learning');
+    }],
+
+    ['sessions: you can only see and label your own; bad input is refused', async () => {
+      const me = await h.makeUser();
+      const other = await h.makeUser('Other');
+      const s = Math.floor((Date.now() - 5 * 3600e3) / 600000) * 600000;
+      await request(app).post('/api/extension/track').set('x-api-key', me.apiKey).send(flush({ duration: 300,
+        timestamp: new Date(s + 30000).toISOString(), focusAnalytics: { focusedMs: 300000 } })).expect(201);
+      const theirs = await request(app).get('/api/sessions').set('Cookie', other.cookie);
+      assert.deepStrictEqual(theirs.body.sessions, []);
+      const steal = await request(app).put('/api/sessions/label').set('Cookie', other.cookie)
+        .send({ startAt: new Date(s).toISOString(), workType: 'dsa' });
+      assert.strictEqual(steal.status, 404);
+      const bad = await request(app).put('/api/sessions/label').set('Cookie', me.cookie)
+        .send({ startAt: new Date(s).toISOString(), workType: 'gaming' });
+      assert.strictEqual(bad.status, 400);
+      const anon = await request(app).get('/api/sessions');
+      assert.strictEqual(anon.status, 401);
+    }],
+
+    ['sessions: the nightly snapshot saves settled sessions once, keeps labels, and uses the picker label', async () => {
+      const me = await h.makeUser();
+      const Session = require('../../models/Session');
+      const { snapshotAll } = require('../../services/sessionSnapshot');
+      const start = Math.floor((Date.now() - 2 * 86400e3) / 600000) * 600000;   // two days ago: settled
+      for (const k of [0, 1]) {
+        await Activity.create({ userId: me.user._id, projectName: 'leetcode', language: 'cpp', fileName: 'two_sum.cpp',
+          bucketStart: new Date(start + k * 600000), timestamp: new Date(start + k * 600000), duration: 600, flushCount: 3,
+          editorAnalytics: { linesInserted: 30, linesDeleted: 5, charsInserted: 900 },
+          writingSec: 400, readingSec: 200, runningSec: 0, modeSec: { dsa: 600 } });
+      }
+      const first = await snapshotAll();
+      assert.ok(first.sessions >= 1);
+      await Session.updateOne({ userId: me.user._id }, { $set: { userLabel: { type: 'dsa', source: 'shown', at: new Date() } } });
+      await snapshotAll();
+      const docs = await Session.find({ userId: me.user._id }).lean();
+      assert.strictEqual(docs.length, 1, 'idempotent: one session');
+      assert.strictEqual(docs[0].durationSec, 1200);
+      assert.deepStrictEqual(docs[0].pickerLabel, { type: 'dsa', group: 'dsa', share: 1 });
+      assert.strictEqual(docs[0].userLabel.type, 'dsa', 'the label survived the re-run');
+    }],
+
+    ['history: the last 7 days split into writing / reading / running, with top files (plan B9)', async () => {
+      const me = await h.makeUser();
+      await request(app).post('/api/extension/track').set('x-api-key', me.apiKey).send(flush({ duration: 300,
+        focusAnalytics: { focusedMs: 300000 }, writingSec: 150, readingSec: 100, runningSec: 50,
+        perFile: [{ name: 'two_sum.cpp', seconds: 200, writing: 150, reading: 0, running: 50 },
+                  { name: 'notes.md', seconds: 100, writing: 0, reading: 100, running: 0 }] })).expect(201);
+      await request(app).post('/api/extension/track').set('x-api-key', me.apiKey)
+        .send(flush({ duration: 120, projectName: 'old-extension' })).expect(201);   // 2.5.0: no split
+      const r = await request(app).get(`/api/analytics/history/${me.user._id}?timezone=0`).set('Cookie', me.cookie);
+      assert.strictEqual(r.status, 200);
+      assert.deepStrictEqual(r.body.split7d, { writingSec: 150, readingSec: 100, runningSec: 50, otherSec: 120 });
+      assert.deepStrictEqual(r.body.topFiles7d.map((f) => [f.name, f.seconds]), [['two_sum.cpp', 200], ['notes.md', 100]]);
+      assert.strictEqual(r.body.topFiles7d[0].running, 50);
+    }],
+
+    ['v2 (extension 2.5.0) uploads are stored exactly as before: no parts', async () => {
+      const { apiKey } = await h.makeUser();
+      const r = await request(app).post('/api/extension/track').set('x-api-key', apiKey).send(flush({ duration: 200 }));
+      assert.strictEqual(r.status, 201);
+      const [doc] = await Activity.find({}).lean();
+      assert.strictEqual(doc.duration, 200);
+      for (const k of ['writingSec', 'readingSec', 'runningSec', 'fileTime']) assert.strictEqual(doc[k], undefined, k);
+      assert.deepStrictEqual(doc.files, ['index.ts']);
+    }],
+
     ['analytics: owner sees their week, another user gets 403', async () => {
       const me = await h.makeUser('Me');
       const other = await h.makeUser('Other');

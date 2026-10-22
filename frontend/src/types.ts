@@ -28,6 +28,7 @@ export interface TerminalSummary {
   debuggingSessions: number;
   commandUsage: Record<string, number>;
   gitActivity: { commits: number; pushes: number; pulls: number; checkouts?: number; merges?: number; clones?: number };
+  /** `command` is a kind ("compile", "test"…), never command text. */
   repeatedFailedCommands: { command: string; count: number }[];
 }
 
@@ -50,6 +51,9 @@ export interface History {
   hourOfDay: number[];
   projects: { name: string; seconds: number }[];
   commits7d: number;
+  /** Last 7 days, extension 2.6.0+: seconds writing / reading / running; otherSec = older uploads. */
+  split7d?: { writingSec: number; readingSec: number; runningSec: number; otherSec: number };
+  topFiles7d?: { name: string; seconds: number; writing: number; reading: number; running: number }[];
 }
 
 export interface TimeSlot {
@@ -174,6 +178,25 @@ export interface SessionSummary {
   languages: string[];
   deepBlockCount: number;
   commits: number;
+}
+
+export type WorkTypeId = 'dsa' | 'project' | 'debugging' | 'learning' | 'setup';
+
+/** One coding session from GET /api/sessions (plan B8/W2). */
+export interface WorkSession {
+  startAt: string;
+  endAt: string;
+  minutes: number;
+  writingSec: number;
+  readingSec: number;
+  runningSec: number;
+  projects: string[];
+  languages: string[];
+  /** The rules' guess; null while a blind question is unanswered. type may be 'not_sure' or 'not_enough'. */
+  workType: { type: string; group: string | null; reason: string; by: 'rules' | 'model' } | null;
+  prompt: 'guess' | 'blind' | 'none';
+  pickerLabel: { type: string; group: string | null; share: number } | null;
+  userLabel: { type: string; group: string | null; source: 'blind' | 'shown' } | null;
 }
 
 export interface Metrics {

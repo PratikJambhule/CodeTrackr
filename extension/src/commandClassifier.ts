@@ -1,8 +1,10 @@
 /**
- * Command classification and sanitization helpers.
+ * Command classification helpers. Only counts and kinds leave this module's callers: the command
+ * text itself is never stored or sent (plan E1).
  */
 
 import { detectGitAction } from "./gitTracker";
+import { commandKind, CommandKind } from "./commandKind";
 
 export type CommandCategory =
   | "git"
@@ -23,6 +25,7 @@ export interface ClassifiedCommand {
   isTest: boolean;
   isDebug: boolean;
   isIgnored: boolean;
+  kind: CommandKind;
 }
 
 const BUILD_COMMANDS = [
@@ -63,7 +66,9 @@ export function classifyCommand(rawCommand: string): ClassifiedCommand {
   const gitAction = detectGitAction(normalized);
   const isBuild = startsWithAny(normalized, BUILD_COMMANDS);
   const isTest = startsWithAny(normalized, TEST_COMMANDS);
-  const isDebug = DEBUG_PATTERNS.some((pattern) => normalized.includes(pattern));
+  // Checked on the whole command line: normalizing drops flags, so "--inspect" was never seen (L-17).
+  const lowered = trimmed.toLowerCase();
+  const isDebug = DEBUG_PATTERNS.some((pattern) => lowered.includes(pattern));
   const isIgnored = isIgnoredCommand(normalized);
 
   return {
@@ -74,6 +79,7 @@ export function classifyCommand(rawCommand: string): ClassifiedCommand {
     isTest,
     isDebug,
     isIgnored,
+    kind: commandKind(trimmed),
   };
 }
 
@@ -104,27 +110,6 @@ export function normalizeCommand(rawCommand: string): string {
   }
 
   return base;
-}
-
-export function sanitizeCommand(rawCommand: string): string {
-  let sanitized = rawCommand.trim();
-
-  sanitized = sanitized.replace(
-    /(token|password|secret|apikey|api[-_]?key|auth|bearer)\s*[:=]\s*([^\s]+)/gi,
-    "$1=***"
-  );
-  sanitized = sanitized.replace(
-    /(--?password|--?token|--?apikey|--?api-key|--?secret|--?key)\s+([^\s]+)/gi,
-    "$1 ***"
-  );
-  sanitized = sanitized.replace(/bearer\s+[^\s]+/gi, "bearer ***");
-
-  const normalized = normalizeCommand(sanitized);
-  if (normalized.length > 120) {
-    return normalized.slice(0, 117) + "...";
-  }
-
-  return normalized;
 }
 
 function classifyCategory(normalized: string): CommandCategory {
@@ -166,6 +151,7 @@ function startsWithAny(normalized: string, patterns: string[]): boolean {
 function isIgnoredCommand(normalized: string): boolean {
   if (!normalized) return true;
   if (INTERNAL_PREFIXES.some((prefix) => normalized.startsWith(prefix))) return true;
-  if (SHELL_STARTUP_COMMANDS.has(normalized)) return true;
+  // "cd src" is housekeeping too, not only a bare "cd"
+  if (SHELL_STARTUP_COMMANDS.has(normalized.split(" ")[0])) return true;
   return false;
 }

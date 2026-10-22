@@ -70,6 +70,29 @@ check('an upload with no focus data gets only the grace', () => {
   assert.strictEqual(corroboratedSeconds(60, {}), 60);
 });
 
+check('background running time counts on top of focus when something really ran (user, 2026-10-22)', () => {
+  // A 6-minute build while the user watched it from the browser: 20 s focus, 360 s running.
+  assert.strictEqual(corroboratedSeconds(380, { focusedMs: 20000 }, { runningSec: 360, ranSomething: true }), 380);
+});
+
+check('running time never credits more than the upload claimed (the 600 s window counter then caps it per window)', () => {
+  assert.strictEqual(corroboratedSeconds(1500, {}, { runningSec: 1500, ranSomething: true }), 1500);
+  assert.strictEqual(corroboratedSeconds(300, {}, { runningSec: 99999, ranSomething: true }), 300);
+});
+
+check('no allowance when nothing ran (claimed running time alone proves nothing)', () => {
+  assert.strictEqual(corroboratedSeconds(600, {}, { runningSec: 600, ranSomething: false }), 120);
+});
+
+check('the allowance never exceeds the running seconds claimed', () => {
+  assert.strictEqual(corroboratedSeconds(600, { focusedMs: 60000 }, { runningSec: 100, ranSomething: true }), 60 + 120 + 100);
+});
+
+check('garbage running values give no allowance', () => {
+  assert.strictEqual(corroboratedSeconds(600, {}, { runningSec: -50, ranSomething: true }), 120);
+  assert.strictEqual(corroboratedSeconds(600, {}, { runningSec: 'lots', ranSomething: true }), 120);
+});
+
 console.log('\ningestCredit: creditFromCounter');
 
 check('credit is what still fits under the cap after this increment', () => {

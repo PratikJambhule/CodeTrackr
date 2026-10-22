@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react';
 import { GITHUB_URL } from '../../components/layout/PublicLayout';
+import { NEVER_SENT, SENT_FROM_VSCODE } from '../../lib/sentData';
 
 function Block({ title, children }: { title: string; children: ReactNode }) {
   return (
@@ -31,19 +32,10 @@ export default function Privacy() {
       </header>
 
       <Block title="From VS Code">
-        <p>After about two minutes of activity, the extension sends one small summary:</p>
-        <List
-          items={[
-            'active coding time, the language, and the project (folder) name',
-            'edit counts: characters and lines added and removed, saves, undo and redo counts, file switches, time spent reading versus writing',
-            'how long the VS Code window had focus',
-            'commit counts from the Git extension; debug sessions',
-            'terminal commands counted by type (build, test, git, npm…) and whether they failed',
-            'a command that keeps failing, shortened to 120 characters, with anything that looks like a password, token or key replaced by ***',
-          ]}
-        />
+        <p>After about two minutes of activity, the extension (version 2.6.0) sends one small summary:</p>
+        <List items={SENT_FROM_VSCODE} />
         <p>
-          <strong>Never sent:</strong> your code or file contents, diffs, commit messages, full file paths, keystrokes, or anything from other apps.
+          <strong>Never sent:</strong> {NEVER_SENT.join(', ')}.
         </p>
       </Block>
 
@@ -54,7 +46,7 @@ export default function Privacy() {
       <Block title="Who sees what">
         <List
           items={[
-            'Your dashboard, goals and insights: only you.',
+            'Your dashboard, file names, goals, insights, your sessions and your answers about them: only you.',
             'A group board: the group’s members see your name, hours, lines added, commits and how often your commands and builds failed, for that group.',
             'The global leaderboard: anyone signed in sees your name, profile picture and totals (hours, commits, lines changed).',
             'Email addresses are never shown to other people.',

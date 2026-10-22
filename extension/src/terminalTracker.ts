@@ -1,18 +1,18 @@
 /**
  * Terminal Analytics Tracker
  * Tracks terminal commands using shell execution events only.
+ *
+ * The command line is read only to classify it; what is kept and uploaded is counts and kinds
+ * (`lastCommand` is a kind such as "compile", repeated failures are `{ command: kind, count }`).
  */
 
 import * as vscode from "vscode";
-import {
-  classifyCommand,
-  sanitizeCommand,
-  normalizeCommand,
-  CommandCategory,
-} from "./commandClassifier";
-import { TerminalAnalyticsAggregator } from "./analyticsAggregator";
+import { classifyCommand, CommandCategory } from "./commandClassifier";
+import { CommandKind } from "./commandKind";
+import { TerminalAnalyticsAggregator, CommandKindCounts } from "./analyticsAggregator";
 
 export interface RepeatedFailedCommand {
+  /** A kind ("compile", "test"…), not command text. The name is kept for the server and website. */
   command: string;
   count: number;
 }
@@ -30,6 +30,7 @@ export interface TerminalAnalyticsPayload {
   buildSuccessRate: number;
   debuggingSessions: number;
   commandUsage: Record<CommandCategory, number>;
+  commandKinds: CommandKindCounts;
   gitActivity: {
     commits: number;
     pushes: number;
@@ -39,14 +40,14 @@ export interface TerminalAnalyticsPayload {
     clones: number;
   };
   repeatedFailedCommands: RepeatedFailedCommand[];
-  lastCommand: string;
+  /** The kind of the last command, or "unknown" before the first one. */
+  lastCommand: CommandKind | "unknown";
   lastCommandTimestamp: string | null;
 }
 
 interface ExecutionMeta {
   startTime: number;
-  command: string;
-  normalized: string;
+  command: string; // kept in memory until the command ends, never stored or sent
   isIgnored: boolean;
 }
 
@@ -55,7 +56,7 @@ export class TerminalTracker {
   private inFlight = new WeakMap<vscode.TerminalShellExecution, ExecutionMeta>();
   private completedExecutions = new WeakSet<vscode.TerminalShellExecution>();
   private aggregator = new TerminalAnalyticsAggregator();
-  private lastCommand: string = "unknown";
+  private lastCommand: CommandKind | "unknown" = "unknown";
   private lastCommandTimestamp: string | null = null;
 
   public start(context: vscode.ExtensionContext): void {
@@ -105,20 +106,17 @@ export class TerminalTracker {
     const commandLine = event.execution.commandLine.value.trim();
     if (!commandLine) return;
 
-    const normalized = normalizeCommand(commandLine);
     const classification = classifyCommand(commandLine);
     const isIgnored = classification.isIgnored;
 
     if (!isIgnored) {
-      const sanitized = sanitizeCommand(commandLine);
-      this.lastCommand = sanitized;
+      this.lastCommand = classification.kind;
       this.lastCommandTimestamp = new Date().toISOString();
     }
 
     this.inFlight.set(event.execution, {
       startTime: Date.now(),
       command: commandLine,
-      normalized,
       isIgnored,
     });
   }
@@ -135,15 +133,12 @@ export class TerminalTracker {
     const classification = classifyCommand(commandLine);
     if (meta?.isIgnored || classification.isIgnored) return;
 
-    const sanitized = sanitizeCommand(commandLine);
-    const normalized = meta?.normalized || normalizeCommand(commandLine);
     const exitCode = event.exitCode ?? 0;
     const durationMs = meta ? Date.now() - meta.startTime : 0;
+    this.inFlight.delete(execution);
 
     this.aggregator.recordExecution({
-      rawCommand: commandLine,
-      sanitizedCommand: sanitized,
-      normalizedCommand: normalized,
+      kind: classification.kind,
       category: classification.category,
       gitAction: classification.gitAction,
       isBuild: classification.isBuild,

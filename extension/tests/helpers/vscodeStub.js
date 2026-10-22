@@ -12,6 +12,10 @@ function createVscodeStub(overrides = {}) {
   const opened = [];
   const clipboard = [];
   const commandHandlers = {};
+  const debugTrackerFactories = [];
+  const statusItems = [];
+  // Tests set quickPickAnswer to a function (items) => item to answer the next Quick Pick.
+  const quickPick = { answer: (items) => undefined, shown: [] };
 
   const settings = Object.assign(
     {
@@ -42,6 +46,7 @@ function createVscodeStub(overrides = {}) {
     window: {
       terminals: [],
       activeTextEditor: overrides.activeTextEditor,
+      visibleTextEditors: [],
       state: { focused: true },
       setStatusBarMessage: () => DISPOSABLE,
       showInformationMessage: (m) => { infos.push(m); return Promise.resolve(undefined); },
@@ -51,11 +56,19 @@ function createVscodeStub(overrides = {}) {
       // Runs the task at once with a never-cancelled token.
       withProgress: (_opts, task) => task({ report() {} }, { isCancellationRequested: false, onCancellationRequested: () => DISPOSABLE }),
       createOutputChannel: () => ({ appendLine() {}, show() {}, dispose() {} }),
+      createStatusBarItem: (alignment, priority) => {
+        const item = { alignment, priority, text: '', tooltip: '', command: undefined, visible: false,
+          show() { this.visible = true; }, hide() { this.visible = false; }, dispose() {} };
+        statusItems.push(item);
+        return item;
+      },
+      showQuickPick: (items) => { quickPick.shown.push(items); return Promise.resolve(quickPick.answer(items)); },
       onDidOpenTerminal: on('onDidOpenTerminal'),
       onDidCloseTerminal: on('onDidCloseTerminal'),
       onDidChangeActiveTextEditor: on('onDidChangeActiveTextEditor'),
       onDidChangeWindowState: on('onDidChangeWindowState'),
       onDidChangeTextEditorSelection: on('onDidChangeTextEditorSelection'),
+      onDidChangeTextEditorVisibleRanges: on('onDidChangeTextEditorVisibleRanges'),
       onDidStartTerminalShellExecution: on('onDidStartTerminalShellExecution'),
       onDidEndTerminalShellExecution: on('onDidEndTerminalShellExecution'),
     },
@@ -71,6 +84,13 @@ function createVscodeStub(overrides = {}) {
       onDidSaveTextDocument: on('onDidSaveTextDocument'),
       onDidChangeTextDocument: on('onDidChangeTextDocument'),
       onDidChangeConfiguration: on('onDidChangeConfiguration'),
+      onDidChangeWorkspaceFolders: on('onDidChangeWorkspaceFolders'),
+      onDidCreateFiles: on('onDidCreateFiles'),
+      onDidDeleteFiles: on('onDidDeleteFiles'),
+    },
+    tasks: {
+      onDidStartTaskProcess: on('onDidStartTaskProcess'),
+      onDidEndTaskProcess: on('onDidEndTaskProcess'),
     },
     commands: {
       registerCommand: (id, handler) => {
@@ -85,6 +105,7 @@ function createVscodeStub(overrides = {}) {
       onDidStartDebugSession: on('onDidStartDebugSession'),
       onDidTerminateDebugSession: on('onDidTerminateDebugSession'),
       onDidChangeBreakpoints: on('onDidChangeBreakpoints'),
+      registerDebugAdapterTrackerFactory: (type, factory) => { debugTrackerFactories.push(factory); return DISPOSABLE; },
     },
     extensions: {
       getExtension: (id) =>
@@ -95,12 +116,13 @@ function createVscodeStub(overrides = {}) {
       clipboard: { writeText: (t) => { clipboard.push(t); return Promise.resolve(); } },
     },
     ProgressLocation: { Notification: 15 },
+    StatusBarAlignment: { Left: 1, Right: 2 },
     Uri: { parse: (u) => ({ toString: () => u }) },
     ConfigurationTarget: { Global: 1, Workspace: 2 },
     TextDocumentChangeReason: { Undo: 1, Redo: 2 },
   };
 
-  return { vscode, emit, registeredCommands, commandHandlers, warnings, infos, settings, opened, clipboard };
+  return { vscode, emit, registeredCommands, commandHandlers, warnings, infos, settings, opened, clipboard, debugTrackerFactories, statusItems, quickPick };
 }
 
 /** Install the stub as the resolution for require('vscode'). */

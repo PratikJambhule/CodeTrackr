@@ -26,3 +26,7 @@ CODETRACKR_PROJECT_CONTEXT.md
 THEME_USER_GUIDE.md
 extension/extension.js
 extension/index.html
+
+# Generated training data: rebuilt exactly by `node ml/generate_synthetic.js` (seeded)
+ml/data/
+__pycache__/

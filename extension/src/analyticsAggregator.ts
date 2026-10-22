@@ -1,13 +1,17 @@
 /**
  * Aggregates terminal analytics for a flush interval.
+ *
+ * Records hold counts and kinds only: no command text reaches this module, so none can reach the
+ * upload (plan E1). Repeated failures are keyed by kind ("compile failed 3 times").
  */
 
 import { CommandCategory } from "./commandClassifier";
+import { COMMAND_KINDS, CommandKind } from "./commandKind";
+
+export type CommandKindCounts = Record<CommandKind, number> & { failed: Record<CommandKind, number> };
 
 interface ExecutionRecord {
-  rawCommand: string;
-  sanitizedCommand: string;
-  normalizedCommand: string;
+  kind: CommandKind;
   category: CommandCategory;
   gitAction: string | null;
   isBuild: boolean;
@@ -18,7 +22,7 @@ interface ExecutionRecord {
 }
 
 interface FailureRecord {
-  command: string;
+  kind: CommandKind;
   timestamps: number[];
 }
 
@@ -35,6 +39,7 @@ export interface TerminalAnalyticsSnapshot {
   buildSuccessRate: number;
   debuggingSessions: number;
   commandUsage: Record<CommandCategory, number>;
+  commandKinds: CommandKindCounts;
   gitActivity: {
     commits: number;
     pushes: number;
@@ -48,7 +53,7 @@ export interface TerminalAnalyticsSnapshot {
 
 export class TerminalAnalyticsAggregator {
   private interval: TerminalAnalyticsSnapshot;
-  private recentFailures = new Map<string, FailureRecord>();
+  private recentFailures = new Map<CommandKind, FailureRecord>();
 
   constructor() {
     this.interval = this.createEmptySnapshot();
@@ -62,10 +67,12 @@ export class TerminalAnalyticsAggregator {
     } else {
       this.interval.failedCommands += 1;
       this.interval.terminalErrorCount += 1;
-      this.trackFailure(record.sanitizedCommand);
+      this.trackFailure(record.kind);
+      this.interval.commandKinds.failed[record.kind] += 1;
     }
 
     this.interval.commandUsage[record.category] += 1;
+    this.interval.commandKinds[record.kind] += 1;
 
     if (record.isBuild) {
       this.interval.buildRuns += 1;
@@ -118,6 +125,7 @@ export class TerminalAnalyticsAggregator {
   public getSnapshot(): TerminalAnalyticsSnapshot {
     const snapshot = { ...this.interval };
     snapshot.commandUsage = { ...this.interval.commandUsage };
+    snapshot.commandKinds = { ...this.interval.commandKinds, failed: { ...this.interval.commandKinds.failed } };
     snapshot.gitActivity = { ...this.interval.gitActivity };
     snapshot.successRate = this.computeSuccessRate(snapshot);
     snapshot.buildSuccessRate = this.computeBuildSuccessRate(snapshot);
@@ -149,6 +157,7 @@ export class TerminalAnalyticsAggregator {
         gcc: 0,
         misc: 0,
       },
+      commandKinds: emptyKindCounts(),
       gitActivity: {
         commits: 0,
         pushes: 0,
@@ -171,22 +180,28 @@ export class TerminalAnalyticsAggregator {
     return Math.round((snapshot.successfulBuilds / snapshot.buildRuns) * 100);
   }
 
-  private trackFailure(command: string): void {
+  private trackFailure(kind: CommandKind): void {
     const now = Date.now();
     const windowMs = 10 * 60 * 1000;
-    const existing = this.recentFailures.get(command) || { command, timestamps: [] };
+    const existing = this.recentFailures.get(kind) || { kind, timestamps: [] };
     existing.timestamps = existing.timestamps.filter((ts) => now - ts <= windowMs);
     existing.timestamps.push(now);
-    this.recentFailures.set(command, existing);
+    this.recentFailures.set(kind, existing);
   }
 
   private collectRepeatedFailures(): Array<{ command: string; count: number }> {
     const entries: Array<{ command: string; count: number }> = [];
     this.recentFailures.forEach((record) => {
       if (record.timestamps.length >= 2) {
-        entries.push({ command: record.command, count: record.timestamps.length });
+        // the field is still called "command" (server and website read it), but it holds a kind
+        entries.push({ command: record.kind, count: record.timestamps.length });
       }
     });
     return entries.sort((a, b) => b.count - a.count).slice(0, 5);
   }
+}
+
+export function emptyKindCounts(): CommandKindCounts {
+  const zero = () => Object.fromEntries(COMMAND_KINDS.map((k) => [k, 0])) as Record<CommandKind, number>;
+  return { ...zero(), failed: zero() };
 }

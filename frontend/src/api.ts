@@ -29,8 +29,8 @@ export async function apiGet<T = unknown>(path: string): Promise<T> {
   return res.json() as Promise<T>;
 }
 
-/** Writes (POST/PATCH/DELETE). Throws ApiError with the server's message. */
-export async function apiSend<T = unknown>(method: 'POST' | 'PATCH' | 'DELETE', path: string, body?: unknown): Promise<T> {
+/** Writes (POST/PUT/PATCH/DELETE). Throws ApiError with the server's message. */
+export async function apiSend<T = unknown>(method: 'POST' | 'PUT' | 'PATCH' | 'DELETE', path: string, body?: unknown): Promise<T> {
   const res = await fetch(`${API_URL}${path}`, {
     method,
     credentials: 'include',

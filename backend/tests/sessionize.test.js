@@ -295,5 +295,75 @@ check('splits a day into morning build / afternoon debug and labels both', () =>
   assert.strictEqual(mix['debug-grind'].sessions, 1);
 });
 
+console.log('\nwork types and 2.6.0 fields (plan B6)');
+
+// Two buckets of a LeetCode session uploaded by extension 2.6.0, with the picker confirmed as DSA.
+const v3 = (min, over = {}) => doc(min, {
+  projectName: 'leetcode', language: 'cpp',
+  editorAnalytics: { linesInserted: 20, linesDeleted: 5, charsInserted: 600, readMs: 200000, writeMs: 300000 },
+  terminalAnalytics: { totalCommands: 6, failedCommands: 2, commandUsage: { gcc: 6 }, commandKinds: { compile: 6, failed: { compile: 2 } } },
+  ...over,
+});
+const s3 = sessionize([
+  { ...v3(0), writingSec: 300, readingSec: 200, runningSec: 100,
+    fileTime: { 'two_sum%2Ecpp': { seconds: 600, writing: 300, reading: 200, running: 100 } },
+    runs: { terminal: 6 }, debug: { breakpointStops: 1 }, reading: { scrollEvents: 3 }, filesCreated: 1,
+    workspace: { sourceFilesBucket: '1', hasGit: false }, modeSec: { dsa: 600 } },
+  { ...v3(10), writingSec: 400, readingSec: 200, runningSec: 0,
+    fileTime: { 'two_sum%2Ecpp': { seconds: 300, writing: 200, reading: 100, running: 0 },
+                'q2%2Ecpp': { seconds: 300, writing: 200, reading: 100, running: 0 } },
+    runs: { terminal: 2 }, modeSec: { dsa: 500 } },
+]);
+
+check('a v3 session adds up writing / reading / running and decodes per-file time', () => {
+  assert.strictEqual(s3.length, 1);
+  const s = s3[0];
+  assert.strictEqual(s.writingSec, 700);
+  assert.strictEqual(s.readingSec, 400);
+  assert.strictEqual(s.runningSec, 100);
+  assert.deepStrictEqual(s.fileSec['two_sum.cpp'], { seconds: 900, writing: 500, reading: 300, running: 100 });
+  assert.deepStrictEqual(s.files.sort(), ['q2.cpp', 'two_sum.cpp']);
+});
+
+check('the 2.6.0 counters are summed and the latest workspace kept', () => {
+  const s = s3[0];
+  assert.deepStrictEqual(s.runs, { terminal: 8 });
+  assert.strictEqual(s.debug.breakpointStops, 1);
+  assert.strictEqual(s.filesCreated, 1);
+  assert.deepStrictEqual(s.commandKinds, { compile: 12, failed: { compile: 4 } });
+  assert.deepStrictEqual(s.workspace, { sourceFilesBucket: '1', hasGit: false });
+});
+
+check('a 2.6.0 session gets feature version 3 (33 features) and rules v2, shown as one of 3 groups', () => {
+  const s = s3[0];
+  assert.strictEqual(s.featureVersion, 3);
+  assert.strictEqual(Object.keys(s.workFeatures).length, 33);
+  assert.strictEqual(s.workType.rules, 'v2');
+  assert.strictEqual(s.workFeatures.practiceFolder, 1);
+  assert.deepStrictEqual({ type: s.workType.type, group: s.workType.group, by: s.workType.by },
+    { type: 'dsa', group: 'dsa', by: 'rules' });
+});
+
+check('the picker label: the mode confirmed for at least half the session', () => {
+  assert.deepStrictEqual(s3[0].pickerLabel, { type: 'dsa', group: 'dsa', share: 0.92 });
+});
+
+check('the picker label is null when confirmed time covers less than half', () => {
+  const { pickerLabel } = require('../services/sessionize');
+  assert.strictEqual(pickerLabel({ project: 200 }, 1200), null);
+  assert.deepStrictEqual(pickerLabel({ project: 700, setup: 100 }, 1200), { type: 'project', group: 'project_work', share: 0.58 });
+  assert.strictEqual(pickerLabel(undefined, 600), null);
+});
+
+check('a 2.5.0 session (no v3 fields) still works: zeros, no picker label', () => {
+  const s = sessionize([doc(0, { editorAnalytics: { linesInserted: 50 } })])[0];
+  assert.strictEqual(s.writingSec, 0);
+  assert.deepStrictEqual(s.fileSec, {});
+  assert.strictEqual(s.pickerLabel, null);
+  assert.ok(s.workType && s.workType.type);
+  assert.strictEqual(s.featureVersion, 2, 'older data keeps the 18 version-2 features');
+  assert.strictEqual(s.workType.rules, 'v1');
+});
+
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed === 0 ? 0 : 1);

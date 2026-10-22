@@ -6,15 +6,7 @@ import { Button, Card, CardTitle, ErrorBox, PageHeader, Pill, Segmented, Skeleto
 import { pct, plural } from '../lib/format';
 import { hourLabel } from '../lib/calendar';
 import type { Finding, MetricMeta, Metrics, Severity } from '../types';
-
-const ARCHETYPE: Record<string, string> = {
-  'deep-build': 'Deep build',
-  'debug-grind': 'Debug grind',
-  exploration: 'Exploration',
-  'admin-config': 'Admin / config',
-  mixed: 'Mixed',
-  unclassified: 'Too short to classify',
-};
+import { WorkSessions } from './insights/WorkSessions';
 
 const SEVERITY: Record<Severity, { label: string; tone: 'warn' | 'good' | 'accent' }> = {
   warning: { label: 'worth a look', tone: 'warn' },
@@ -157,35 +149,7 @@ function Body({ m, findings, skipped, total }: { m: Metrics; findings: Finding[]
         ))}
       </div>
 
-      {m.sessionCount > 0 && (
-        <Card className="mb-6 p-5">
-          <CardTitle aside={`last ${m.sessionWindowDays} days`}>How you worked: {plural(m.sessionCount, 'session')}</CardTitle>
-          <div className="mb-4 flex flex-wrap gap-2">
-            {Object.entries(m.archetypeMix)
-              .filter(([, v]) => v.sessions > 0)
-              .sort((a, b) => b[1].minutes - a[1].minutes)
-              .map(([name, v]) => (
-                <span key={name} className="rounded-full border border-line bg-surface-2 px-3 py-1 text-sm">
-                  {ARCHETYPE[name] ?? name}: {v.sessions} <span className="text-muted">({v.minutes} min)</span>
-                </span>
-              ))}
-          </div>
-          <ul className="flex flex-col gap-2">
-            {m.recentSessions.slice(0, 6).map((s) => (
-              <li key={s.startMs} className="flex flex-wrap items-baseline justify-between gap-2 rounded-xl bg-surface-2 px-3 py-2.5">
-                <span className="text-sm">
-                  {new Date(s.startMs).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })} · {s.minutes} min ·{' '}
-                  <strong>{ARCHETYPE[s.archetype] ?? s.archetype}</strong>
-                </span>
-                <span className="text-xs text-muted">{s.reason}</span>
-              </li>
-            ))}
-          </ul>
-          <p className="mt-3 text-xs text-muted">
-            Sessions are grouped from your activity with a 30-minute break between them. Activity is recorded in ten-minute blocks, so times are accurate to about ten minutes.
-          </p>
-        </Card>
-      )}
+      <WorkSessions days={m.windowDays} />
 
       <p className="text-xs text-muted">These figures are private to you and never appear on a board. Times are in your time zone.</p>
     </>

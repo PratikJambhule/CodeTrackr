@@ -1,5 +1,7 @@
 'use strict';
 
+const { validateTimeParts } = require('./timeParts');
+
 // Bounds for one ingest flush. `duration` is generous — a flush covers at most
 // a few minutes of real coding time; 1 hour is already an outlier.
 const MAX_DURATION = 3600;          // seconds
@@ -58,10 +60,15 @@ function validateIngestPayload(body) {
     }
   }
 
+  // Payload v3 (extension 2.6.0): writing / reading / running seconds and per-file time.
+  const parts = errors.length ? null : validateTimeParts(b, duration);
+  if (parts) errors.push(...parts.errors);
+
   if (errors.length) return { ok: false, errors };
   return {
     ok: true,
     value: {
+      timeParts: parts.value,
       duration,
       fileName: b.fileName,
       language: b.language,

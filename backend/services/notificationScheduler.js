@@ -87,6 +87,10 @@ const initScheduler = () => {
     rollupDaily({ apply: true, beforeDays: 2 })
       .then((r) => log.info('daily rollup', { wrote: r.wrote }))
       .catch((err) => log.error('daily rollup failed', { err }));
+    // Save yesterday's coding sessions for the work-type model (ML plan B7). Idempotent.
+    require('./sessionSnapshot').snapshotAll()
+      .then((r) => log.info('session snapshot', r))
+      .catch((err) => log.error('session snapshot failed', { err }));
   });
 
   // Run immediately on startup

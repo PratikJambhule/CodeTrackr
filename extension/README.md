@@ -18,7 +18,18 @@ Each computer you sign in from gets its own key. You can see and disconnect them
 under **Profile → Connected devices**; a lost laptop can be cut off without affecting the others.
 Device keys expire after one year — just run **Sign In** again.
 
-## What's new in 2.5.0
+## What's new in 2.6.0
+
+- **Accurate time** — counted from what you actually do, second by second: typing is *writing*;
+  scrolling, moving around and switching files is *reading*; a command, task, debug session or
+  Code Runner run you are waiting on is *running* (typing with a server running is still writing).
+  A pause over 60 s counts nothing, and time goes to the file you
+  were in.
+- **What kind of work** — pick *DSA / Project / Debugging / Learning / Setup* in the status bar, or
+  leave it on *Auto*. It labels your session only when you choose or confirm it that session.
+- **More private** — the text of terminal commands is no longer sent, only their kind.
+
+## What was new in 2.5.0
 
 - **Sign In** — connect with a short code instead of copying an API key.
 - **Nothing lost offline** — every upload is saved before it is sent and retried oldest first,
@@ -38,6 +49,7 @@ Full history: [CHANGELOG](CHANGELOG.md).
 | CodeTrackr: Show Connection Info | Shows whether you are connected and to which server |
 | CodeTrackr: Show Statistics | Shows what has been recorded in this session |
 | CodeTrackr: Show Event Logs | Opens the extension's log output |
+| CodeTrackr: Set What I'm Working On | Tell CodeTrackr the kind of work (also: click it in the status bar) |
 | CodeTrackr: Flush Now | Sends the current interval immediately |
 | CodeTrackr: Start / Stop Tracking | Pause and resume tracking |
 | CodeTrackr: Setup API Key | Older way to connect: paste a key from the dashboard's Profile page |
@@ -45,14 +57,21 @@ Full history: [CHANGELOG](CHANGELOG.md).
 ## What is tracked, and what is not
 
 **Sent** (a small summary after about 2 minutes of real activity):
-- active coding time, the language, and the project (workspace) name;
-- edit counts (lines added and removed, saves), time reading vs writing, window-focus time;
-- commit counts; debug sessions;
-- terminal commands by type (build, test, git, …) and whether they failed. A command that fails
-  repeatedly is sent with anything that looks like a password, token or key replaced by `***`,
-  cut to 120 characters.
+- active time split into writing, reading and running, and the project (workspace folder) name;
+- the **names of the files** you worked on (base names like `two_sum.cpp`, never folders or full
+  paths), each with its time, language and line counts, up to 30 per summary;
+- edit counts (lines added and removed, saves, undo), window-focus time;
+- commit counts; debug sessions, breakpoint stops and steps;
+- programs you ran: terminal commands, tasks, *Run Without Debugging*, Code Runner (counts only);
+- terminal commands by kind (install, run, compile, build, test, git, docker, other) and whether
+  they failed, including which kind keeps failing ("compile, 3 times");
+- reading counts: scroll bursts, jumps, files opened but not edited; files created and deleted;
+- the kind of project: a size range of source files, whether it has `package.json`,
+  `requirements.txt` or `.git`, whether recent commits are yours, whether it was cloned recently;
+- the work mode you chose in the status bar, if any.
 
-**Never sent:** file contents, diffs, commit messages, full file paths, keystrokes.
+**Never sent:** file contents, diffs, commit messages, full file paths, keystrokes, your Git email,
+and (since 2.6.0) the text of your terminal commands.
 
 All traffic is HTTPS. Your key is stored in your operating system's keychain.
 

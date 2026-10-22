@@ -18,7 +18,7 @@ export function AccountMenu({ user }: { user: Me }) {
         className="flex h-11 items-center gap-2 rounded-xl border border-line bg-surface pl-1.5 pr-2 hover:bg-surface-2 sm:pr-3"
       >
         <Avatar name={user.name} src={user.profilePictureUrl} size={32} />
-        <span className="hidden max-w-[140px] truncate text-sm font-semibold text-ink sm:block">{user.name}</span>
+        <span className="hidden max-w-[140px] truncate text-sm font-semibold text-ink sm:block lg:hidden xl:block">{user.name}</span>
       </button>
       {open && (
         <div className="card absolute right-0 top-[52px] z-40 w-[280px] p-2 shadow-card">

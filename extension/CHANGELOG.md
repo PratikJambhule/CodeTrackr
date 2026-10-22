@@ -2,6 +2,59 @@
 
 All notable changes to the CodeTrackr VS Code extension will be documented in this file.
 
+## [Unreleased] - 2.6.0
+
+### Privacy
+
+- **Command text is no longer sent.** `lastCommand` and the repeated-failure list now carry only
+  the kind of command (`install`, `run`, `compile`, `build`, `test`, `git`, `docker`, `other`).
+  2.5.0 sent the program plus its first argument (e.g. `g++ two_sum.cpp`), cut to 120 characters
+  with secrets masked.
+
+### Added
+
+- `terminalAnalytics.commandKinds`: commands counted per kind, with failures per kind. The old
+  per-tool `commandUsage` counts are unchanged.
+
+### Changed: how time is counted
+
+- **Time now comes from your actions, second by second.** Typing counts as writing; scrolling,
+  moving the cursor and switching files as reading; a terminal command, task or debug session as
+  running when you are waiting on it (even with VS Code in the background, up to 30 minutes per run);
+  what you do wins, so typing with a dev server running counts as writing. A pause of up to 60 s
+  counts; a longer pause counts nothing. Leaving VS Code for up to 30 s counts as reading.
+- Before, only 4 editor events counted as activity, so scrolling, terminal work and running counted
+  as idle, while up to 2 minutes of real idle were counted, and all time went to the file open at
+  upload time.
+- Uploads (payload version 3) carry writing / reading / running seconds and a per-file breakdown.
+  Upload happens at 2 counted minutes, when you go idle, when the project changes, on Flush Now and
+  when VS Code closes. Reading-only and running-only time is uploaded too.
+- Only real files count: the Output panel and files changed in the background are ignored.
+
+### Added: what kind of work it was
+
+- **Work-mode picker** in the status bar: *CodeTrackr: DSA / Project / Debugging / Learning / Setup /
+  Auto* (command **CodeTrackr: Set What I'm Working On**). It is remembered per folder, but it labels
+  your session only when you picked or confirmed it in that session; a remembered choice shows as
+  "DSA?" and one click on "✓ Still DSA practice" confirms it. After 30 minutes without uploads it
+  asks again.
+- **Programs you ran**: terminal commands, tasks, *Run Without Debugging* and Code Runner are counted
+  (`runs`); Code Runner's run time counts as running.
+- **Real debugging**: debug sessions, breakpoint stops and steps (`debug`). *Run Without Debugging* is
+  no longer counted as a debug session.
+- **Reading signals**: scroll bursts, jumps (Go to Definition, Find), files opened but not edited
+  (`reading`). VS Code has no event for the Search panel, so searches are not counted.
+- **File events**: files created and deleted (counts), and which files in the upload are new.
+- **Kind of project** (`workspace`): a size range of source files (e.g. "6-20"), whether it has a
+  `package.json`, `requirements.txt` or `.git`, whether recent commits are yours (your Git email is
+  compared on your computer and never sent) and whether it was cloned in the last 14 days.
+
+### Fixed
+
+- `cd <folder>` is no longer counted as a command (only a bare `cd` was ignored).
+- `node --inspect` and other debug flags are detected again (the flags were stripped before the check).
+- Text written to the Output panel by other extensions was counted as your typing.
+
 ## [2.5.0] - 2026-10-04
 
 ### Fixed — offline data

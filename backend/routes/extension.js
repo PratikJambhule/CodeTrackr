@@ -11,16 +11,21 @@ const { verifyApiKey } = require('../middleware/auth');
 const {
     normalizeEditorAnalytics,
     normalizeFocusAnalytics,
-    normalizeGitAnalytics
+    normalizeGitAnalytics,
+    normalizeV3Signals,
+    normalizeUserMode
 } = require('../services/activityNormalizers');
 const {
     planActivityWrite,
     hasSignal,
-    bucketStartFor
+    bucketStartFor,
+    modeInc
 } = require('../services/activityBucket');
 const { validateIngestPayload } = require('../services/ingestValidation');
 const rateLimit = require('express-rate-limit');
 const { hashSecret } = require('../services/apiKeys');
+const { toKind, kindFailures, normalizeKindCounts } = require('../services/commandKinds');
+const { splitParts, timeInc } = require('../services/timeParts');
 
 // Per-key ingest quota (roadmap item 5). The app-level /api/extension limiter is
 // per IP, which a script on one machine shares with nobody and a campus shares
@@ -122,7 +127,8 @@ async function bumpStats(normalized, credited, when, opts) {
  */
 async function persistFlush(normalized, when) {
     if (!ACTIVITY_BUCKET_MS) {
-        const activity = await Activity.create({ ...normalized, timestamp: when });
+        const { timeParts, ranSomething, ...doc } = normalized; // eslint-disable-line no-unused-vars
+        const activity = await Activity.create({ ...doc, ...((timeParts && timeParts.kinds) || {}), timestamp: when });
         await bumpStats(normalized, normalized.duration, when);
         return {
             status: 201,
@@ -142,8 +148,12 @@ async function persistFlush(normalized, when) {
 
     const { userId, projectName, language } = normalized;
     const claimed = Number(normalized.duration) || 0;
-    const slices = spreadAcrossWindows(when.getTime(),
-        corroboratedSeconds(claimed, normalized.focusAnalytics), Date.now(), ACTIVITY_BUCKET_MS);
+    const kinds = normalized.timeParts && normalized.timeParts.kinds;
+    const vouched = corroboratedSeconds(claimed, normalized.focusAnalytics, {
+        runningSec: kinds ? kinds.runningSec : 0,
+        ranSomething: normalized.ranSomething,
+    });
+    const slices = spreadAcrossWindows(when.getTime(), vouched, Date.now(), ACTIVITY_BUCKET_MS);
     const firstStart = slices.length ? slices[0].bucketStart : bucketStartFor(when, ACTIVITY_BUCKET_MS);
 
     const credits = [];
@@ -151,10 +161,13 @@ async function persistFlush(normalized, when) {
         credits.push(await claimWindow(userId, slice.bucketStart, slice.seconds));
     }
 
+    // Payload v3 parts follow the credit: each window gets its share, scaled down when less was
+    // credited than claimed, so the parts always add up to the window's credited seconds.
+    const windows = splitParts(normalized.timeParts, credits.length ? credits : [0]);
     // The first window carries every counter (edits, commands, focus...); the
     // later windows of a spread upload receive time only.
-    const plan = planActivityWrite({ ...normalized, duration: credits[0] || 0 }, firstStart, ACTIVITY_BUCKET_MS);
-    const extraWindows = slices.slice(1).map((slice, i) => ({ slice, credit: credits[i + 1] }))
+    const plan = planActivityWrite({ ...normalized, duration: credits[0] || 0, timeWindow: windows[0] }, firstStart, ACTIVITY_BUCKET_MS);
+    const extraWindows = slices.slice(1).map((slice, i) => ({ slice, credit: credits[i + 1], parts: windows[i + 1] }))
         .filter((w) => w.credit > 0);
 
     if (plan.mode === 'merge') {
@@ -180,10 +193,14 @@ async function persistFlush(normalized, when) {
 
     plan.update.$inc.claimedDuration = claimed;
     const doc = await upsertBucket(plan.filter, plan.update, plan.setOnInsert);
-    for (const { slice, credit } of extraWindows) {
+    for (const { slice, credit, parts } of extraWindows) {
+        const t = timeInc(parts);
+        const update = { $inc: { duration: credit, ...t.$inc, ...modeInc(normalized.userMode, credit) } };
+        if (Object.keys(t.$set).length) update.$set = t.$set;
+        if (t.files.length) update.$addToSet = { files: { $each: t.files } };
         await upsertBucket(
             { userId, projectName, language, bucketStart: slice.bucketStart },
-            { $inc: { duration: credit } },
+            update,
             // flushCount 0: this document holds spread time, not an upload. Without
             // it, readers that default a missing flushCount to 1 over-count uploads.
             { ...plan.setOnInsert, bucketStart: slice.bucketStart, timestamp: slice.bucketStart, flushCount: 0 });
@@ -244,44 +261,53 @@ function normalizeTerminalAnalytics(body) {
             merges: Number(gitActivity.merges) || 0,
             clones: Number(gitActivity.clones) || 0
         },
-        repeatedFailedCommands: Array.isArray(source.repeatedFailedCommands)
-            ? source.repeatedFailedCommands.map(entry => ({
-                command: entry?.command || "",
-                count: Number(entry?.count) || 0
-            }))
-            : [],
-        lastCommand: source.lastCommand || source.lastTerminalCommand || 'unknown',
+        // Kinds only, never command text: extension 2.5.0 still sends a short command
+        // ("g++ two_sum.cpp"), so it is reduced to its kind ("compile") here (plan E1/B5).
+        commandKinds: normalizeKindCounts(source.commandKinds),
+        repeatedFailedCommands: kindFailures(source.repeatedFailedCommands),
+        lastCommand: toKind(source.lastCommand || source.lastTerminalCommand) || 'unknown',
         lastCommandTimestamp: source.lastCommandTimestamp
             ? new Date(source.lastCommandTimestamp)
             : null
     };
 }
 
+/** Did the upload show that something really ran? (Needed for the background running allowance.) */
+function ranSomething(body, terminal) {
+    const runs = (body && body.runs) || {};
+    return Number(terminal.totalCommands) > 0 || Number(terminal.debuggingSessions) > 0 ||
+        ['terminal', 'task', 'debugNoDebug', 'codeRunner'].some((k) => Number(runs[k]) > 0);
+}
+
+/** The record ingest stores for one validated upload (shared by /track and /track/batch). */
+function buildNormalized(user, body, validated) {
+    const terminalAnalytics = normalizeTerminalAnalytics(body);
+    return {
+        userId: activityUserId(user._id),
+        fileName: body.fileName,
+        fileType: body.fileType || 'unknown',
+        projectName: body.projectName || 'Unknown Project',
+        language: body.language,
+        duration: Number(body.duration),
+        linesAdded: Number(body.linesAdded) || 0,
+        linesRemoved: Number(body.linesRemoved) || 0,
+        terminalAnalytics,
+        editorAnalytics: normalizeEditorAnalytics(body),
+        focusAnalytics: normalizeFocusAnalytics(body),
+        gitAnalytics: normalizeGitAnalytics(body),
+        timeParts: validated.timeParts,
+        // Extension 2.6.0: what ran, real debugging, reading counts, file events, project kind.
+        signals: normalizeV3Signals(body),
+        userMode: normalizeUserMode(body),
+        ranSomething: ranSomething(body, terminalAnalytics),
+    };
+}
+
 // POST endpoint for VS Code extension to send coding activity
 router.post('/track', keyQuota, verifyApiKey, async (req, res, next) => {
     try {
-        const {
-            fileName,
-            fileType,
-            projectName,
-            language,
-            duration,
-            linesAdded,
-            linesRemoved,
-            timestamp,
-            terminalAnalytics,
-            analysis
-        } = req.body;
-
-        const terminalPayload = normalizeTerminalAnalytics({
-            terminalAnalytics,
-            analysis,
-            ...req.body
-        });
-
         // Bounds-check the payload: duration in (0, 3600], string length caps,
-        // timestamp within [now-24h, now+60s]. Replaces the old truthiness check
-        // that accepted `duration: 1e12`, negatives and a far-backdated timestamp.
+        // timestamp within [now-24h, now+60s], and the v3 time parts.
         const v = validateIngestPayload(req.body);
         if (!v.ok) {
             return res.status(400).json({
@@ -294,25 +320,10 @@ router.post('/track', keyQuota, verifyApiKey, async (req, res, next) => {
         // The flush covers an interval that started `duration` seconds ago; the
         // extension stamps `timestamp` with that start so backdated/queued
         // activity is filed under the day it actually happened.
-        const parsedTimestamp = timestamp ? new Date(timestamp) : new Date();
+        const parsedTimestamp = req.body.timestamp ? new Date(req.body.timestamp) : new Date();
         const when = isNaN(parsedTimestamp.getTime()) ? new Date() : parsedTimestamp;
 
-        const normalized = {
-            userId: activityUserId(req.user._id),
-            fileName,
-            fileType: fileType || 'unknown',
-            projectName: projectName || 'Unknown Project',
-            language,
-            duration: Number(duration),
-            linesAdded: Number(linesAdded) || 0,
-            linesRemoved: Number(linesRemoved) || 0,
-            terminalAnalytics: terminalPayload,
-            editorAnalytics: normalizeEditorAnalytics(req.body),
-            focusAnalytics: normalizeFocusAnalytics(req.body),
-            gitAnalytics: normalizeGitAnalytics(req.body)
-        };
-
-        const { status, body } = await persistOnce(normalized, when, v.value.flushId);
+        const { status, body } = await persistOnce(buildNormalized(req.user, req.body, v.value), when, v.value.flushId);
         res.status(status).json(body);
     } catch (error) {
         return next(error);
@@ -332,6 +343,7 @@ router.post('/track/batch', keyQuota, verifyApiKey, async (req, res, next) => {
         }
 
         // Same bounds check as /track, per element. The batch is all-or-nothing.
+        const validated = [];
         for (let i = 0; i < activities.length; i++) {
             const v = validateIngestPayload(activities[i]);
             if (!v.ok) {
@@ -341,30 +353,18 @@ router.post('/track/batch', keyQuota, verifyApiKey, async (req, res, next) => {
                     details: v.errors
                 });
             }
+            validated.push(v.value);
         }
 
         // Persist each activity through the same bucketing path as /track.
         // (The shipped extension never calls this endpoint — a simple loop
         // stays obviously correct.)
         let processed = 0;
-        for (const activity of activities) {
+        for (let i = 0; i < activities.length; i++) {
+            const activity = activities[i];
             const parsed = activity.timestamp ? new Date(activity.timestamp) : new Date();
             const when = isNaN(parsed.getTime()) ? new Date() : parsed;
-            const normalized = {
-                userId: activityUserId(req.user._id),
-                fileName: activity.fileName,
-                fileType: activity.fileType || 'unknown',
-                projectName: activity.projectName || 'Unknown Project',
-                language: activity.language,
-                duration: Number(activity.duration),
-                linesAdded: Number(activity.linesAdded) || 0,
-                linesRemoved: Number(activity.linesRemoved) || 0,
-                terminalAnalytics: normalizeTerminalAnalytics(activity),
-                editorAnalytics: normalizeEditorAnalytics(activity),
-                focusAnalytics: normalizeFocusAnalytics(activity),
-                gitAnalytics: normalizeGitAnalytics(activity)
-            };
-            const r = await persistOnce(normalized, when, activity.flushId || null);
+            const r = await persistOnce(buildNormalized(req.user, activity, validated[i]), when, validated[i].flushId);
             if (!r.body.duplicate) processed += 1;
         }
 

@@ -7,8 +7,8 @@ import { Ring } from '../../components/charts/Ring';
 import { Sparkline } from '../../components/charts/Sparkline';
 import type { Tone } from '../../components/charts/tone';
 import { Card, CardTitle, EmptyState, Pill, Skeleton } from '../../components/ui';
-import { deadlineKey, hoursHm, int, relativeDay } from '../../lib/format';
-import type { PeriodView, Severity } from '../../types';
+import { commandKindLabel, deadlineKey, hm, hoursHm, int, relativeDay } from '../../lib/format';
+import type { History, PeriodView, Severity } from '../../types';
 
 export function StatTile({ label, value, note, noteTone = 'muted', spark, sparkTone = 'accent' }: { label: string; value: string; note: string; noteTone?: 'muted' | 'good' | 'bad'; spark?: number[]; sparkTone?: Tone }) {
   const tone = noteTone === 'good' ? 'text-good-ink' : noteTone === 'bad' ? 'text-bad-ink' : 'text-muted';
@@ -76,7 +76,7 @@ export function BuildHealth({ view, period }: { view: PeriodView; period: 'today
               <ul className="flex flex-col gap-1.5">
                 {t.repeatedFailedCommands.slice(0, 3).map((f) => (
                   <li key={f.command} className="flex items-center justify-between gap-3 text-sm">
-                    <code className="truncate font-mono text-[12px] text-ink">{f.command}</code>
+                    <span className="truncate text-ink">{commandKindLabel(f.command)}</span>
                     <span className="flex-none font-mono text-[12px] text-bad-ink">{f.count}×</span>
                   </li>
                 ))}
@@ -163,6 +163,54 @@ export function InsightTeaser() {
         <EmptyState icon={<Sparkles className="h-8 w-8" />} title="Nothing stands out yet">
           Insights appear once there are a few weeks of coding to compare against.
         </EmptyState>
+      )}
+    </Card>
+  );
+}
+
+const SPLIT_PARTS = [
+  { key: 'writingSec', label: 'Writing', color: 'var(--accent)' },
+  { key: 'readingSec', label: 'Reading', color: 'var(--heat-2)' },
+  { key: 'runningSec', label: 'Running', color: 'var(--good)' },
+  { key: 'otherSec', label: 'Not split', color: 'var(--muted)' },
+] as const;
+
+/**
+ * Where the last 7 days went (plan W1): writing, reading and running, then the files with the most
+ * time. Time from extension versions before 2.6.0 has no split and shows as "Not split".
+ */
+export function TimeSplitCard({ history, pending }: { history?: History; pending: boolean }) {
+  const split = history?.split7d;
+  const total = split ? split.writingSec + split.readingSec + split.runningSec + split.otherSec : 0;
+  const files = history?.topFiles7d ?? [];
+  return (
+    <Card className="min-w-0 p-5">
+      <CardTitle aside="last 7 days">How you spent it</CardTitle>
+      {pending ? (
+        <Skeleton className="h-32" />
+      ) : total === 0 ? (
+        <p className="text-sm text-muted">No coding in the last 7 days.</p>
+      ) : (
+        <>
+          <SplitBar label="Time by kind" parts={SPLIT_PARTS.map((p) => ({ label: p.label, value: split![p.key], color: p.color }))} />
+          <ul className="mt-3 grid grid-cols-2 gap-x-4 gap-y-1.5 text-sm">
+            {SPLIT_PARTS.filter((p) => p.key !== 'otherSec' || split!.otherSec > 0).map((p) => (
+              <li key={p.key} className="flex items-center gap-2">
+                <span className="h-2.5 w-2.5 flex-none rounded-full" style={{ background: p.color }} aria-hidden="true" />
+                <span className="text-ink">{p.label}</span>
+                <span className="ml-auto font-mono text-xs text-muted num">{hm(split![p.key])}</span>
+              </li>
+            ))}
+          </ul>
+          {split!.otherSec > 0 && (
+            <p className="mt-2 text-xs text-muted">"Not split" is time from extension versions before 2.6.0.</p>
+          )}
+          <h3 className="mb-3 mt-6 text-sm font-semibold">Top files</h3>
+          <RankedBars
+            empty="File times appear with extension 2.6.0."
+            items={files.slice(0, 5).map((f) => ({ label: f.name, value: f.seconds, display: hm(f.seconds) }))}
+          />
+        </>
       )}
     </Card>
   );

@@ -9,6 +9,7 @@ import { ThemeToggle } from '../components/layout/ThemeToggle';
 import { Avatar, Button, Card, CardTitle, Modal, PageHeader, useToast } from '../components/ui';
 import { readStored, writeStored } from '../lib/storage';
 import type { Me } from '../types';
+import { NEVER_SENT, SENT_FROM_VSCODE } from '../lib/sentData';
 
 const TARGET_KEY = 'codetrackr.dailyTarget';
 
@@ -152,6 +153,15 @@ export default function Profile({ user }: { user: Me }) {
             </label>
           </div>
           <p className="mt-4 text-xs text-muted">Kept in this browser only.</p>
+        </Card>
+
+        <Card className="p-6">
+          <CardTitle aside={<Link to="/privacy">Privacy page</Link>}>What VS Code sends</CardTitle>
+          <p className="mb-3 text-sm text-muted">After about two minutes of activity the extension sends one small summary with:</p>
+          <ul className="list-disc space-y-1 pl-5 text-sm text-muted">
+            {SENT_FROM_VSCODE.map((t) => <li key={t}>{t}</li>)}
+          </ul>
+          <p className="mt-3 text-sm"><strong>Never sent:</strong> <span className="text-muted">{NEVER_SENT.join(', ')}.</span></p>
         </Card>
 
         <ApiKeySection user={user} />

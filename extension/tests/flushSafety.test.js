@@ -4,7 +4,8 @@
  * `buildPayload` resets every tracker, so any bail-out after that point used to
  * destroy the interval: a signal-less flush, a missing API key, an out-of-range
  * duration, or a failed upload. These cover the carry-forward merge that fixes
- * it, plus the idle-pause gate that stopped focusedMs/readMs banking the gap.
+ * it, plus the idle-pause gate that stops focusedMs banking the gap. (Reading time is now measured by
+ * the time engine; see tests/heartbeat.test.js and tests/timeWiring.test.js.)
  */
 const assert = require('assert');
 const path = require('path');
@@ -191,22 +192,6 @@ check('unpausing does not back-fill the idle gap', () => {
 
   const after = t.getIntervalSnapshot().focusedMs;
   assert.ok(after - before <= 11000, `expected ~10s of new time, banked ${after - before}ms`);
-});
-
-check('EditorTracker readMs does not accrue while paused', () => {
-  const t = new EditorTracker();
-  t.sampleAttention(0);
-  t.sampleAttention(5000);                    // 5s of reading
-  const before = t.getIntervalSnapshot().readMs;
-  assert.ok(before >= 5000);
-
-  t.setPaused(true, 5000);
-  t.sampleAttention(5000 + 3600 * 1000);      // an hour idle
-  assert.strictEqual(t.getIntervalSnapshot().readMs, before, 'idle gap must not become readMs');
-
-  t.setPaused(false, 5000 + 3600 * 1000);
-  t.sampleAttention(5000 + 3600 * 1000 + 5000);
-  assert.ok(t.getIntervalSnapshot().readMs > before, 'resumes banking after unpause');
 });
 
 restore();

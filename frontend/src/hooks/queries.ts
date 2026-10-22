@@ -3,7 +3,7 @@ import { ApiError, apiGet } from '../api';
 import { tzOffset } from '../lib/format';
 import type {
   AppNotification, DeviceToken, Goal, GoalProgress, Group, GroupDetails, GroupPreview, History,
-  InsightsPayload, LeaderRow, Me, Metrics, PeriodView, TimeSlot,
+  InsightsPayload, LeaderRow, Me, Metrics, PeriodView, TimeSlot, WorkSession,
 } from '../types';
 
 /**
@@ -118,4 +118,11 @@ export const useMetrics = (days: number) =>
   useQuery({
     queryKey: ['metrics', days, tz()],
     queryFn: () => apiGet<{ metrics: Metrics; insights?: InsightsPayload }>(`/api/metrics?days=${days}&timezone=${tz()}`),
+  });
+
+/** Your coding sessions with their kind of work and labels (plan B8/W2). */
+export const useSessions = (days: number) =>
+  useQuery({
+    queryKey: ['sessions', days],
+    queryFn: () => apiGet<{ days: number; sessions: WorkSession[] }>(`/api/sessions?days=${days}`),
   });

@@ -11,7 +11,7 @@ import { streaks } from '../lib/calendar';
 import { readStored, writeStored } from '../lib/storage';
 import type { Me } from '../types';
 import { RaceStrip } from './dashboard/RaceStrip';
-import { BuildHealth, GoalsMini, InsightTeaser, StatTile } from './dashboard/cards';
+import { BuildHealth, GoalsMini, InsightTeaser, StatTile, TimeSplitCard } from './dashboard/cards';
 import { TimeSlotDialog } from './dashboard/TimeSlotDialog';
 
 const TARGET_KEY = 'codetrackr.dailyTarget';
@@ -224,6 +224,8 @@ export default function Dashboard({ user }: { user: Me }) {
             <RankedBars empty="No projects in the last 7 days." items={(history.data?.projects ?? []).slice(0, 5).map((p) => ({ label: p.name, value: p.seconds, display: hm(p.seconds) }))} />
           )}
         </Card>
+
+          <TimeSplitCard history={history.data} pending={history.isPending} />
 
           <Card className="min-w-0 p-5">
             <CardTitle aside="last 7 days">When you code</CardTitle>

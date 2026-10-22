@@ -70,15 +70,16 @@ check('counts file switches and unique files', () => {
   assert.strictEqual(s.uniqueFiles, 2);
 });
 
-check('splits attention into read and write time', () => {
+check('counts lines per file (base name), for the per-file breakdown', () => {
   const t = new EditorTracker();
-  t.sampleAttention(0);
-  t.recordChange({ text: 'x', rangeLength: 0 }, undefined, 1000);
-  t.sampleAttention(5000);   // edit happened -> write
-  t.sampleAttention(10000);  // no edit since -> read
-  const s = t.consumeInterval();
-  assert.strictEqual(s.writeMs, 5000);
-  assert.strictEqual(s.readMs, 5000);
+  t.recordChange({ text: 'a\nb\n', rangeLength: 0 }, undefined, 1000, 'two_sum.cpp');
+  t.recordChange({ text: '', rangeLength: 4, linesRemoved: 1 }, undefined, 2000, 'two_sum.cpp');
+  t.recordChange({ text: 'x\n', rangeLength: 0 }, undefined, 3000, 'notes.md');
+  const lines = t.getFileLines();
+  assert.deepStrictEqual(lines.get('two_sum.cpp'), { linesInserted: 2, linesDeleted: 1 });
+  assert.deepStrictEqual(lines.get('notes.md'), { linesInserted: 1, linesDeleted: 0 });
+  t.consumeInterval();
+  assert.strictEqual(t.getFileLines().size, 0, 'reset each interval');
 });
 
 check('flags large inserts without storing their text', () => {

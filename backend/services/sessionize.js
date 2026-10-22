@@ -24,6 +24,10 @@
  *     what makes gap-splitting trustworthy at all.
  */
 
+const { decodeFileKey } = require('./timeParts');
+const { bestFeatures } = require('./workTypeFeatures');
+const { classifyWorkType, WORK_TYPES, groupOf } = require('./workType');
+
 const BUCKET_MS = 600000;          // 10 minutes — must match activityBucket.js
 const SESSION_GAP_MS = 30 * 60000; // a break longer than this starts a new session
 const DEEP_BLOCK_MS = 25 * 60000;
@@ -40,6 +44,15 @@ const startMsOf = (doc, bucketMs) => {
     // Floor legacy per-flush timestamps onto the same grid as bucketed docs.
     return Math.floor(t / bucketMs) * bucketMs;
 };
+
+/** Add every numeric leaf of `src` into `target` (one level deep, plus a nested `failed`). */
+function addCounts(target, src) {
+    if (!src || typeof src !== 'object') return;
+    for (const [k, v] of Object.entries(src)) {
+        if (v && typeof v === 'object') { addCounts(target[k] || (target[k] = {}), v); continue; }
+        if (num(v) > 0) target[k] = (target[k] || 0) + num(v);
+    }
+}
 
 /** Collapse every document sharing a bucketStart into one slot. */
 function collapseByBucket(docs, bucketMs) {
@@ -60,6 +73,11 @@ function collapseByBucket(docs, bucketMs) {
                 totalCommands: 0, failedCommands: 0, terminalErrorCount: 0,
                 buildRuns: 0, failedBuilds: 0, testRuns: 0, debuggingSessions: 0,
                 languages: new Set(), projects: new Set(), docCount: 0,
+                // extension 2.6.0 (payload v3) and the fields the work-type features need
+                writingSec: 0, readingSec: 0, runningSec: 0, partsSec: 0,
+                charsInserted: 0, largeInsertChars: 0, commandUsage: {}, commandKinds: {},
+                fileSec: {}, files: new Set(), runs: {}, debug: {}, reading: {},
+                filesCreated: 0, filesDeleted: 0, workspace: null, modeSec: {},
             });
         }
         const s = slots.get(start);
@@ -93,6 +111,30 @@ function collapseByBucket(docs, bucketMs) {
         s.debuggingSessions += num(t.debuggingSessions);
         if (doc.language) s.languages.add(doc.language);
         if (doc.projectName) s.projects.add(doc.projectName);
+        s.charsInserted += num(e.charsInserted);
+        s.largeInsertChars += num(e.largeInsertChars);
+        addCounts(s.commandUsage, t.commandUsage);
+        addCounts(s.commandKinds, t.commandKinds);
+        const parts = num(doc.writingSec) + num(doc.readingSec) + num(doc.runningSec);
+        s.writingSec += num(doc.writingSec);
+        s.readingSec += num(doc.readingSec);
+        s.runningSec += num(doc.runningSec);
+        s.partsSec += parts;
+        for (const [key, ft] of Object.entries(doc.fileTime || {})) {
+            const name = decodeFileKey(key);
+            const cur = s.fileSec[name] || (s.fileSec[name] = { seconds: 0, writing: 0, reading: 0, running: 0 });
+            for (const k of ['seconds', 'writing', 'reading', 'running']) cur[k] += num(ft && ft[k]);
+            s.files.add(name);
+        }
+        for (const f of Array.isArray(doc.files) ? doc.files : []) if (f) s.files.add(f);
+        if (doc.fileName && doc.fileName !== 'unknown') s.files.add(doc.fileName);
+        addCounts(s.runs, doc.runs);
+        addCounts(s.debug, doc.debug);
+        addCounts(s.reading, doc.reading);
+        s.filesCreated += num(doc.filesCreated);
+        s.filesDeleted += num(doc.filesDeleted);
+        if (doc.workspace) s.workspace = { ...(s.workspace || {}), ...doc.workspace };
+        addCounts(s.modeSec, doc.modeSec);
     }
 
     return [...slots.values()].sort((a, b) => a.start - b.start);
@@ -138,7 +180,12 @@ function buildSession(slots, bucketMs) {
         totalCommands: 0, failedCommands: 0, terminalErrorCount: 0,
         buildRuns: 0, failedBuilds: 0, testRuns: 0, debuggingSessions: 0,
         languages: [], projects: [],
+        writingSec: 0, readingSec: 0, runningSec: 0, partsSec: 0,
+        charsInserted: 0, largeInsertChars: 0, commandUsage: {}, commandKinds: {},
+        fileSec: {}, files: [], runs: {}, debug: {}, reading: {},
+        filesCreated: 0, filesDeleted: 0, workspace: null, modeSec: {},
     };
+    const files = new Set();
     const languages = new Set();
     const projects = new Set();
 
@@ -149,6 +196,15 @@ function buildSession(slots, bucketMs) {
             'totalCommands', 'failedCommands', 'terminalErrorCount', 'buildRuns',
             'failedBuilds', 'testRuns', 'debuggingSessions',
         ]) acc[key] += s[key];
+        for (const key of ['writingSec', 'readingSec', 'runningSec', 'partsSec', 'charsInserted',
+            'largeInsertChars', 'filesCreated', 'filesDeleted']) acc[key] += s[key];
+        for (const key of ['commandUsage', 'commandKinds', 'runs', 'debug', 'reading', 'modeSec']) addCounts(acc[key], s[key]);
+        for (const [name, ft] of Object.entries(s.fileSec)) {
+            const cur = acc.fileSec[name] || (acc.fileSec[name] = { seconds: 0, writing: 0, reading: 0, running: 0 });
+            for (const k of Object.keys(cur)) cur[k] += ft[k];
+        }
+        for (const f of s.files) files.add(f);
+        if (s.workspace) acc.workspace = { ...(acc.workspace || {}), ...s.workspace };
         acc.flowBlocksMs.push(...s.flowBlocksMs);
         for (const l of s.languages) languages.add(l);
         for (const p of s.projects) projects.add(p);
@@ -164,7 +220,31 @@ function buildSession(slots, bucketMs) {
     const { archetype, reason } = classify(acc, acc.features);
     acc.archetype = archetype;
     acc.archetypeReason = reason;
+
+    acc.files = [...files];
+    // Work type (ML plan): the 18 features from the shared feature code, then rules v1.
+    const wt = bestFeatures(acc); // v3 for 2.6.0 data, else v2
+    acc.workFeatures = wt.features;
+    acc.featureVersion = wt.version;
+    const guess = classifyWorkType(wt);
+    acc.workType = { type: guess.workType, group: groupOf(guess.workType), reason: guess.reason, by: 'rules',
+        rules: wt.version === 3 ? 'v2' : 'v1' };
+    acc.pickerLabel = pickerLabel(acc.modeSec, acc.durationSec);
     return acc;
+}
+
+/**
+ * The work type the user CONFIRMED in the status-bar picker for most of the session (plan B4).
+ * Counts only when confirmed seconds cover at least half the session; else null.
+ */
+function pickerLabel(modeSec, durationSec) {
+    let best = null;
+    for (const t of WORK_TYPES) {
+        const sec = num(modeSec && modeSec[t]);
+        if (sec > 0 && (!best || sec > best.seconds)) best = { type: t, seconds: sec };
+    }
+    if (!best || best.seconds < num(durationSec) / 2) return null;
+    return { type: best.type, group: groupOf(best.type), share: Math.round((best.seconds / Math.max(1, num(durationSec))) * 100) / 100 };
 }
 
 /**
@@ -285,4 +365,5 @@ module.exports = {
     featureVector,
     classify,
     archetypeMix,
+    pickerLabel,
 };

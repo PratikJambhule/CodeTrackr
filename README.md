@@ -15,9 +15,9 @@ each other week by week.
 
 ## Features
 
-- **Automatic tracking.** After about two minutes of real activity the extension sends one small
-  summary: active time, language, project name, edit counts, commits, and terminal commands with
-  their exit codes. Never file contents, diffs or full paths.
+- **Accurate time.** Extension 2.6.0 counts time from your actions, second by second: writing,
+  reading, and running (a build or program you wait on), per file. A pause over 60 s counts nothing.
+  Summaries carry counts and file names, never file contents, diffs, paths or command text.
 - **Weekly race.** Every group has a board: an F1-style standings tower (one cell per day, gap to the
   leader), a race chart of running totals, highlights, and contest dates you can share as a link.
 - **Dashboard.** Your race, today and this week, a year heatmap, languages and projects, when you
@@ -26,6 +26,9 @@ each other week by week.
 - **Goals.** "N hours of X by a date", with progress from matching time and one reminder per goal.
 - **Insights.** Plain statistics over your own data (deep-work ratio, peak hours, cadence, rework)
   and 13 threshold rules. Every number shows "—" until there is enough data. Not machine learning.
+- **What kind of work.** Each coding session is shown as DSA, Project work or Learning & setup, with a
+  one-tap ✓ / Change. You can also pick the kind in VS Code's status bar. Your answers are private and
+  are what a future model would learn from.
 - **One-click sign-in for VS Code.** *CodeTrackr: Sign In* shows a code; approve it on the website
   and that computer gets its own revocable key, stored in the OS keychain.
 
@@ -38,14 +41,14 @@ each other week by week.
 ```mermaid
 flowchart LR
   subgraph VSCode["VS Code extension"]
-    T["5 trackers: editor, focus, git, terminal, debug"] --> Q["persisted outbox<br/>(survives restarts)"]
+    T["trackers + time engine<br/>writing / reading / running per file"] --> Q["persisted outbox<br/>(survives restarts)"]
   end
   Q -- "POST /api/extension/track<br/>per-device key" --> API
   B["React website (Vercel)"] -- "/api, /auth via Vercel proxy<br/>httpOnly JWT cookie" --> API
   GH["GitHub Actions cron"] -- "hourly reminders, nightly rollup" --> API
   subgraph API["Express API (Render)"]
     I["validate → credit → 10-minute bucket"]
-    R["analytics, leaderboard, groups, goals"]
+    R["analytics, leaderboard, groups, goals,<br/>sessions + labels"]
   end
   API --> DB[("MongoDB Atlas")]
 ```
@@ -139,10 +142,18 @@ cd extension && npm test
 cd frontend && npm run lint && npm test && npm run build
 ```
 
-375 backend unit assertions, 42 API integration tests (the real Express app over HTTP against an
-in-memory MongoDB), 70 extension assertions and 55 frontend tests. Frontend tests run in the India
+475 backend unit assertions, 60 API integration tests (the real Express app over HTTP against an
+in-memory MongoDB), 135 extension assertions and 62 frontend tests. Frontend tests run in the India
 time zone, where the date bugs showed up. CI runs all of them, plus a Docker build with a health
 check, on every push.
+
+## Work-type classifier (experimental)
+
+`ml/` holds a pipeline that labels a coding session as DSA practice, project building, debugging,
+learning or setup from 18 features the extension already collects. There are not enough real
+labelled sessions yet, so the current model is trained on a **generated** dataset
+(`node ml/generate_synthetic.js`, then `python ml/train_work_type.py`). Its scores describe that
+generated data, not real users, and the API does not serve it. See [`ml/README.md`](ml/README.md).
 
 ## Project structure
 
@@ -150,15 +161,17 @@ check, on every push.
 backend/     Express API: routes/, services/, models/, middleware/, tests/, scripts/, bench/
 frontend/    React website: src/pages, src/components (ui, charts, layout), src/lib, src/hooks
 extension/   VS Code extension: src/ (trackers, outbox, sign-in), tests/
+ml/          work-type classifier: synthetic data generator, training script, reports
 .github/     CI, scheduled jobs, deploy workflow
 ```
 
 ## Privacy
 
 The extension sends counts and durations, the language, the project (folder) name, and terminal
-commands by type with their exit codes. A command that fails repeatedly is sent with anything that
-looks like a password, token or key replaced by `***`. File contents, diffs and full paths are never
-sent. The website's privacy page explains it in full.
+commands by kind (install, run, compile, build, test, git, docker, other) with whether they failed.
+Command text is never stored: extension 2.6.0 sends only the kind, and the server reduces any text an
+older extension sends to its kind before saving. File contents, diffs and full paths are never sent.
+The website's privacy page explains it in full.
 
 ## Team
 

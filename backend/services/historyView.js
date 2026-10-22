@@ -9,6 +9,9 @@
  *   projects   top 8 projects by seconds, last 7 local days
  *   commits7d  commits in the last 7 local days: the git tracker's count first,
  *              terminal `git commit`s as the fallback (same rule as group boards)
+ *   split7d    last 7 local days: seconds writing / reading / running (extension 2.6.0), and
+ *              otherSec = time from older uploads that carry no split (plan B9)
+ *   topFiles7d last 7 local days: the 8 files with the most time, with their split (plan B9)
  *
  * Local time follows analyticsViews: shift timestamps by the client's
  * Date.getTimezoneOffset() (minutes, negative east of UTC) and read them as UTC.
@@ -17,6 +20,7 @@
  */
 const Activity = require('../models/Activity');
 const { matchActivityUser } = require('./activityUser');
+const { decodeFileKey } = require('./timeParts');
 
 const DAY_MS = 864e5;
 const n = (path) => ({ $ifNull: [path, 0] });
@@ -32,6 +36,13 @@ function localMidnightUtc(instant, offsetMinutes) {
   const offsetMs = clampOffset(offsetMinutes) * 60000;
   const local = new Date(new Date(instant).getTime() - offsetMs);
   return new Date(Date.UTC(local.getUTCFullYear(), local.getUTCMonth(), local.getUTCDate()) + offsetMs);
+}
+
+/** Writing / reading / running seconds, plus time from older uploads that carry no split. */
+function splitOf(row) {
+  const w = (row && row.writing) || 0, rd = (row && row.reading) || 0, ru = (row && row.running) || 0;
+  const total = (row && row.duration) || 0;
+  return { writingSec: w, readingSec: rd, runningSec: ru, otherSec: Math.max(0, total - w - rd - ru) };
 }
 
 async function historyData({ userId, offsetMinutes = 0, now = new Date(), days = 365 }) {
@@ -63,6 +74,22 @@ async function historyData({ userId, offsetMinutes = 0, now = new Date(), days =
           { $sort: { seconds: -1, _id: 1 } },
           { $limit: 8 },
         ],
+        split: [
+          inWeek,
+          { $group: { _id: null, duration: { $sum: n('$duration') }, writing: { $sum: n('$writingSec') },
+            reading: { $sum: n('$readingSec') }, running: { $sum: n('$runningSec') } } },
+        ],
+        files: [
+          inWeek,
+          { $match: { fileTime: { $type: 'object' } } },
+          { $project: { f: { $objectToArray: '$fileTime' } } },
+          { $unwind: '$f' },
+          { $group: { _id: '$f.k', seconds: { $sum: n('$f.v.seconds') }, writing: { $sum: n('$f.v.writing') },
+            reading: { $sum: n('$f.v.reading') }, running: { $sum: n('$f.v.running') } } },
+          { $match: { seconds: { $gt: 0 } } },
+          { $sort: { seconds: -1, _id: 1 } },
+          { $limit: 8 },
+        ],
         commits: [
           inWeek,
           {
@@ -83,6 +110,9 @@ async function historyData({ userId, offsetMinutes = 0, now = new Date(), days =
     hourOfDay,
     projects: r.projects.map((p) => ({ name: p._id, seconds: p.seconds })),
     commits7d: (r.commits[0] && r.commits[0].commits) || 0,
+    split7d: splitOf(r.split[0]),
+    topFiles7d: r.files.map((f) => ({ name: decodeFileKey(f._id), seconds: f.seconds, writing: f.writing,
+      reading: f.reading, running: f.running })),
   };
 }
 

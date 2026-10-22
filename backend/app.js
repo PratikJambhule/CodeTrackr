@@ -112,6 +112,7 @@ const metricsRoutes = require('./routes/metrics');
 const authRoutes = require('./routes/auth');
 const internalRoutes = require('./routes/internal');
 const deviceRoutes = require('./routes/device');
+const sessionRoutes = require('./routes/sessions');
 
 app.use('/api/analytics', analyticsRoutes);
 app.use('/api/leaderboard', leaderboardRoutes);
@@ -124,6 +125,7 @@ app.use('/api/metrics', metricsRoutes);
 app.use('/auth', authRoutes);
 app.use('/api/internal', internalRoutes);
 app.use('/api/device', deviceRoutes);
+app.use('/api/sessions', sessionRoutes);
 
 // Central error handler — one place that logs the full error server-side with a
 // short correlation id and returns a generic body. Routes call `next(err)`

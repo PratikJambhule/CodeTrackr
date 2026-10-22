@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  addDays, dayLabel, deadlineKey, fromDateKey, gapLabel, hm, hmCompact, hoursHm, localDateKey, mondayOf,
+  addDays, commandKindLabel, dayLabel, deadlineKey, fromDateKey, gapLabel, hm, hmCompact, hoursHm, localDateKey, mondayOf,
   plural, relativeDay, timeAgo, tzOffset,
 } from './format';
 
@@ -77,5 +77,23 @@ describe('local dates (tests run in India, UTC+5:30)', () => {
   it('reads a stored deadline as the date that was chosen', () => {
     // The API stores "2026-10-10" as 2026-10-10T00:00:00.000Z.
     expect(deadlineKey('2026-10-10T00:00:00.000Z')).toBe('2026-10-10');
+  });
+});
+
+describe('command kinds', () => {
+  it('names each kind the server stores in plain words', () => {
+    expect(commandKindLabel('compile')).toBe('Compiling');
+    expect(commandKindLabel('build')).toBe('Builds');
+    expect(commandKindLabel('test')).toBe('Tests');
+    expect(commandKindLabel('run')).toBe('Running programs');
+    expect(commandKindLabel('install')).toBe('Installing packages');
+    expect(commandKindLabel('git')).toBe('Git');
+    expect(commandKindLabel('docker')).toBe('Docker');
+    expect(commandKindLabel('other')).toBe('Other commands');
+  });
+
+  it('shows anything else as it came (rows saved before the clean-up)', () => {
+    expect(commandKindLabel('npm run lint')).toBe('npm run lint');
+    expect(commandKindLabel('')).toBe('Other commands');
   });
 });

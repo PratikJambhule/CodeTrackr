@@ -1,7 +1,7 @@
 {
   "name": "codetrackr-vscode",
   "displayName": "CodeTrackr for VS Code",
-  "description": "Automatic coding-time tracking: hours, languages, projects, commits and failed builds. Sign in once and compete with friends on group boards and the leaderboard.",
+  "description": "Accurate coding-time tracking: writing, reading and running time per file, languages, projects, commits and failed builds, and what kind of work you did. Sign in once and compete with friends on group boards and the leaderboard.",
   "publisher": "CodeTrackr-ext",
   "repository": {
     "type": "git",
@@ -10,7 +10,7 @@
   "bugs": {
     "url": "https://github.com/PratikJambhule/CodeTrackr/issues"
   },
-  "version": "2.5.0",
+  "version": "2.6.0",
   "icon": "images/icon.png",
   "license": "MIT",
   "author": {
@@ -88,6 +88,11 @@
         "command": "codetrackr.showInfo",
         "title": "CodeTrackr: Show Connection Info",
         "category": "CodeTrackr"
+      },
+      {
+        "command": "codetrackr.setWorkMode",
+        "title": "CodeTrackr: Set What I'm Working On",
+        "category": "CodeTrackr"
       }
     ],
     "configuration": {
@@ -141,7 +146,7 @@
     "build": "npm run typecheck && npm run esbuild-base -- --minify",
     "watch": "npm run esbuild-base -- --sourcemap --watch",
     "package": "vsce package",
-    "test": "node tests/trackers.test.js && node tests/activation.test.js && node tests/flushSafety.test.js && node tests/secretKey.test.js && node tests/outbox.test.js && node tests/signIn.test.js",
+    "test": "node tests/trackers.test.js && node tests/activation.test.js && node tests/flushSafety.test.js && node tests/secretKey.test.js && node tests/outbox.test.js && node tests/signIn.test.js && node tests/commandKinds.test.js && node tests/heartbeat.test.js && node tests/timeWiring.test.js && node tests/signals.test.js && node tests/workMode.test.js",
     "pretest": "npm run build"
   },
   "devDependencies": {

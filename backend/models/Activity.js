@@ -69,11 +69,34 @@ const activitySchema = new mongoose.Schema({
             merges: Number,
             clones: Number
         },
+        // Counts per kind of command (extension 2.6.0+). Older uploads have none.
+        commandKinds: {
+            install: Number,
+            run: Number,
+            compile: Number,
+            build: Number,
+            test: Number,
+            git: Number,
+            docker: Number,
+            other: Number,
+            failed: {
+                install: Number,
+                run: Number,
+                compile: Number,
+                build: Number,
+                test: Number,
+                git: Number,
+                docker: Number,
+                other: Number,
+            }
+        },
+        // `command` holds a KIND ("compile", "test"…), never command text: ingest reduces any
+        // text to its kind (services/commandKinds.js). The field name is kept for the website.
         repeatedFailedCommands: [{
             command: String,
             count: Number
         }],
-        lastCommand: String,
+        lastCommand: String, // a kind, or 'unknown'
         lastCommandTimestamp: Date
     },
     timestamp: {
@@ -117,7 +140,38 @@ const activitySchema = new mongoose.Schema({
     // Seconds the client CLAIMED for uploads in this bucket, before the anti-cheat
     // limits (focus corroboration, 600 s window cap). `duration` holds what was
     // credited. A large gap between the two is the signal of an inflated client.
-    claimedDuration: { type: Number }
+    claimedDuration: { type: Number },
+    // Payload v3 (extension 2.6.0): the credited duration split by kind, and per file. Older
+    // uploads have none of these. fileTime keys are file base names with "." "$" "%" escaped
+    // (services/timeParts.js encodeFileKey): { seconds, writing, reading, running,
+    // linesInserted, linesDeleted, language }.
+    writingSec: { type: Number },
+    readingSec: { type: Number },
+    runningSec: { type: Number },
+    fileTime: { type: mongoose.Schema.Types.Mixed },
+    // Payload v3 signals (extension 2.6.0): counts and yes/no flags only, never names or paths.
+    // runs: programs started without the debugger; debug: real debugging only.
+    runs: {
+        terminal: { type: Number }, task: { type: Number },
+        debugNoDebug: { type: Number }, codeRunner: { type: Number },
+    },
+    debug: { sessions: { type: Number }, breakpointStops: { type: Number }, steps: { type: Number } },
+    reading: { scrollEvents: { type: Number }, navigations: { type: Number }, filesOpenedNotEdited: { type: Number } },
+    filesCreated: { type: Number },
+    filesDeleted: { type: Number },
+    // Plan B4: what the user said they were doing. userMode = the latest answer; modeSec = seconds
+    // CONFIRMED per mode (picked or confirmed in that coding session). Labels come from modeSec.
+    userMode: { mode: { type: String }, confirmed: { type: Boolean } },
+    modeSec: {
+        dsa: { type: Number }, project: { type: Number }, debugging: { type: Number },
+        learning: { type: Number }, setup: { type: Number },
+    },
+    // The project's kind, latest upload wins. sourceFilesBucket is a size range, never a list.
+    workspace: {
+        sourceFilesBucket: { type: String },
+        hasPackageJson: { type: Boolean }, hasRequirements: { type: Boolean }, hasGit: { type: Boolean },
+        ownCommits: { type: Boolean }, clonedRecently: { type: Boolean },
+    },
 }, { timestamps: true });
 
 // The range queries every read path actually does filter on `timestamp`.

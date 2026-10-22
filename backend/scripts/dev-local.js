@@ -16,6 +16,7 @@
  *
  * Data disappears when the process stops. Never point this at a real database.
  */
+const { encodeFileKey } = require('../services/timeParts');
 const path = require('path');
 const BACKEND = path.join(__dirname, '..');
 const { MongoMemoryServer } = require('mongodb-memory-server');
@@ -38,6 +39,7 @@ const PROJECTS = {
   'os-assignment': [['c', 8], ['makefile', 2]],
   portfolio: [['typescriptreact', 6], ['css', 4]],
 };
+const SECOND_FILES = { typescript: 'api.ts', javascript: 'utils.js', python: 'two_sum.py', cpp: 'graph.cpp', c: 'parser.c', typescriptreact: 'Navbar.tsx', css: 'theme.css' };
 const FILES = { typescript: 'app.ts', javascript: 'index.js', json: 'package.json', python: 'solution.py', cpp: 'main.cpp', c: 'shell.c', makefile: 'Makefile', typescriptreact: 'App.tsx', css: 'styles.css' };
 
 /** Activity buckets for one coding session starting at `start` (ms, on the 10-min grid). */
@@ -60,11 +62,28 @@ function session(userId, start, minutes, project, now) {
         commandUsage: { git: Math.round(rnd() * 2), npm: project === 'codetrackr' || project === 'portfolio' ? Math.round(rnd() * 3) : 0, python: project === 'dsa-sheet' ? Math.round(rnd() * 3) : 0, gcc: project === 'os-assignment' ? Math.round(rnd() * 3) : 0 },
         gitActivity: { commits: 0, pushes: rnd() < 0.1 ? 1 : 0, pulls: rnd() < 0.05 ? 1 : 0 },
         repeatedFailedCommands: failing && rnd() < 0.4
-          ? [{ command: project === 'os-assignment' ? 'make test' : project === 'dsa-sheet' ? 'python solution.py < input.txt' : 'npm run build', count: 2 }]
+          ? [{ command: project === 'os-assignment' ? 'test' : project === 'dsa-sheet' ? 'run' : 'build', count: 2 }] // kinds, as ingest stores them
           : [],
       },
       gitAnalytics: { commits: rnd() < 0.18 ? 1 : 0 },
     };
+    // The last two weeks look like extension 2.6.0: time split into writing / reading / running,
+    // per-file seconds, and (sometimes) a work mode confirmed in the status bar.
+    if (t > now - 14 * DAY) {
+      const writing = Math.round(duration * (0.4 + rnd() * 0.3));
+      const reading = Math.round((duration - writing) * (0.5 + rnd() * 0.4));
+      const running = duration - writing - reading;
+      const second = SECOND_FILES[language] || 'README.md';
+      const main = Math.round(duration * 0.7);
+      Object.assign(doc, {
+        writingSec: writing, readingSec: reading, runningSec: running, files: [FILES[language], second],
+        fileTime: {
+          [encodeFileKey(FILES[language])]: { seconds: main, writing: Math.min(main, writing), reading: Math.max(0, main - Math.min(main, writing) - running), running, language },
+          [encodeFileKey(second)]: { seconds: duration - main, writing: writing - Math.min(main, writing), reading: reading - Math.max(0, main - Math.min(main, writing) - running), running: 0, language },
+        },
+      });
+      if (project === 'dsa-sheet' && rnd() < 0.6) doc.modeSec = { dsa: duration };
+    }
     docs.push(doc);
   }
   return docs;

@@ -5,13 +5,17 @@
  *
  * Replaces the net `doc.lineCount` delta, which reported zero for any
  * replace-in-place edit (i.e. most refactoring).
+ *
+ * Reading vs writing TIME is no longer sampled here: the time engine (heartbeat.ts) measures it from
+ * real actions. The old 5-second sampler counted any quiet stretch, idle included, as reading (P8).
  */
 
 import * as vscode from "vscode";
 
 const CHURN_WINDOW_MS = 10 * 60 * 1000;
 const LARGE_INSERT_CHARS = 80;
-const ATTENTION_SAMPLE_MS = 5000;
+const SCROLL_BURST_MS = 1000; // scroll events arrive many per second; count bursts
+const SELECTION_BY_COMMAND = 3; // vscode.TextEditorSelectionChangeKind.Command: Go to Definition, Find, Peek…
 
 export interface EditorAnalyticsSnapshot {
   charsInserted: number;
@@ -24,10 +28,28 @@ export interface EditorAnalyticsSnapshot {
   saveCount: number;
   fileSwitches: number;
   uniqueFiles: number;
-  readMs: number;
-  writeMs: number;
   largeInsertCount: number;
   largeInsertChars: number;
+}
+
+/** Lines inserted and deleted per file (base name) in this interval. */
+export type FileLines = Map<string, { linesInserted: number; linesDeleted: number }>;
+
+/** Reading and file signals of this interval (plan E9 + E11). Counts only, no names leave here. */
+export interface EditorSignals {
+  scrollEvents: number;
+  navigations: number;
+  filesCreated: number;
+  filesDeleted: number;
+  /** Base names of files created in this interval, to mark them in perFile. */
+  created: Set<string>;
+}
+
+/** Only real documents count: the Output panel, Git views and settings fire edit events too. */
+export function isUserDocument(doc?: { uri?: { scheme?: string } }): boolean {
+  if (!doc) return false;
+  const scheme = doc.uri?.scheme ?? "file";
+  return scheme === "file" || scheme === "untitled" || scheme === "vscode-notebook-cell";
 }
 
 interface ChangeLike {
@@ -45,14 +67,17 @@ interface InsertRecord {
 
 export class EditorTracker {
   private subscriptions: vscode.Disposable[] = [];
-  private sampler?: NodeJS.Timeout;
 
   private counters = EditorTracker.empty();
   private files = new Set<string>();
+  private fileLines: FileLines = new Map();
   private recentInserts: InsertRecord[] = [];
-  private lastEditMs = 0;
-  private lastSampleMs = 0;
-  private paused = false;
+  private signals = EditorTracker.emptySignals();
+  private lastScrollMs = -Infinity; // so the first scroll always starts a burst
+
+  private static emptySignals(): EditorSignals {
+    return { scrollEvents: 0, navigations: 0, filesCreated: 0, filesDeleted: 0, created: new Set() };
+  }
 
   private static empty(): EditorAnalyticsSnapshot {
     return {
@@ -66,8 +91,6 @@ export class EditorTracker {
       saveCount: 0,
       fileSwitches: 0,
       uniqueFiles: 0,
-      readMs: 0,
-      writeMs: 0,
       largeInsertCount: 0,
       largeInsertChars: 0,
     };
@@ -76,41 +99,45 @@ export class EditorTracker {
   public start(context: vscode.ExtensionContext): void {
     this.subscriptions.push(
       vscode.workspace.onDidChangeTextDocument((event) => {
+        // Text written to the Output panel used to count as typing (L-19).
+        if (!isUserDocument(event.document)) return;
+        const name = baseName(event.document?.fileName);
         for (const change of event.contentChanges || []) {
-          this.recordChange(change as ChangeLike, (event as any).reason);
+          this.recordChange(change as ChangeLike, (event as any).reason, undefined, name);
         }
       }),
-      vscode.workspace.onDidSaveTextDocument(() => this.recordSave()),
+      vscode.workspace.onDidSaveTextDocument((doc) => { if (isUserDocument(doc)) this.recordSave(); }),
       vscode.window.onDidChangeActiveTextEditor((editor) => {
-        if (editor?.document?.fileName) {
+        if (editor?.document?.fileName && isUserDocument(editor.document)) {
           this.recordFileSwitch(editor.document.fileName);
         }
+      }),
+      vscode.window.onDidChangeTextEditorSelection((e) => {
+        if (isUserDocument(e.textEditor?.document)) this.recordSelection((e as any).kind);
       })
     );
-
-    this.lastSampleMs = Date.now();
-    this.sampler = setInterval(() => {
-      // Only attribute attention while the window actually has focus.
-      if (vscode.window.state?.focused !== false) {
-        this.sampleAttention(Date.now());
-      } else {
-        this.lastSampleMs = Date.now();
-      }
-    }, ATTENTION_SAMPLE_MS);
+    // Newer APIs: guarded so an older VS Code still activates.
+    if (typeof vscode.window.onDidChangeTextEditorVisibleRanges === "function") {
+      this.subscriptions.push(vscode.window.onDidChangeTextEditorVisibleRanges((e) => {
+        if (isUserDocument(e.textEditor?.document)) this.recordScroll(Date.now());
+      }));
+    }
+    if (typeof vscode.workspace.onDidCreateFiles === "function") {
+      this.subscriptions.push(
+        vscode.workspace.onDidCreateFiles((e) => this.recordCreated((e.files || []).map((u) => u.fsPath || u.path))),
+        vscode.workspace.onDidDeleteFiles((e) => { this.signals.filesDeleted += (e.files || []).length; })
+      );
+    }
 
     context.subscriptions.push(...this.subscriptions);
   }
 
   public stop(): void {
-    if (this.sampler) {
-      clearInterval(this.sampler);
-      this.sampler = undefined;
-    }
     this.subscriptions.forEach((s) => s.dispose());
     this.subscriptions = [];
   }
 
-  public recordChange(change: ChangeLike, reason?: number, nowMs?: number): void {
+  public recordChange(change: ChangeLike, reason?: number, nowMs?: number, fileName?: string): void {
     const now = nowMs ?? Date.now();
     const text = change.text || "";
     const removedChars = Number(change.rangeLength) || 0;
@@ -129,6 +156,7 @@ export class EditorTracker {
       }
       if (insertedLines > 0) {
         this.recentInserts.push({ atMs: now, lines: insertedLines });
+        if (fileName) this.lineCounts(fileName).linesInserted += insertedLines;
       }
     }
 
@@ -141,10 +169,22 @@ export class EditorTracker {
           ? change.range.end.line - change.range.start.line
           : 0;
       this.counters.linesDeleted += removedLines;
-      if (removedLines > 0) this.consumeChurn(removedLines, now);
+      if (removedLines > 0) {
+        this.consumeChurn(removedLines, now);
+        if (fileName) this.lineCounts(fileName).linesDeleted += removedLines;
+      }
     }
+  }
 
-    this.lastEditMs = now;
+  private lineCounts(fileName: string) {
+    let c = this.fileLines.get(fileName);
+    if (!c) { c = { linesInserted: 0, linesDeleted: 0 }; this.fileLines.set(fileName, c); }
+    return c;
+  }
+
+  /** Per-file line counts of this interval (a copy). */
+  public getFileLines(): FileLines {
+    return new Map([...this.fileLines].map(([k, v]) => [k, { ...v }]));
   }
 
   /** Attribute deleted lines against still-fresh insertions. */
@@ -164,6 +204,27 @@ export class EditorTracker {
     }
   }
 
+  /** Scrolling: one count per burst. */
+  public recordScroll(nowMs: number): void {
+    if (nowMs - this.lastScrollMs > SCROLL_BURST_MS) this.signals.scrollEvents += 1;
+    this.lastScrollMs = nowMs;
+  }
+
+  /** A selection change made by a command (Go to Definition, Find, Peek…) is a navigation. */
+  public recordSelection(kind?: number): void {
+    if (kind === SELECTION_BY_COMMAND) this.signals.navigations += 1;
+  }
+
+  public recordCreated(paths: string[]): void {
+    this.signals.filesCreated += paths.length;
+    for (const p of paths) { const n = baseName(p); if (n) this.signals.created.add(n); }
+  }
+
+  /** Reading and file signals of this interval (a copy). Read before consumeInterval(). */
+  public getSignals(): EditorSignals {
+    return { ...this.signals, created: new Set(this.signals.created) };
+  }
+
   public recordSave(): void {
     this.counters.saveCount += 1;
   }
@@ -171,36 +232,6 @@ export class EditorTracker {
   public recordFileSwitch(fileName: string): void {
     this.counters.fileSwitches += 1;
     this.files.add(fileName);
-  }
-
-  /**
-   * Idle-pause gate. The attention sampler runs on its own interval, so an
-   * unattended-but-focused window used to bank the whole idle gap as `readMs`,
-   * skewing comprehensionLoad. While paused we advance the clock and bank
-   * nothing.
-   */
-  public setPaused(paused: boolean, nowMs: number = Date.now()): void {
-    if (paused === this.paused) return;
-    this.sampleAttention(nowMs); // bank real time up to the pause boundary
-    this.paused = paused;
-    this.lastSampleMs = nowMs;
-  }
-
-  public isPaused(): boolean {
-    return this.paused;
-  }
-
-  /** Called on a fixed interval; splits elapsed time into read vs write. */
-  public sampleAttention(nowMs: number): void {
-    const elapsed = nowMs - this.lastSampleMs;
-    this.lastSampleMs = nowMs;
-    if (elapsed <= 0 || this.paused) return;
-
-    if (this.lastEditMs > nowMs - elapsed) {
-      this.counters.writeMs += elapsed;
-    } else {
-      this.counters.readMs += elapsed;
-    }
   }
 
   public getIntervalSnapshot(): EditorAnalyticsSnapshot {
@@ -211,9 +242,15 @@ export class EditorTracker {
     const snapshot = this.getIntervalSnapshot();
     this.counters = EditorTracker.empty();
     this.files.clear();
+    this.fileLines = new Map();
+    this.signals = EditorTracker.emptySignals();
     this.recentInserts = [];
     return snapshot;
   }
+}
+
+function baseName(fileName?: string): string | undefined {
+  return fileName ? fileName.split(/[\\/]/).pop() : undefined; // Windows "\" and POSIX "/"
 }
 
 export function createEditorTracker(): EditorTracker {

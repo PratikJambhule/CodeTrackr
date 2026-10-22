@@ -53,6 +53,11 @@ const SESSION_PROJECTION = {
     'terminalAnalytics.terminalErrorCount': 1, 'terminalAnalytics.buildRuns': 1,
     'terminalAnalytics.failedBuilds': 1, 'terminalAnalytics.testRuns': 1,
     'terminalAnalytics.debuggingSessions': 1,
+    // work-type features and extension 2.6.0 fields
+    fileName: 1, files: 1, 'editorAnalytics.charsInserted': 1, 'editorAnalytics.largeInsertChars': 1,
+    'terminalAnalytics.commandUsage': 1, 'terminalAnalytics.commandKinds': 1,
+    writingSec: 1, readingSec: 1, runningSec: 1, fileTime: 1, runs: 1, debug: 1, reading: 1,
+    filesCreated: 1, filesDeleted: 1, workspace: 1, modeSec: 1,
 };
 
 /** 'YYYY-MM-DD' for an instant shifted into the user's local day. */
@@ -272,6 +277,9 @@ async function buildMetrics(
             languages: s.languages,
             deepBlockCount: s.deepBlockCount,
             commits: s.commits,
+            workType: s.workType,
+            pickerLabel: s.pickerLabel,
+            writingSec: s.writingSec, readingSec: s.readingSec, runningSec: s.runningSec,
         })),
         // --- flat scalars: unchanged API surface ---
         deepWorkRatio: deepWorkRatio(flowBlocksMs),
@@ -369,4 +377,4 @@ async function buildGoalPairs(userId, userIdStr) {
     return pairs;
 }
 
-module.exports = { buildMetrics, buildGoalPairs };
+module.exports = { buildMetrics, buildGoalPairs, SESSION_PROJECTION };

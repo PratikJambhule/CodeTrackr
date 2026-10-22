@@ -52,11 +52,25 @@ function spreadAcrossWindows(startMs, seconds, nowMs = Date.now(), bucketMs = BU
   return out;
 }
 
-/** Seconds of an upload that window-focus time can vouch for. */
-function corroboratedSeconds(duration, focusAnalytics) {
+// Background running allowance (user decision 2026-10-22): a build, test or program running while
+// VS Code is in the background counts, up to 10 minutes per 10-minute window the upload covers, and
+// only when the upload shows that a command, task or debug session really ran. The window cap
+// (WINDOW_CAP_SECONDS) still applies afterwards, so credit never runs faster than a clock.
+const RUNNING_ALLOWANCE_PER_WINDOW = 600;
+
+/**
+ * Seconds of an upload that window-focus time (plus a grace, plus real running time) can vouch for.
+ * @param running  { runningSec, ranSomething } from payload v3; omitted for older extensions.
+ */
+function corroboratedSeconds(duration, focusAnalytics, running = {}) {
   const d = Math.max(0, Number(duration) || 0);
   const focusedSec = Math.max(0, Number(focusAnalytics && focusAnalytics.focusedMs) || 0) / 1000;
-  return Math.min(d, Math.round(focusedSec) + FOCUS_GRACE_SECONDS);
+  const runningSec = Number(running.runningSec);
+  const windows = Math.max(1, Math.ceil(d / (BUCKET_MS / 1000)));
+  const allowance = running.ranSomething && Number.isFinite(runningSec) && runningSec > 0
+    ? Math.min(runningSec, RUNNING_ALLOWANCE_PER_WINDOW * windows)
+    : 0;
+  return Math.min(d, Math.round(focusedSec) + FOCUS_GRACE_SECONDS + Math.round(allowance));
 }
 
 /**
@@ -70,5 +84,5 @@ function creditFromCounter(added, totalAfter, cap = WINDOW_CAP_SECONDS) {
 
 module.exports = {
   spreadAcrossWindows, corroboratedSeconds, creditFromCounter,
-  WINDOW_CAP_SECONDS, FOCUS_GRACE_SECONDS,
+  WINDOW_CAP_SECONDS, FOCUS_GRACE_SECONDS, RUNNING_ALLOWANCE_PER_WINDOW,
 };

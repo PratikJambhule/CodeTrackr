@@ -41,6 +41,17 @@ export function int(n: number): string {
   return Math.round(Number(n) || 0).toLocaleString('en-IN');
 }
 
+const COMMAND_KIND_LABELS: Record<string, string> = {
+  compile: 'Compiling', build: 'Builds', test: 'Tests', run: 'Running programs',
+  install: 'Installing packages', git: 'Git', docker: 'Docker', other: 'Other commands',
+};
+
+/** A command kind as the server stores it ("compile") in plain words. Command text is never stored. */
+export function commandKindLabel(kind: string): string {
+  if (!kind) return COMMAND_KIND_LABELS.other;
+  return COMMAND_KIND_LABELS[kind] ?? kind;
+}
+
 /** "Just now", "5m ago", "3h ago", "2d ago", then the date. */
 export function timeAgo(iso: string | number | Date, now = Date.now()): string {
   const seconds = Math.floor((now - new Date(iso).getTime()) / 1000);

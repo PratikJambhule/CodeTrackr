@@ -36,7 +36,9 @@ router.post('/run-notifications', requireCronSecret, async (req, res, next) => {
 router.post('/run-rollup', requireCronSecret, async (req, res, next) => {
   try {
     const r = await rollupDaily({ apply: true, beforeDays: 2 });
-    res.json({ ok: true, wrote: r && r.wrote });
+    // Also save settled coding sessions for the work-type model (ML plan B7). Idempotent.
+    const s = await require('../services/sessionSnapshot').snapshotAll();
+    res.json({ ok: true, wrote: r && r.wrote, sessions: s.sessions });
   } catch (err) {
     return next(err);
   }

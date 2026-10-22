@@ -69,6 +69,14 @@ check('metrics route takes no user id from the request', () => {
   assert.ok(/isAuthenticated/.test(src), 'metrics route is unguarded');
 });
 
+console.log('\nsessions route (labels)');
+check('sessions routes take no user id from the request and all require a login', () => {
+  const src = read('sessions.js');
+  assert.ok(!/req\.params/.test(src), 'sessions route reads req.params');
+  const unguarded = routeDeclarations(src).filter((r) => !/isAuthenticated/.test(r.rest));
+  assert.deepStrictEqual(unguarded, [], 'a sessions route is unguarded');
+});
+
 console.log('\ngoals (and the removed teams API)');
 check('every goals route requires authentication', () => {
   const unguarded = routeDeclarations(read('goals.js'))

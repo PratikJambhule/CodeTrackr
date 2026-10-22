@@ -1,11 +1,13 @@
 /**
- * Debug Session Tracker
- * Counts debug sessions, breakpoint changes and exceptions for the current
- * flush interval. The counts are folded into the terminalAnalytics payload
- * sent to /api/extension/track, so this data actually reaches the backend.
+ * Debug Session Tracker (plan E7)
  *
- * (Before 2.0.11 this fed the EventLogger/SyncService pipeline, which posted
- * to a route that does not exist — none of it was ever stored.)
+ * Counts REAL debugging for the current interval: debug sessions started with the debugger, how
+ * often execution stopped (breakpoint, exception) and how often you stepped (next / step in / out).
+ * "Run Without Debugging", which most ▶ Run buttons use, is a run, not debugging: RunsTracker counts
+ * it, and it is not counted here (before 2.6.0 it was, so running a DSA file looked like debugging).
+ *
+ * Stops and steps come from a debug adapter tracker, which sees the messages between VS Code and the
+ * debugger. Only the message type is read: no variables, values or source.
  */
 
 import * as vscode from "vscode";
@@ -13,17 +15,24 @@ import * as vscode from "vscode";
 interface DebugSessionState {
   sessionId: string;
   startTime: number;
-  breakpointHitCount: number;
-  exceptionCount: number;
-  configuration: string;
-  workspaceFolder: string;
 }
 
 export interface DebugIntervalSnapshot {
+  /** Debug sessions started with the debugger (Run Without Debugging excluded). */
   debugSessions: number;
-  breakpointHits: number;
-  exceptions: number;
+  /** Times execution stopped at a breakpoint or an exception. */
+  breakpointStops: number;
+  /** Step over / into / out / back requests. */
+  steps: number;
   totalDebugMs: number;
+}
+
+const STOP_REASONS = new Set(["breakpoint", "exception", "function breakpoint", "data breakpoint", "instruction breakpoint"]);
+const STEP_COMMANDS = new Set(["next", "stepIn", "stepOut", "stepBack"]);
+
+/** True for "Run Without Debugging" (Ctrl+F5, and most ▶ Run buttons). */
+export function isNoDebug(session?: { configuration?: { [key: string]: any } }): boolean {
+  return session?.configuration?.noDebug === true;
 }
 
 export class DebugTracker {
@@ -32,16 +41,24 @@ export class DebugTracker {
   private interval: DebugIntervalSnapshot = DebugTracker.empty();
 
   private static empty(): DebugIntervalSnapshot {
-    return { debugSessions: 0, breakpointHits: 0, exceptions: 0, totalDebugMs: 0 };
+    return { debugSessions: 0, breakpointStops: 0, steps: 0, totalDebugMs: 0 };
   }
 
   public start(context: vscode.ExtensionContext): void {
     this.subscriptions.push(
       vscode.debug.onDidStartDebugSession((session) => this.onSessionStart(session)),
-      vscode.debug.onDidTerminateDebugSession((session) => this.onSessionEnd(session)),
-      vscode.debug.onDidChangeBreakpoints((event) => this.onBreakpointChange(event))
+      vscode.debug.onDidTerminateDebugSession((session) => this.onSessionEnd(session))
     );
-
+    if (typeof vscode.debug.registerDebugAdapterTrackerFactory === "function") {
+      this.subscriptions.push(
+        vscode.debug.registerDebugAdapterTrackerFactory("*", {
+          createDebugAdapterTracker: (session) => (isNoDebug(session) ? undefined : {
+            onDidSendMessage: (message: any) => this.onAdapterMessage(message),
+            onWillReceiveMessage: (message: any) => this.onClientMessage(message),
+          }),
+        })
+      );
+    }
     context.subscriptions.push(...this.subscriptions);
     console.log("Debug tracker started");
   }
@@ -49,6 +66,20 @@ export class DebugTracker {
   public stop(): void {
     this.subscriptions.forEach((sub) => sub.dispose());
     this.subscriptions = [];
+  }
+
+  /** A message from the debugger to VS Code: "stopped" events count as stops. Exposed for tests. */
+  public onAdapterMessage(message: any): void {
+    if (message?.type === "event" && message.event === "stopped" && STOP_REASONS.has(message.body?.reason)) {
+      this.interval.breakpointStops += 1;
+    }
+  }
+
+  /** A request from VS Code to the debugger: step requests count as steps. Exposed for tests. */
+  public onClientMessage(message: any): void {
+    if (message?.type === "request" && STEP_COMMANDS.has(message.command)) {
+      this.interval.steps += 1;
+    }
   }
 
   /** Returns the counts for this interval and resets them. */
@@ -62,45 +93,17 @@ export class DebugTracker {
     return { ...this.interval };
   }
 
-  private onSessionStart(session: vscode.DebugSession): void {
-    this.activeSessions.set(session.id, {
-      sessionId: session.id,
-      startTime: Date.now(),
-      breakpointHitCount: 0,
-      exceptionCount: 0,
-      configuration: session.configuration.name || "unknown",
-      workspaceFolder: session.workspaceFolder?.name || "unknown"
-    });
-
+  public onSessionStart(session: vscode.DebugSession): void {
+    if (isNoDebug(session)) return; // a run, not debugging
+    this.activeSessions.set(session.id, { sessionId: session.id, startTime: Date.now() });
     this.interval.debugSessions += 1;
-    console.log(`Debug session started: ${session.id}`);
   }
 
-  private onSessionEnd(session: vscode.DebugSession): void {
+  public onSessionEnd(session: vscode.DebugSession): void {
     const sessionState = this.activeSessions.get(session.id);
     if (!sessionState) return;
-
-    const duration = Date.now() - sessionState.startTime;
-    this.interval.totalDebugMs += duration;
+    this.interval.totalDebugMs += Date.now() - sessionState.startTime;
     this.activeSessions.delete(session.id);
-    console.log(`Debug session ended: ${session.id} (${(duration / 1000).toFixed(1)}s)`);
-  }
-
-  private onBreakpointChange(event: vscode.BreakpointsChangeEvent): void {
-    if (this.activeSessions.size === 0) return;
-
-    this.interval.breakpointHits += event.added.length;
-    this.activeSessions.forEach((state) => {
-      state.breakpointHitCount += event.added.length;
-    });
-  }
-
-  public logException(sessionId: string): void {
-    const sessionState = this.activeSessions.get(sessionId);
-    if (sessionState) {
-      sessionState.exceptionCount += 1;
-    }
-    this.interval.exceptions += 1;
   }
 
   public getActiveSessions(): DebugSessionState[] {
