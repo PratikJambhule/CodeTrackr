@@ -29,6 +29,16 @@ each other week by week.
 - **What kind of work.** Each coding session is shown as DSA, Project work or Learning & setup, with a
   one-tap ✓ / Change. You can also pick the kind in VS Code's status bar. Your answers are private and
   are what a future model would learn from.
+- **Analytics per kind of work.** Insights has a tab for each kind, because each cares about
+  different things:
+  - **DSA:** problems worked on and time on each, compile-and-run loops, failed compiles, days
+    practised.
+  - **Project work:** time per project, commits, files, debugging time and breakpoint stops,
+    failed builds and tests.
+  - **Learning & setup:** reading and docs time, repos explored, installs that failed, config files,
+    and a warning when setup takes a quarter of your coding time.
+
+  Each tab says how many sessions you confirmed; the rest are CodeTrackr's guess.
 - **One-click sign-in for VS Code.** *CodeTrackr: Sign In* shows a code; approve it on the website
   and that computer gets its own revocable key, stored in the OS keychain.
 
@@ -142,8 +152,8 @@ cd extension && npm test
 cd frontend && npm run lint && npm test && npm run build
 ```
 
-475 backend unit assertions, 60 API integration tests (the real Express app over HTTP against an
-in-memory MongoDB), 135 extension assertions and 62 frontend tests. Frontend tests run in the India
+501 backend unit assertions, 62 API integration tests (the real Express app over HTTP against an
+in-memory MongoDB), 135 extension assertions and 63 frontend tests. Frontend tests run in the India
 time zone, where the date bugs showed up. CI runs all of them, plus a Docker build with a health
 check, on every push.
 
@@ -153,7 +163,10 @@ check, on every push.
 learning or setup from 18 features the extension already collects. There are not enough real
 labelled sessions yet, so the current model is trained on a **generated** dataset
 (`node ml/generate_synthetic.js`, then `python ml/train_work_type.py`). Its scores describe that
-generated data, not real users, and the API does not serve it. See [`ml/README.md`](ml/README.md).
+generated data, not real users. The API runs it in **shadow mode**: it guesses every session from
+extension 2.6.0 and saves the guess without showing it, so people's own answers can score it against
+the rules (`node scripts/shadow-report.js`). People keep seeing the rules' guess until the model
+wins on real answers. See [`ml/README.md`](ml/README.md).
 
 ## Project structure
 

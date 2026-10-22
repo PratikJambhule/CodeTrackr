@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { WorkSession } from '../types';
-import { groupMinutes, groupOf, knownType, sessionState, toLabel } from './workTypes';
+import { biggestGroup, groupMinutes, groupOf, knownType, sessionState, toLabel } from './workTypes';
 
 const base: WorkSession = {
   startAt: '2026-10-21T09:00:00.000Z', endAt: '2026-10-21T10:00:00.000Z', minutes: 60,
@@ -57,5 +57,14 @@ describe('work types (3 groups shown, 5 kept)', () => {
       s({ startAt: '2026-10-21T15:00:00Z', prompt: 'none' }),
     ], 7, now);
     expect(list.map((x) => x.startAt)).toEqual(['2026-10-21T09:00:00Z', '2026-10-20T09:00:00Z']);
+  });
+
+  it('opens the tab with the most minutes, DSA when tied or empty', () => {
+    const m = (dsa: number, project_work: number, learning_setup: number) =>
+      ({ dsa: { minutes: dsa }, project_work: { minutes: project_work }, learning_setup: { minutes: learning_setup } });
+    expect(biggestGroup(m(10, 90, 30))).toBe('project_work');
+    expect(biggestGroup(m(0, 0, 5))).toBe('learning_setup');
+    expect(biggestGroup(m(0, 0, 0))).toBe('dsa');
+    expect(biggestGroup(m(40, 40, 0))).toBe('dsa');
   });
 });

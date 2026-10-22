@@ -68,3 +68,11 @@ export function toLabel(sessions: WorkSession[], days = 7, now = Date.now()): Wo
   const since = now - days * 864e5;
   return sessions.filter((s) => Date.parse(s.startAt) >= since && (sessionState(s) === 'guess' || sessionState(s) === 'blind'));
 }
+
+/** Setup above this share of all coding time gets a gentle warning on the Learning & setup tab. */
+export const SETUP_WARN_SHARE = 0.25;
+
+/** The tab to open first: the kind of work with the most minutes (DSA on a tie or when empty). */
+export function biggestGroup(groups: Record<WorkGroupId, { minutes: number }>): WorkGroupId {
+  return WORK_GROUPS.reduce<WorkGroupId>((best, g) => (groups[g.id].minutes > groups[best].minutes ? g.id : best), 'dsa');
+}

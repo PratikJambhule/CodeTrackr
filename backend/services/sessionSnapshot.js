@@ -3,7 +3,8 @@
 /**
  * Saving coding sessions and their labels (ML plan slice 1a, tasks B7 + B8; label priority M4).
  *
- *   sessionFields(session)        pure: the stored copy of a sessionize() session
+ *   sessionFields(session)        the stored copy of a sessionize() session, with the model's
+ *                                 shadow guess (D-56)
  *   promptFor(userId, startMs)    pure: 'blind' for 1 in 5 sessions, fixed per session
  *   trainingLabel(doc)            pure: the label to train on, by priority picker > blind > shown
  *   sessionsFor(userId, range)    reads a user's buckets and returns sessionize() sessions
@@ -17,6 +18,7 @@ const Session = require('../models/Session');
 const { sessionize } = require('./sessionize');
 const { SESSION_PROJECTION } = require('./metricsService');
 const { matchActivityUser } = require('./activityUser');
+const { shadowGuess } = require('./workTypeModel');
 
 const DAY_MS = 24 * 3600 * 1000;
 const SETTLE_MS = DAY_MS;      // a session is saved once it ended more than 24 h ago
@@ -36,6 +38,7 @@ function sessionFields(s) {
         features: s.workFeatures,
         workType: s.workType,
         pickerLabel: s.pickerLabel || null,
+        modelGuess: shadowGuess(s), // shadow mode (D-56): saved, never shown
     };
 }
 

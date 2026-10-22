@@ -64,6 +64,11 @@ function isProblemFile(name) {
   return tokens.some((t) => DSA_WORDS.has(t)) && tokens.length <= 6;
 }
 
+/** A source-code file by its extension (.cpp, .py, .ts, ...). */
+function isCodeFile(name) {
+  return CODE_EXT.has(splitName(name).ext);
+}
+
 function isConfigFile(name) {
   const { base, ext } = splitName(name);
   const lower = base.toLowerCase();
@@ -96,4 +101,4 @@ function fileNameHints(files = [], projects = []) {
   };
 }
 
-module.exports = { fileNameHints, isProblemFile, isConfigFile, isPracticeFolder };
+module.exports = { fileNameHints, isProblemFile, isConfigFile, isCodeFile, isPracticeFolder };

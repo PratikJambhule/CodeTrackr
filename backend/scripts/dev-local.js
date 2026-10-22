@@ -33,17 +33,48 @@ const pick = (weighted) => {
   return weighted[0][0];
 };
 
+// A second generator for the 2.6.0 signals, so adding them did not change the older demo numbers.
+let seed2 = 20261022;
+const rnd2 = () => { seed2 = (seed2 * 1103515245 + 12345) % 2147483648; return seed2 / 2147483648; };
+const upTo = (n) => Math.floor(rnd2() * (n + 1));
+const PROBLEMS = ['two_sum.py', 'lru_cache.py', 'merge_intervals.py', 'valid_parentheses.cpp', 'dijkstra.cpp', 'knapsack.py'];
+
+/** The 2.6.0 counts for one bucket of a given kind of work (D-55 demo: every Insights tab has data). */
+function signals(kind) {
+  if (kind === 'dsa') {
+    const compile = upTo(3);
+    return { kinds: { compile, run: 1 + upTo(3), failed: { compile: Math.min(compile, upTo(2)), run: upTo(1) } },
+      runs: { codeRunner: upTo(2) }, workspace: { sourceFilesBucket: '6-20', hasGit: false, hasPackageJson: false } };
+  }
+  if (kind === 'learning') {
+    return { kinds: { run: upTo(1) }, reading: { navigations: 5 + upTo(10), scrollEvents: 20 + upTo(30), filesOpenedNotEdited: 1 + upTo(3) },
+      workspace: { clonedRecently: true, ownCommits: false, hasGit: true, hasPackageJson: true, sourceFilesBucket: '21-100' } };
+  }
+  if (kind === 'setup') {
+    return { kinds: { install: 2 + upTo(3), docker: upTo(1), run: upTo(1), failed: { install: upTo(1) } },
+      workspace: { hasPackageJson: true, hasGit: true, ownCommits: true, sourceFilesBucket: '101-500' } };
+  }
+  const debugging = rnd2() < 0.15;
+  return { kinds: { run: upTo(2), build: upTo(1), test: upTo(2), git: upTo(2), failed: { build: upTo(1) ? 0 : upTo(1), test: upTo(1) } },
+    runs: { task: upTo(1), debugNoDebug: upTo(1) },
+    debug: debugging ? { sessions: 1, breakpointStops: 2 + upTo(6), steps: 5 + upTo(25) } : undefined,
+    reading: { navigations: upTo(6), scrollEvents: upTo(20) },
+    workspace: { hasPackageJson: true, hasGit: true, ownCommits: true, sourceFilesBucket: '101-500' } };
+}
+const KIND_OF_PROJECT = { 'dsa-sheet': 'dsa', 'react-tutorial': 'learning' };
+
 const PROJECTS = {
   codetrackr: [['typescript', 7], ['javascript', 2], ['json', 1]],
   'dsa-sheet': [['python', 6], ['cpp', 4]],
   'os-assignment': [['c', 8], ['makefile', 2]],
   portfolio: [['typescriptreact', 6], ['css', 4]],
+  'react-tutorial': [['javascript', 1]],
 };
 const SECOND_FILES = { typescript: 'api.ts', javascript: 'utils.js', python: 'two_sum.py', cpp: 'graph.cpp', c: 'parser.c', typescriptreact: 'Navbar.tsx', css: 'theme.css' };
 const FILES = { typescript: 'app.ts', javascript: 'index.js', json: 'package.json', python: 'solution.py', cpp: 'main.cpp', c: 'shell.c', makefile: 'Makefile', typescriptreact: 'App.tsx', css: 'styles.css' };
 
 /** Activity buckets for one coding session starting at `start` (ms, on the 10-min grid). */
-function session(userId, start, minutes, project, now) {
+function session(userId, start, minutes, project, now, kind = KIND_OF_PROJECT[project] || 'project') {
   const docs = [];
   for (let t = start, left = minutes; left > 0 && t < now - TEN_MIN; t += TEN_MIN, left -= 10) {
     const language = pick(PROJECTS[project]);
@@ -83,7 +114,28 @@ function session(userId, start, minutes, project, now) {
         },
       });
       if (project === 'dsa-sheet' && rnd() < 0.6) doc.modeSec = { dsa: duration };
+      const sig = signals(kind);
+      doc.terminalAnalytics.commandKinds = sig.kinds;
+      Object.assign(doc, { runs: sig.runs, debug: sig.debug, reading: sig.reading, workspace: sig.workspace });
+      if (kind === 'dsa') {
+        // practice files named like problems, so the DSA tab lists them
+        const problem = PROBLEMS[upTo(PROBLEMS.length - 1)];
+        doc.fileName = problem;
+        doc.files = [problem];
+        doc.fileTime = { [encodeFileKey(problem)]: { seconds: duration, writing, reading, running, language } };
+      } else if (kind === 'learning' || kind === 'setup') {
+        // mostly reading or installing: little new code
+        const files = kind === 'learning' ? ['README.md', 'App.jsx'] : ['package.json', '.env', 'vite.config.ts'];
+        const read = Math.round(duration * 0.75);
+        Object.assign(doc, { linesAdded: upTo(6), linesRemoved: upTo(2), fileName: files[0], files,
+          writingSec: duration - read - 30, readingSec: read, runningSec: 30,
+          fileTime: { [encodeFileKey(files[0])]: { seconds: read, writing: 0, reading: read, running: 0, language },
+            [encodeFileKey(files[1])]: { seconds: duration - read, writing: duration - read - 30, reading: 0, running: 30, language } } });
+        doc.editorAnalytics.charsInserted = upTo(120);
+      }
     }
+    // Real uploads carry line counts in editorAnalytics too; sessions and Insights read them there.
+    Object.assign(doc.editorAnalytics, { linesInserted: doc.linesAdded, linesDeleted: doc.linesRemoved });
     docs.push(doc);
   }
   return docs;
@@ -153,6 +205,11 @@ function history(userId, days, now, { codeChance, evening = 0.7, intensity = 1 }
   for (const [name, chance] of Object.entries(profiles)) {
     docs.push(...history(friends[name]._id, 21, now, { codeChance: chance, evening: 0.6, intensity: 0.9 + rnd() * 0.5 }));
   }
+  // A few afternoon (14:30 IST) learning and setup sessions in the last two weeks, so the
+  // Learning & setup tab on Insights has data. Added last, so the older demo numbers stay the same.
+  const afternoon = (d) => Math.floor(now / DAY) * DAY - d * DAY + 9 * 3600e3;
+  for (const d of [2, 5, 9]) docs.push(...session(me._id, afternoon(d), 50, 'react-tutorial', now, 'learning'));
+  for (const d of [3, 11]) docs.push(...session(me._id, afternoon(d), 40, 'portfolio', now, 'setup'));
   // De-duplicate (user, project, language, bucket) so the unique bucket index accepts every row.
   const seen = new Set();
   const unique = docs.filter((d) => {

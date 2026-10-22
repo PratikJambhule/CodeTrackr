@@ -199,6 +199,42 @@ export interface WorkSession {
   userLabel: { type: string; group: string | null; source: 'blind' | 'shown' } | null;
 }
 
+/** One Insights tab's shared numbers (GET /api/sessions/by-type, decision D-55). */
+export interface TypeTabBase {
+  sessions: number;
+  /** answered on Insights or picked in VS Code; the rest are the rules' guess */
+  confirmed: number;
+  minutes: number;
+  /** sessions from extension 2.6.0, which carry the detailed counts */
+  detailSessions: number;
+  split: { writingSec: number; readingSec: number; runningSec: number };
+}
+export interface NamedSeconds { name: string; seconds: number }
+
+export interface TypeAnalytics {
+  days: number;
+  totalMinutes: number;
+  /** asked blind and not answered yet, so not counted anywhere */
+  waiting: number;
+  /** "not sure" or too short */
+  unsorted: number;
+  groups: {
+    dsa: TypeTabBase & {
+      problems: NamedSeconds[]; problemCount: number; compiles: number; failedCompiles: number; runs: number;
+      runsPerProblem: number; activeDays: number; languages: { name: string; sessions: number }[];
+    };
+    project_work: TypeTabBase & {
+      projects: { name: string; minutes: number }[]; commits: number; commitsPerHour: number; linesWritten: number;
+      topFiles: NamedSeconds[]; debugging: { minutes: number; sessions: number; breakpointStops: number; steps: number };
+      builds: number; failedBuilds: number; tests: number; failedTests: number; runs: number;
+    };
+    learning_setup: TypeTabBase & {
+      learningMinutes: number; setupMinutes: number; docSec: number; navigations: number; filesOpenedNotEdited: number;
+      clonedRepos: string[]; installs: number; failedInstalls: number; configFiles: string[]; setupShare: number;
+    };
+  };
+}
+
 export interface Metrics {
   windowDays: number;
   deepWorkRatio: number;

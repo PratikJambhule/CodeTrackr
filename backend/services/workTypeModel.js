@@ -15,7 +15,7 @@
 const fs = require('fs');
 const path = require('path');
 const { FEATURES_BY_VERSION } = require('./workTypeFeatures');
-const { NOT_SURE } = require('./workType');
+const { NOT_SURE, groupOf } = require('./workType');
 
 const MODEL_PATH = path.join(__dirname, '..', 'ml', 'workTypeModel.json');
 
@@ -69,4 +69,23 @@ function predict(model, vector) {
   };
 }
 
-module.exports = { loadModel, isServable, predict, MODEL_PATH };
+let cached;
+/** The model file, read once per process (null when there is none). */
+function currentModel() {
+  if (cached === undefined) cached = loadModel();
+  return cached;
+}
+
+/**
+ * Shadow mode (decision D-56): the model's guess for a sessionize() session, saved next to the rules'
+ * guess but never shown, so blind and picker answers can score both on real data. Null when there is
+ * no model or the session's features are another version (sessions before 2.6.0 are version 2).
+ */
+function shadowGuess(session, model = currentModel()) {
+  if (!model || !session || session.featureVersion !== model.featureVersion || !session.workFeatures) return null;
+  const r = predict(model, model.features.map((f) => session.workFeatures[f]));
+  return { type: r.workType, group: groupOf(r.workType), probability: Math.round(r.probability * 1000) / 1000,
+    because: r.because, modelVersion: model.version };
+}
+
+module.exports = { loadModel, isServable, predict, shadowGuess, MODEL_PATH };

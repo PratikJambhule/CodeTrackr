@@ -334,6 +334,75 @@ async function main() {
       assert.strictEqual(anon.status, 401);
     }],
 
+    ['shadow mode: a labelled 2.6.0 session is saved with the model guess; the report scores it, read-only', async () => {
+      const me = await h.makeUser();
+      const { promptFor } = require('../../services/sessionSnapshot');
+      const uid = String(me.user._id);
+      const starts = [];
+      for (let k = 2; k <= 30; k++) starts.push(Math.floor((Date.now() - k * 3600e3) / 600000) * 600000);
+      const blindAt = starts.find((s) => promptFor(uid, s) === 'blind');
+      await request(app).post('/api/extension/track').set('x-api-key', me.apiKey).send(flush({ duration: 480,
+        timestamp: new Date(blindAt + 30000).toISOString(), focusAnalytics: { focusedMs: 480000 },
+        editorAnalytics: { charsInserted: 1500, linesInserted: 50, linesDeleted: 5, saveCount: 3 },
+        terminalAnalytics: { totalCommands: 8, failedCommands: 3, commandKinds: { compile: 5, run: 3, failed: { compile: 3 } } },
+        payloadVersion: 3, writingSec: 300, readingSec: 120, runningSec: 60,
+        perFile: [{ name: 'two_sum.cpp', language: 'cpp', seconds: 480, writing: 300, reading: 120, running: 60, linesInserted: 50, linesDeleted: 5, edited: true }],
+      })).expect(201);
+      const shown = await request(app).get('/api/sessions?days=2').set('Cookie', me.cookie);
+      const mine = shown.body.sessions.find((x) => Date.parse(x.startAt) === blindAt);
+      assert.strictEqual(mine.workType, null, 'still blind: no guess shown');
+      assert.ok(!('modelGuess' in mine), 'the model guess is never sent to the website');
+      await request(app).put('/api/sessions/label').set('Cookie', me.cookie)
+        .send({ startAt: new Date(blindAt).toISOString(), workType: 'dsa' }).expect(200);
+
+      const Session = require('../../models/Session');
+      const saved = await Session.findOne({ userId: me.user._id }).lean();
+      const model = require('../../ml/workTypeModel.json');
+      assert.ok(saved.modelGuess && saved.modelGuess.type, 'model guess saved');
+      assert.strictEqual(saved.modelGuess.modelVersion, model.version);
+      assert.ok(saved.workType.type, 'the rules guess is saved too');
+
+      const { execFileSync } = require('child_process');
+      const path = require('path');
+      const before = await Session.countDocuments();
+      const out = JSON.parse(execFileSync(process.execPath, [path.join(__dirname, '..', '..', 'scripts', 'shadow-report.js'), '--json'],
+        { env: process.env, encoding: 'utf8' }));
+      assert.strictEqual(out.labels, 1);
+      assert.strictEqual(out.verdict, 'not_enough_labels');
+      assert.deepStrictEqual(out.modelVersions, [model.version]);
+      assert.strictEqual(await Session.countDocuments(), before, 'the report writes nothing');
+    }],
+
+    ['sessions/by-type: a labelled DSA session fills the DSA tab with its problems and compiles; only your own', async () => {
+      const me = await h.makeUser();
+      const other = await h.makeUser('Other');
+      const s = Math.floor((Date.now() - 6 * 3600e3) / 600000) * 600000;
+      await request(app).post('/api/extension/track').set('x-api-key', me.apiKey).send(flush({ duration: 480,
+        timestamp: new Date(s + 30000).toISOString(), focusAnalytics: { focusedMs: 480000 },
+        editorAnalytics: { charsInserted: 1500, linesInserted: 50, linesDeleted: 5, saveCount: 3 },
+        terminalAnalytics: { totalCommands: 8, failedCommands: 3, commandKinds: { compile: 5, run: 3, failed: { compile: 3 } } },
+        payloadVersion: 3, writingSec: 300, readingSec: 120, runningSec: 60,
+        perFile: [{ name: 'two_sum.cpp', language: 'cpp', seconds: 480, writing: 300, reading: 120, running: 60, linesInserted: 50, linesDeleted: 5, edited: true }],
+      })).expect(201);
+      await request(app).put('/api/sessions/label').set('Cookie', me.cookie)
+        .send({ startAt: new Date(s).toISOString(), workType: 'dsa' }).expect(200);
+
+      const r = await request(app).get('/api/sessions/by-type?days=2&timezone=-330').set('Cookie', me.cookie);
+      assert.strictEqual(r.status, 200, JSON.stringify(r.body));
+      const d = r.body.groups.dsa;
+      assert.strictEqual(d.sessions, 1);
+      assert.strictEqual(d.confirmed, 1);
+      assert.strictEqual(d.detailSessions, 1);
+      assert.deepStrictEqual(d.problems, [{ name: 'two_sum.cpp', seconds: 480 }]);
+      assert.strictEqual(d.compiles, 5);
+      assert.strictEqual(d.failedCompiles, 3);
+      assert.strictEqual(r.body.groups.project_work.sessions, 0);
+
+      const theirs = await request(app).get('/api/sessions/by-type').set('Cookie', other.cookie);
+      assert.strictEqual(theirs.body.groups.dsa.sessions, 0);
+      assert.strictEqual((await request(app).get('/api/sessions/by-type')).status, 401);
+    }],
+
     ['sessions: the nightly snapshot saves settled sessions once, keeps labels, and uses the picker label', async () => {
       const me = await h.makeUser();
       const Session = require('../../models/Session');

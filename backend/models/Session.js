@@ -30,6 +30,14 @@ const sessionSchema = new mongoose.Schema({
     },
     // What the user confirmed in the status-bar picker for most of the session (strongest label).
     pickerLabel: { type: { type: String }, group: { type: String }, share: { type: Number } },
+    // Shadow mode (D-56): the model's guess, saved but never shown, to score it against the rules.
+    modelGuess: {
+        type: { type: String },
+        group: { type: String },
+        probability: { type: Number },
+        because: [String],
+        modelVersion: { type: String },
+    },
     // What the user said on the website. source 'blind' = asked without seeing a guess (the only
     // answers used to MEASURE accuracy); 'shown' = they confirmed or changed a guess they saw.
     userLabel: {

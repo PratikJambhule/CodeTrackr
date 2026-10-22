@@ -75,5 +75,39 @@ check('a missing model file means "no model", not a crash', () => {
   assert.strictEqual(loadModel(path.join(__dirname, 'no-such-model.json')), null);
 });
 
+console.log('\nshadow mode (D-56)');
+const { shadowGuess } = require('../services/workTypeModel');
+const { sessionFeaturesV3 } = require('../services/workTypeFeatures');
+const { WORK_TYPES, NOT_SURE, groupOf } = require('../services/workType');
+const v3 = (raw) => ({ featureVersion: 3, workFeatures: sessionFeaturesV3({ durationSec: 1800, writingSec: 900, readingSec: 600, runningSec: 300, ...raw }).features });
+
+check('a 2.6.0 session gets the model\'s guess: a type or "not sure", its probability, why, and the model version', () => {
+  const g = shadowGuess(v3({ linesInserted: 60, files: ['two_sum.cpp'], commandKinds: { compile: 10, run: 8 } }));
+  assert.ok(g, 'a guess for a v3 session');
+  assert.ok([...WORK_TYPES, NOT_SURE].includes(g.type), g.type);
+  assert.ok(g.probability > 0 && g.probability <= 1);
+  assert.strictEqual(g.because.length, 2);
+  assert.strictEqual(g.modelVersion, model.version);
+  assert.strictEqual(g.group, groupOf(g.type));
+});
+
+check('the shadow guess matches predict() on the same features (same model, same order)', () => {
+  const s = v3({ linesInserted: 300, files: ['App.tsx', 'api.ts', 'db.ts'], commandKinds: { run: 6, git: 3 }, commits: 2 });
+  const direct = predict(model, model.features.map((f) => s.workFeatures[f]));
+  const g = shadowGuess(s);
+  assert.strictEqual(g.type, direct.workType);
+  assert.strictEqual(g.probability, Math.round(direct.probability * 1000) / 1000);
+});
+
+check('a session from before 2.6.0 (feature version 2) or with no features gets no shadow guess', () => {
+  assert.strictEqual(shadowGuess({ featureVersion: 2, workFeatures: { linesPerMin: 3 } }), null);
+  assert.strictEqual(shadowGuess({}), null);
+  assert.strictEqual(shadowGuess(null), null);
+});
+
+check('no model file means no shadow guess, not a crash', () => {
+  assert.strictEqual(shadowGuess(v3({ linesInserted: 60 }), null), null);
+});
+
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

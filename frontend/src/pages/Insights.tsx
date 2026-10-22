@@ -6,6 +6,7 @@ import { Button, Card, CardTitle, ErrorBox, PageHeader, Pill, Segmented, Skeleto
 import { pct, plural } from '../lib/format';
 import { hourLabel } from '../lib/calendar';
 import type { Finding, MetricMeta, Metrics, Severity } from '../types';
+import { TypeAnalytics } from './insights/TypeAnalytics';
 import { WorkSessions } from './insights/WorkSessions';
 
 const SEVERITY: Record<Severity, { label: string; tone: 'warn' | 'good' | 'accent' }> = {
@@ -149,6 +150,7 @@ function Body({ m, findings, skipped, total }: { m: Metrics; findings: Finding[]
         ))}
       </div>
 
+      <TypeAnalytics days={m.windowDays} />
       <WorkSessions days={m.windowDays} />
 
       <p className="text-xs text-muted">These figures are private to you and never appear on a board. Times are in your time zone.</p>

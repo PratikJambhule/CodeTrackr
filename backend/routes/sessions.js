@@ -4,6 +4,7 @@ const { isAuthenticated } = require('../middleware/auth');
 const Session = require('../models/Session');
 const { sessionsFor, sessionFields, promptFor, SETTLE_MS } = require('../services/sessionSnapshot');
 const { WORK_TYPES, NOT_ENOUGH, groupOf } = require('../services/workType');
+const { typeAnalytics } = require('../services/typeAnalytics');
 
 /**
  * Coding sessions and their labels (ML plan tasks B8 + W2).
@@ -14,6 +15,9 @@ const { WORK_TYPES, NOT_ENOUGH, groupOf } = require('../services/workType');
  *   GET /api/sessions?days=30   your sessions, newest first, with the guess and any labels.
  *                               For a session asked BLIND that has no answer yet, the guess is
  *                               withheld, so the answer can measure accuracy honestly.
+ *   GET /api/sessions/by-type?days=30&timezone=-330
+ *                               the numbers behind the DSA / Project work / Learning & setup tabs
+ *                               (services/typeAnalytics.js, D-55)
  *   PUT /api/sessions/label     { startAt, workType }  saves your answer for the session at startAt.
  */
 
@@ -44,19 +48,41 @@ function view(s, doc, userId) {
     };
 }
 
+const daysOf = (req) => Math.min(MAX_DAYS, Math.max(1, Number.parseInt(req.query.days, 10) || 30));
+
+/** Your sessions in the last `days` days, oldest first, each with its saved labels (or null). */
+async function sessionsWithDocs(userId, days) {
+    const now = Date.now();
+    const sessions = await sessionsFor(userId, now - days * DAY_MS, now);
+    const docs = await Session.find({ userId, startAt: { $in: sessions.map((s) => new Date(s.startMs)) } })
+        .select('startAt prompt userLabel').lean();
+    const byStart = new Map(docs.map((d) => [d.startAt.getTime(), d]));
+    return sessions.map((s) => ({ s, doc: byStart.get(s.startMs) || null }));
+}
+
 router.get('/', isAuthenticated, async (req, res, next) => {
     try {
-        const days = Math.min(MAX_DAYS, Math.max(1, Number.parseInt(req.query.days, 10) || 30));
-        const now = Date.now();
+        const days = daysOf(req);
         const userId = String(req.user._id);
-        const sessions = await sessionsFor(req.user._id, now - days * DAY_MS, now);
-        const docs = await Session.find({ userId: req.user._id, startAt: { $in: sessions.map((s) => new Date(s.startMs)) } })
-            .select('startAt prompt userLabel').lean();
-        const byStart = new Map(docs.map((d) => [d.startAt.getTime(), d]));
+        const rows = await sessionsWithDocs(req.user._id, days);
         res.json({
             days,
-            sessions: sessions.slice().reverse().map((s) => view(s, byStart.get(s.startMs), userId)),
+            sessions: rows.reverse().map(({ s, doc }) => view(s, doc, userId)),
         });
+    } catch (err) {
+        return next(err);
+    }
+});
+
+router.get('/by-type', isAuthenticated, async (req, res, next) => {
+    try {
+        const days = daysOf(req);
+        const userId = String(req.user._id);
+        const tz = Number.parseInt(req.query.timezone, 10);
+        const timezoneOffset = Number.isFinite(tz) && Math.abs(tz) <= 14 * 60 ? tz : 0;
+        const rows = await sessionsWithDocs(req.user._id, days);
+        const entries = rows.map(({ s, doc }) => ({ s, doc, prompt: (doc && doc.prompt) || promptFor(userId, s.startMs) }));
+        res.json({ days, ...typeAnalytics(entries, { timezoneOffset }) });
     } catch (err) {
         return next(err);
     }

@@ -9,6 +9,7 @@ import type { Tone } from '../../components/charts/tone';
 import { Card, CardTitle, EmptyState, Pill, Skeleton } from '../../components/ui';
 import { commandKindLabel, deadlineKey, hm, hoursHm, int, relativeDay } from '../../lib/format';
 import type { History, PeriodView, Severity } from '../../types';
+import { SPLIT_PARTS } from '../../lib/timeSplit';
 
 export function StatTile({ label, value, note, noteTone = 'muted', spark, sparkTone = 'accent' }: { label: string; value: string; note: string; noteTone?: 'muted' | 'good' | 'bad'; spark?: number[]; sparkTone?: Tone }) {
   const tone = noteTone === 'good' ? 'text-good-ink' : noteTone === 'bad' ? 'text-bad-ink' : 'text-muted';
@@ -168,12 +169,6 @@ export function InsightTeaser() {
   );
 }
 
-const SPLIT_PARTS = [
-  { key: 'writingSec', label: 'Writing', color: 'var(--accent)' },
-  { key: 'readingSec', label: 'Reading', color: 'var(--heat-2)' },
-  { key: 'runningSec', label: 'Running', color: 'var(--good)' },
-  { key: 'otherSec', label: 'Not split', color: 'var(--muted)' },
-] as const;
 
 /**
  * Where the last 7 days went (plan W1): writing, reading and running, then the files with the most

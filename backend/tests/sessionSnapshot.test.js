@@ -52,5 +52,16 @@ check('the stored copy keeps times, features and the guess, rounded', () => {
   assert.ok(!('userLabel' in f), 'a snapshot never overwrites what the user said');
 });
 
+check('the stored copy carries the model\'s shadow guess for 2.6.0 sessions only (D-56)', () => {
+  const { sessionFeaturesV3 } = require('../services/workTypeFeatures');
+  const base = { startMs: 0, endMs: 1200000, durationSec: 1200, projects: [], languages: [], workType: { type: 'dsa' }, pickerLabel: null };
+  const old = sessionFields({ ...base, featureVersion: 2, workFeatures: { linesPerMin: 3 } });
+  assert.strictEqual(old.modelGuess, null);
+  const fresh = sessionFields({ ...base, featureVersion: 3,
+    workFeatures: sessionFeaturesV3({ durationSec: 1200, writingSec: 800, readingSec: 300, runningSec: 100, linesInserted: 40, files: ['two_sum.cpp'] }).features });
+  assert.ok(fresh.modelGuess && fresh.modelGuess.type, 'model guess saved');
+  assert.strictEqual(fresh.workType.type, 'dsa', 'the rules\' guess is still what people see');
+});
+
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

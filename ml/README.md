@@ -66,4 +66,17 @@ rules'. If it fails, the rules stay.
 | 2026-10-21 | synthetic (seed 20261021) | 1,961 / 60 | 0.869 (logistic regression) | 0.610 | passed | no (synthetic) |
 | 2026-10-22 | synthetic v3 (2.6.0 signals, 33 features; dev servers counted as D-54) | 2,077 / 60 | 0.943 (logistic regression) | 0.693 (rules v2) | passed | no (synthetic) |
 
+## Shadow mode (from 2026-10-22)
+
+The API runs the model on every session recorded by extension 2.6.0 and saves its guess next to the
+rules' guess, without showing it. People keep seeing the rules. Once people have answered (blind
+questions on Insights, or the work-mode picker in VS Code), this compares the two on real answers:
+
+```bash
+cd backend && node scripts/shadow-report.js
+```
+
+It needs at least 150 answers from 10 people, with 10 of each type, and then applies the same gate
+as training. Only when it says `switch_on` is the model a candidate for being shown to people.
+
 Real labels: once people answer on the Insights page, run `cd backend && node ../ml/export_sessions.js` (read-only), then `python ml/train_work_type.py --data ml/data/real_sessions_v3.csv`. A model trained on real data that passes the gate is marked `servable: true`.
