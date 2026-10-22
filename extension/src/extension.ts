@@ -172,12 +172,19 @@ function getCfg() {
 }
 
 // --------- Helpers ----------
+/** The last part of a path, split on both "/" and "\" so a folder path can never leave the laptop
+ * whatever OS the extension host runs on (path.basename on Linux keeps a Windows path whole). */
+export function baseName(p: string | undefined): string {
+  return (p || "").split(/[\\/]/).filter(Boolean).pop() || "";
+}
+const parentOf = (p: string) => p.split(/[\\/]/).slice(0, -1).join("/");
+
 function getFileMeta(filePath: string | undefined) {
   if (!filePath) return {};
   const ext = path.extname(filePath).toLowerCase();
   const projectName =
     vscode.workspace.name ||
-    path.basename(vscode.workspace.rootPath || path.dirname(filePath));
+    baseName(vscode.workspace.rootPath || parentOf(filePath));
   const language =
     vscode.window.activeTextEditor?.document?.languageId || "unknown";
   return { fileType: ext, projectName, language };
@@ -203,7 +210,7 @@ function isOnScreen(doc: vscode.TextDocument): boolean {
 function heartbeat(kind: "writing" | "reading", doc?: vscode.TextDocument): void {
   if (!isUserDocument(doc)) return;
   const now = Date.now();
-  engine.beat(now, kind, path.basename(doc.fileName), doc.languageId);
+  engine.beat(now, kind, baseName(doc.fileName), doc.languageId);
   state.lastKnownFile = doc.fileName;
   focusTracker?.noteActivity(now);
   leaveIdle();
@@ -485,7 +492,7 @@ function buildPayload(snap: TimeSnapshot) {
     payloadVersion: 3,
     // Stamped with when the counted time began, so hour-of-day charts stay right.
     timestamp: new Date(snap.startMs ?? Date.now() - snap.seconds * 1000).toISOString(),
-    fileName: top ? top.name : path.basename(activePath),
+    fileName: top ? top.name : baseName(activePath),
     fileType: top ? path.extname(top.name).toLowerCase() || "unknown" : activeType || "unknown",
     projectName: projectName || "unknown",
     language: top && top.language !== "unknown" ? top.language : activeLanguage || "unknown",
@@ -677,7 +684,7 @@ function registerListeners(context: vscode.ExtensionContext): void {
   listenersRegistered = true;
 
   const active = vscode.window.activeTextEditor?.document;
-  if (isUserDocument(active)) engine.setActiveFile(path.basename(active.fileName), active.languageId);
+  if (isUserDocument(active)) engine.setActiveFile(baseName(active.fileName), active.languageId);
   engine.setFocus(vscode.window.state?.focused !== false, Date.now());
 
   const subs: vscode.Disposable[] = [
