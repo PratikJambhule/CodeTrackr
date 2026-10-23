@@ -20,15 +20,17 @@ each other week by week.
   Summaries carry counts and file names, never file contents, diffs, paths or command text.
 - **Weekly race.** Every group has a board: an F1-style standings tower (one cell per day, gap to the
   leader), a race chart of running totals, highlights, and contest dates you can share as a link.
-- **Dashboard.** Your race, today and this week, a year heatmap, languages and projects, when you
-  code, build health, goals and the top insight.
+- **Dashboard.** Your race, today and this week, how you spent it (writing / reading / running and
+  your top files), the week by kind of work, a year heatmap, languages and projects, when you code,
+  build health (commands by kind with failures, program runs, real debugging), goals and the top
+  insight.
 - **Leaderboard.** Everyone ranked by hours, all time or the last 7 / 30 days.
 - **Goals.** "N hours of X by a date", with progress from matching time and one reminder per goal.
 - **Insights.** Plain statistics over your own data (deep-work ratio, peak hours, cadence, rework)
   and 13 threshold rules. Every number shows "—" until there is enough data. Not machine learning.
 - **What kind of work.** Each coding session is shown as DSA, Project work or Learning & setup, with a
-  one-tap ✓ / Change. You can also pick the kind in VS Code's status bar. Your answers are private and
-  are what a future model would learn from.
+  one-tap ✓ / Change. You can also pick the kind in VS Code's status bar. Your answers are private;
+  they score the work-type model running in shadow mode and are what it will be retrained on.
 - **Analytics per kind of work.** Insights has a tab for each kind, because each cares about
   different things:
   - **DSA:** problems worked on and time on each, compile-and-run loops, failed compiles, days
@@ -63,8 +65,10 @@ flowchart LR
   API --> DB[("MongoDB Atlas")]
 ```
 
-- **Credited, not trusted, time.** An upload counts only as far as window-focus time vouches for it,
-  capped at 600 s per user per 10-minute window with an atomic counter, so a script cannot farm hours.
+- **Credited, not trusted, time.** An upload counts only as far as window-focus time (or a program
+  that is really running) vouches for it, capped at 600 s per user per 10-minute window with an
+  atomic counter, so a script cannot farm hours. A write that fails gives its claimed seconds back,
+  so a retried upload is still credited.
 - **Ten-minute buckets.** Uploads are merged with one atomic `$inc` upsert per (user, project,
   language, 10 minutes): about 5× fewer documents and 13× less data than one document per upload
   (local benchmark at the 2-minute upload cadence).
@@ -152,15 +156,16 @@ cd extension && npm test
 cd frontend && npm run lint && npm test && npm run build
 ```
 
-501 backend unit assertions, 62 API integration tests (the real Express app over HTTP against an
-in-memory MongoDB), 135 extension assertions and 63 frontend tests. Frontend tests run in the India
+505 backend unit assertions, 65 API integration tests (the real Express app over HTTP against an
+in-memory MongoDB), 135 extension assertions and 66 frontend tests. Frontend tests run in the India
 time zone, where the date bugs showed up. CI runs all of them, plus a Docker build with a health
 check, on every push.
 
 ## Work-type classifier (experimental)
 
 `ml/` holds a pipeline that labels a coding session as DSA practice, project building, debugging,
-learning or setup from 18 features the extension already collects. There are not enough real
+learning or setup from 33 features the extension already collects (18 for sessions from versions
+before 2.6.0). There are not enough real
 labelled sessions yet, so the current model is trained on a **generated** dataset
 (`node ml/generate_synthetic.js`, then `python ml/train_work_type.py`). Its scores describe that
 generated data, not real users. The API runs it in **shadow mode**: it guesses every session from
@@ -180,8 +185,9 @@ ml/          work-type classifier: synthetic data generator, training script, re
 
 ## Privacy
 
-The extension sends counts and durations, the language, the project (folder) name, and terminal
-commands by kind (install, run, compile, build, test, git, docker, other) with whether they failed.
+The extension sends counts and durations, the language, the project (folder) name, the names of the
+files you worked in (never folders or full paths), and terminal commands by kind (install, run,
+compile, build, test, git, docker, other) with whether they failed.
 Command text is never stored: extension 2.6.0 sends only the kind, and the server reduces any text an
 older extension sends to its kind before saving. File contents, diffs and full paths are never sent.
 The website's privacy page explains it in full.

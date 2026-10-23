@@ -33,6 +33,7 @@ const COMMANDS = [
   ['CodeTrackr: Show Connection Info', 'Whether you are connected, and to which server.'],
   ['CodeTrackr: Show Statistics', 'What has been recorded in this session.'],
   ['CodeTrackr: Show Event Logs', 'The extension’s log output.'],
+  ['CodeTrackr: Set What I’m Working On', 'Tell CodeTrackr the kind of work: DSA, project, debugging, learning or setup. Also in the status bar.'],
   ['CodeTrackr: Flush Now', 'Send the current summary immediately.'],
   ['CodeTrackr: Start / Stop Tracking', 'Pause and resume tracking.'],
   ['CodeTrackr: Setup API Key', 'Older way to connect: paste a key from your Profile page.'],
@@ -84,8 +85,13 @@ export default function Guide() {
 
           <Section id="recorded" title="What gets recorded, and when">
             <p>
-              The extension watches for real activity: typing, saving, switching files, running commands. After about <strong>two minutes</strong> of it, a small summary is sent:
-              time, language, project name, edit counts, commits, and how many commands and builds failed. The full list is on the <a href="/privacy">privacy page</a>.
+              The extension counts real activity, second by second. Typing is <strong>writing</strong>; scrolling, moving around and switching files is <strong>reading</strong>;
+              waiting on a command, task or debug run is <strong>running</strong>. A pause of more than a minute counts nothing, so time away is never added.
+            </p>
+            <p>
+              After about <strong>two minutes</strong> of counted time, a small summary is sent: that time split three ways, the language, the project name, the names of the files you
+              worked in, edit counts, commits, and terminal commands counted by kind (compile, test, install…) with how many failed. Never your code, and never the text of a command.
+              The full list is on the <a href="/privacy">privacy page</a>.
             </p>
             <p>
               Offline, or the server is waking up? Summaries wait in a queue on your computer, survive restarting VS Code, and are sent oldest first. Each carries an id,
@@ -99,8 +105,9 @@ export default function Guide() {
               against your daily target, which you can change on the chart.
             </p>
             <p>
-              Below that: your <strong>year</strong> at a glance (darker purple means more time), your <strong>languages and projects</strong>, <strong>when you code</strong>,
-              and <strong>build health</strong>: how many commands failed and which one fails most.
+              Below that: <strong>how you spent it</strong> (writing, reading and running over the last seven days, and your top files), your <strong>year</strong> at a glance
+              (darker purple means more time), your <strong>languages and projects</strong>, <strong>when you code</strong>, and <strong>build health</strong>: how many commands failed
+              and which kind fails most.
             </p>
           </Section>
 
@@ -129,21 +136,30 @@ export default function Guide() {
           <Section id="insights" title="Insights">
             <p>
               Insights are plain statistics over your own history: deep-work share, your longest focus blocks, how steady your week is, your best hours. Each has a confidence level,
-              and anything without enough data shows a dash instead of a misleading number. They are private to you. They are not AI.
+              and anything without enough data shows a dash instead of a misleading number. They are private to you.
+            </p>
+            <p>
+              <strong>How you worked</strong> shows each coding session as DSA, project work, or learning &amp; setup, with a one-tap <strong>Right</strong> or <strong>Change</strong>.
+              Now and then a session is asked without a guess, so your answers can check how good the guesses are. <strong>By kind of work</strong> then gives each kind its own
+              numbers: problems and failed compiles for DSA, commits and debugging time for projects, and how much of your week went to setup.
+            </p>
+            <p>
+              You can also say what you are working on before you start: click <strong>CodeTrackr</strong> in VS Code’s status bar and pick DSA, Project, Debugging, Learning or Setup.
             </p>
           </Section>
 
           <Section id="fair" title="How time is counted">
             <p>
-              A leaderboard is only fun if it is fair, so the server checks every summary. Time counts only while the VS Code window has focus, plus two minutes of grace. Nobody can
-              earn more than ten minutes of credit in any ten-minute window. A long upload after being offline is spread over the time it covers, so honest work is never cut.
+              A leaderboard is only fun if it is fair, so the server checks every summary. Time counts while the VS Code window has focus, plus a short grace, and while a program
+              you started is still running. Nobody can earn more than ten minutes of credit in any ten-minute window. A long upload after being offline is spread over the time it
+              covers, so honest work is never cut.
             </p>
           </Section>
 
           <Section id="trouble" title="Troubleshooting">
             <dl className="flex flex-col gap-4">
               {[
-                ['Nothing shows on the dashboard', 'Run CodeTrackr: Show Connection Info in VS Code. If it says you are not connected, run CodeTrackr: Sign In. Summaries are sent after about two minutes of activity; Flush Now sends one immediately.'],
+                ['Nothing shows on the dashboard', 'Run CodeTrackr: Show Connection Info in VS Code. If it says you are not connected, run CodeTrackr: Sign In. Summaries are sent after about two minutes of activity; Flush Now sends one immediately. If uploads failed earlier, reloading the VS Code window sends everything still waiting.'],
                 ['The first visit of the day is slow', 'The free server sleeps when idle and takes about 20 seconds to wake. Nothing is lost: the extension’s queue waits and retries.'],
                 ['The extension says the key was rejected', 'Device keys expire after a year, or the computer was disconnected on the Profile page. Run CodeTrackr: Sign In again.'],
                 ['Signing in loops back to the sign-in page', 'Your browser is blocking this site’s cookie. Allow cookies for this site, or try another browser.'],

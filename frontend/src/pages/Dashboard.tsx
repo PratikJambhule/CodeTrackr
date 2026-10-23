@@ -11,7 +11,8 @@ import { streaks } from '../lib/calendar';
 import { readStored, writeStored } from '../lib/storage';
 import type { Me } from '../types';
 import { RaceStrip } from './dashboard/RaceStrip';
-import { BuildHealth, GoalsMini, InsightTeaser, StatTile, TimeSplitCard } from './dashboard/cards';
+import { BuildHealth, GoalsMini, InsightTeaser, KindOfWorkCard, StatTile, TimeSplitCard } from './dashboard/cards';
+import { buildHealth } from '../lib/buildHealth';
 import { TimeSlotDialog } from './dashboard/TimeSlotDialog';
 
 const TARGET_KEY = 'codetrackr.dailyTarget';
@@ -63,6 +64,7 @@ export default function Dashboard({ user }: { user: Me }) {
   let running = 0;
   const todaySpark = hourly.slice(0, nowHour + 1).map((h) => (running += h.hours));
   const t = week.data?.terminalSummary;
+  const builds = t ? buildHealth(t).builds : { runs: 0, failed: 0 };
 
   return (
     <>
@@ -129,9 +131,9 @@ export default function Dashboard({ user }: { user: Me }) {
             <StatTile label="Commits" value={String(history.data?.commits7d ?? 0)} note="last 7 days" />
             <StatTile
               label="Failed builds"
-              value={String(t?.failedBuilds ?? 0)}
-              note={t?.buildRuns ? `${Math.round(((t.failedBuilds || 0) / t.buildRuns) * 100)}% of ${plural(t.buildRuns, 'build')}` : 'no builds this week'}
-              noteTone={t?.failedBuilds ? 'bad' : 'muted'}
+              value={String(builds.failed)}
+              note={builds.runs ? `${Math.round((builds.failed / builds.runs) * 100)}% of ${plural(builds.runs, 'build')}` : 'no builds this week'}
+              noteTone={builds.failed ? 'bad' : 'muted'}
             />
           </>
         )}
@@ -233,7 +235,8 @@ export default function Dashboard({ user }: { user: Me }) {
           </Card>
         </div>
 
-        <div className="col-span-12 grid min-w-0 xl:col-span-4">
+        <div className="col-span-12 flex min-w-0 flex-col gap-4 xl:col-span-4 [&>*:last-child]:flex-1">
+          <KindOfWorkCard />
           {view.data ? <BuildHealth view={view.data} period={period} /> : <Skeleton className="h-80" />}
         </div>
 

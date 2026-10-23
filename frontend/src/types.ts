@@ -14,6 +14,9 @@ export interface Me {
   createdAt?: string;
 }
 
+/** What the extension and server keep instead of command text (D-46). */
+export type CommandKind = 'install' | 'run' | 'compile' | 'build' | 'test' | 'git' | 'docker' | 'other';
+
 export interface TerminalSummary {
   totalCommands: number;
   terminalErrorCount: number;
@@ -30,6 +33,12 @@ export interface TerminalSummary {
   gitActivity: { commits: number; pushes: number; pulls: number; checkouts?: number; merges?: number; clones?: number };
   /** `command` is a kind ("compile", "test"…), never command text. */
   repeatedFailedCommands: { command: string; count: number }[];
+  /** Extension 2.6.0+: commands by kind, with failures per kind (zeros for older data). */
+  commandKinds?: Record<CommandKind, number> & { failed?: Partial<Record<CommandKind, number>> };
+  /** Extension 2.6.0+: terminal commands, tasks, Run Without Debugging and Code Runner runs. */
+  runs?: { terminal: number; task: number; debugNoDebug: number; codeRunner: number };
+  /** Extension 2.6.0+: real debugging (Run Without Debugging is not counted here). */
+  debug?: { sessions: number; breakpointStops: number; steps: number };
 }
 
 /** /api/analytics/:id (today, by hour) and /api/analytics/weekly/:id (7 days, by day). */

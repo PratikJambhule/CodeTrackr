@@ -17,6 +17,8 @@
  */
 const Activity = require('../models/Activity');
 const { matchActivityUser } = require('./activityUser');
+const { COMMAND_KINDS } = require('./commandKinds');
+const { RUN_KEYS, DEBUG_KEYS } = require('./activityNormalizers');
 
 const n = (path) => ({ $ifNull: [path, 0] });
 const COMMAND_USAGE = ['git', 'npm', 'node', 'python', 'docker', 'gcc', 'java', 'pip', 'misc'];
@@ -44,6 +46,13 @@ async function viewData({ userId, from, to, offsetMinutes = 0, unit }) {
   for (const f of TERMINAL_SUMS) terminalGroup[f] = { $sum: n(`$terminalAnalytics.${f}`) };
   for (const f of COMMAND_USAGE) terminalGroup[`cu_${f}`] = { $sum: n(`$terminalAnalytics.commandUsage.${f}`) };
   for (const f of GIT_ACTIVITY) terminalGroup[`ga_${f}`] = { $sum: n(`$terminalAnalytics.gitActivity.${f}`) };
+  // Extension 2.6.0: command kinds with failures per kind, program runs and real debugging (D-46, D-49).
+  for (const k of COMMAND_KINDS) {
+    terminalGroup[`ck_${k}`] = { $sum: n(`$terminalAnalytics.commandKinds.${k}`) };
+    terminalGroup[`ckf_${k}`] = { $sum: n(`$terminalAnalytics.commandKinds.failed.${k}`) };
+  }
+  for (const k of RUN_KEYS) terminalGroup[`rn_${k}`] = { $sum: n(`$runs.${k}`) };
+  for (const k of DEBUG_KEYS) terminalGroup[`db_${k}`] = { $sum: n(`$debug.${k}`) };
 
   const [r] = await Activity.aggregate([
     { $match: { userId: matchActivityUser(userId), timestamp: { $gte: from, $lt: to } } },
@@ -104,6 +113,12 @@ async function viewData({ userId, from, to, offsetMinutes = 0, unit }) {
   terminalSummary.buildSuccessRate = terminalSummary.buildRuns > 0
     ? Math.round((terminalSummary.successfulBuilds / terminalSummary.buildRuns) * 100) : 0;
   terminalSummary.repeatedFailedCommands = r.repeated.map((x) => ({ command: x._id, count: x.count, timestamps: [] }));
+  terminalSummary.commandKinds = {
+    ...Object.fromEntries(COMMAND_KINDS.map((k) => [k, t[`ck_${k}`] || 0])),
+    failed: Object.fromEntries(COMMAND_KINDS.map((k) => [k, t[`ckf_${k}`] || 0])),
+  };
+  terminalSummary.runs = Object.fromEntries(RUN_KEYS.map((k) => [k, t[`rn_${k}`] || 0]));
+  terminalSummary.debug = Object.fromEntries(DEBUG_KEYS.map((k) => [k, t[`db_${k}`] || 0]));
 
   return {
     docs: totals.docs,

@@ -21,7 +21,7 @@ export const NEVER_SENT: string[] = [
   'diffs and commit messages',
   'full file paths',
   'keystrokes',
-  'the text of your terminal commands (extension 2.5.0 and older still send a shortened command; the server keeps only its kind)',
+  'the text of your terminal commands (if you still use extension 2.5.0 or older, it sends a shortened command, and the server keeps only its kind; update to 2.6.0)',
   'your Git email',
   'anything from other apps',
 ];

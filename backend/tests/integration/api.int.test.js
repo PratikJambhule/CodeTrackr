@@ -979,7 +979,15 @@ async function main() {
         }
         return nu;
       };
-      const strip = ({ streakDays, ...rest }) => rest;
+      // The 2.6.0 sums (commandKinds, runs, debug) came after the old code, so the oracle can't check
+      // them; the "dashboard view: 2.6.0 command kinds" test does.
+      const strip = ({ streakDays, ...rest }) => {
+        if (rest.terminalSummary) {
+          const { commandKinds, runs, debug, ...terminalSummary } = rest.terminalSummary;
+          rest.terminalSummary = terminalSummary;
+        }
+        return rest;
+      };
       const daily = await request(app).get(`/api/analytics/${uid}?timezone=${tz}`).set('Cookie', me.cookie);
       const todayDocs = await Activity.find({ userId: uid, timestamp: { $gte: new Date(midnight), $lt: new Date(midnight + 864e5) } });
       assert.ok(todayDocs.length > 0, 'test needs some docs today');
@@ -1009,6 +1017,31 @@ async function main() {
       const shown = weekly.body.dailyActivity.reduce((a, d) => a + d.hours, 0);
       assert.strictEqual(weekly.body.totalHours, 0.5);
       assert.ok(Math.abs(shown - weekly.body.totalHours) < 0.011);
+    }],
+
+    ['dashboard view: 2.6.0 command kinds, program runs and real debugging are summed for build health', async () => {
+      const me = await h.makeUser();
+      const uid = String(me.user._id);
+      const at = new Date(Date.now() - 2 * 3600e3);
+      await Activity.insertMany([
+        { userId: uid, fileName: 'a.cpp', language: 'cpp', projectName: 'p', duration: 600, timestamp: at,
+          terminalAnalytics: { totalCommands: 9, failedCommands: 4, commandKinds: { compile: 6, run: 3, failed: { compile: 4 } } },
+          runs: { terminal: 9, codeRunner: 2 }, debug: { sessions: 1, breakpointStops: 5, steps: 12 } },
+        { userId: uid, fileName: 'b.ts', language: 'ts', projectName: 'p', duration: 600, timestamp: new Date(at.getTime() + 600e3),
+          terminalAnalytics: { totalCommands: 3, failedCommands: 1, commandKinds: { install: 2, test: 1, failed: { test: 1 } } },
+          runs: { task: 1, debugNoDebug: 2 } },
+        // a 2.5.0 bucket: no kinds, must not break the sums
+        { userId: uid, fileName: 'c.py', language: 'python', projectName: 'p', duration: 300, timestamp: new Date(at.getTime() + 1200e3),
+          terminalAnalytics: { totalCommands: 2, failedCommands: 0, buildRuns: 1, debuggingSessions: 1 } },
+      ]);
+      const r = await request(app).get(`/api/analytics/weekly/${uid}?timezone=0`).set('Cookie', me.cookie);
+      assert.strictEqual(r.status, 200, JSON.stringify(r.body));
+      const t = r.body.terminalSummary;
+      assert.deepStrictEqual(t.commandKinds, { install: 2, run: 3, compile: 6, build: 0, test: 1, git: 0, docker: 0, other: 0,
+        failed: { install: 0, run: 0, compile: 4, build: 0, test: 1, git: 0, docker: 0, other: 0 } });
+      assert.deepStrictEqual(t.runs, { terminal: 9, task: 1, debugNoDebug: 2, codeRunner: 2 });
+      assert.deepStrictEqual(t.debug, { sessions: 1, breakpointStops: 5, steps: 12 });
+      assert.strictEqual(t.debuggingSessions, 1, 'the old field is still summed for older clients');
     }],
 
     ['userId migration: mixed String/ObjectId data reads as one user, before and after migrating', async () => {

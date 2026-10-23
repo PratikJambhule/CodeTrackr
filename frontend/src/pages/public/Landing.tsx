@@ -221,13 +221,13 @@ export default function Landing() {
           <div className="mb-10 max-w-3xl">
             <h2 className="display text-balance text-[clamp(44px,5vw,72px)]">Know your own game</h2>
             <p className="mt-4 text-lg text-muted">
-              Your dashboard shows where your time went and how steady you are: a year at a glance, languages and projects, when in the day you code, and which commands keep failing. Insights are plain statistics over your own history, each with a confidence level. Not AI, and every number can be explained.
+              Your dashboard shows where your time went and how steady you are: writing, reading and running, your top files, a year at a glance, languages and projects, and when in the day you code. Insights split your sessions into DSA, project work and learning & setup, with numbers that fit each one. Plain statistics over your own history, each with a confidence level. Every number can be explained.
             </p>
           </div>
           <div className="grid gap-5 [grid-template-columns:repeat(auto-fit,minmax(min(250px,100%),1fr))]">
             {[
               { Icon: Timer, title: 'Hours that count', body: 'Active coding time per day, week and year, by language and project.' },
-              { Icon: ShieldCheck, title: 'Failed builds, counted', body: 'See which command keeps failing. Anything that looks like a password or token is masked before sending.' },
+              { Icon: ShieldCheck, title: 'Failed builds, counted', body: 'See which kind of command keeps failing: compile, test, install. Only the kind is sent, never the command itself.' },
               { Icon: KeyRound, title: 'Goals with deadlines', body: 'Set a target in hours for a language or project, get a reminder before the deadline.' },
               { Icon: Lock, title: 'Private by default', body: 'Insights are yours alone. Groups see totals, never detail.' },
             ].map(({ Icon, title, body }) => (
@@ -269,11 +269,11 @@ export default function Landing() {
               <h3 className="mb-3 text-lg font-semibold text-good-ink">Sent, as a small summary</h3>
               <ul className="flex flex-col gap-2.5 text-[15px] text-muted">
                 {[
-                  'Active coding time, the language, and the project (folder) name',
-                  'Edit counts: lines added and removed, saves, reading vs writing time',
-                  'Window-focus time, commit counts, debug sessions',
-                  'Terminal commands by type (build, test, git) and whether they failed',
-                  'A command that fails repeatedly, with passwords, tokens and keys replaced by ***',
+                  'Active time, split into writing, reading and running, the language, and the project (folder) name',
+                  'The names of the files you worked on (never the folder path), each with its time',
+                  'Edit counts: lines added and removed, saves, file switches',
+                  'Window-focus time, commit counts, debug sessions and breakpoint stops',
+                  'Terminal commands counted by kind (install, run, compile, build, test, git) and whether they failed',
                 ].map((t) => (
                   <li key={t} className="flex gap-2.5">
                     <Check className="mt-0.5 h-4 w-4 flex-none text-good-ink" aria-hidden="true" />
@@ -285,7 +285,7 @@ export default function Landing() {
             <div className="card p-6">
               <h3 className="mb-3 text-lg font-semibold text-bad-ink">Never sent</h3>
               <ul className="flex flex-col gap-2.5 text-[15px] text-muted">
-                {['Your code or file contents', 'Diffs and commit messages', 'Full file paths', 'Keystrokes', 'Anything from other apps on your computer'].map((t) => (
+                {['Your code or file contents', 'Diffs and commit messages', 'Full file paths', 'The text of your terminal commands', 'Keystrokes', 'Anything from other apps on your computer'].map((t) => (
                   <li key={t} className="flex gap-2.5">
                     <XIcon className="mt-0.5 h-4 w-4 flex-none text-bad-ink" aria-hidden="true" />
                     {t}

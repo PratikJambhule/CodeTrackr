@@ -1,9 +1,13 @@
 # CodeTrackr for VS Code
 
 **Automatic coding-time tracking for you and your friends.** Install it once, sign in once, and
-CodeTrackr records how long you code, in which languages and projects, your commits, and how often
-your commands and builds fail. Compare it all with friends on group boards and the leaderboard at
-the [CodeTrackr dashboard](https://code-trackr-frontend.vercel.app).
+CodeTrackr records how long you really code (writing, reading and running, file by file), in which
+languages and projects, your commits, and how often your commands and builds fail. Compare it all with
+friends on group boards and the leaderboard at the
+[CodeTrackr dashboard](https://code-trackr-frontend.vercel.app).
+
+On the dashboard you also see how your week split between writing, reading and running, your top
+files, and Insights for each kind of work: DSA practice, project work, and learning & setup.
 
 ## Getting started (1 minute)
 
@@ -29,13 +33,13 @@ Device keys expire after one year — just run **Sign In** again.
   leave it on *Auto*. It labels your session only when you choose or confirm it that session.
 - **More private** — the text of terminal commands is no longer sent, only their kind.
 
-## What was new in 2.5.0
+## Also built in
 
 - **Sign In** — connect with a short code instead of copying an API key.
 - **Nothing lost offline** — every upload is saved before it is sent and retried oldest first,
   even after VS Code restarts. Retries are counted once on the server.
-- **Key in your OS keychain** — the key is kept in VS Code's SecretStorage instead of
-  `settings.json`. A key from an older version is moved there automatically.
+- **Key in your OS keychain** — the key is kept in VS Code's SecretStorage, never in
+  `settings.json`.
 - **Correct times for held work** — time recorded while offline is filed under the project,
   language and time it actually happened.
 
@@ -94,6 +98,8 @@ You normally don't need to change anything.
   sends the current one immediately.
 - **First upload of the day is slow.** The free server sleeps when idle and takes ~20 seconds to
   wake. Nothing is lost: the upload waits in the queue and retries.
+- **Uploads failed earlier and are still waiting.** They are sent with your next upload, or at once
+  when you run **Developer: Reload Window**.
 - **The extension says your key was rejected.** Device keys expire after a year, or the device was
   disconnected on the Profile page. Run **Sign In** again.
 

@@ -1,13 +1,15 @@
 import { Link } from 'react-router-dom';
 import { splitGoals } from '../../lib/goals';
 import { Sparkles, Target } from 'lucide-react';
-import { useGoalProgress, useGoals, useMetrics } from '../../hooks/queries';
+import { useGoalProgress, useGoals, useMetrics, useSessions, useTypeAnalytics } from '../../hooks/queries';
 import { Bars, RankedBars, SplitBar } from '../../components/charts/Bars';
 import { Ring } from '../../components/charts/Ring';
 import { Sparkline } from '../../components/charts/Sparkline';
 import type { Tone } from '../../components/charts/tone';
 import { Card, CardTitle, EmptyState, Pill, Skeleton } from '../../components/ui';
-import { commandKindLabel, deadlineKey, hm, hoursHm, int, relativeDay } from '../../lib/format';
+import { commandKindLabel, deadlineKey, hm, hoursHm, int, plural, relativeDay } from '../../lib/format';
+import { buildHealth } from '../../lib/buildHealth';
+import { toLabel, WORK_GROUPS } from '../../lib/workTypes';
 import type { History, PeriodView, Severity } from '../../types';
 import { SPLIT_PARTS } from '../../lib/timeSplit';
 
@@ -23,20 +25,25 @@ export function StatTile({ label, value, note, noteTone = 'muted', spark, sparkT
   );
 }
 
-/** Commands and builds, red only for failures (chart kit #9), plus what fails most. */
+/**
+ * Commands and builds, red only for failures (chart kit #9), plus what fails most. With extension
+ * 2.6.0 data it uses command kinds (a compile counts as a build), program runs and real debugging;
+ * older data keeps the old counters (lib/buildHealth.ts).
+ */
 export function BuildHealth({ view, period }: { view: PeriodView; period: 'today' | 'week' }) {
   const t = view.terminalSummary;
+  const h = buildHealth(t);
   const usage = Object.entries(t.commandUsage ?? {})
     .filter(([, v]) => v > 0)
     .sort((a, b) => b[1] - a[1])
     .slice(0, 5);
   const timeline = view.terminalTimeline ?? [];
   const okCmds = Math.max(0, t.totalCommands - t.failedCommands);
-  const okBuilds = Math.max(0, t.buildRuns - t.failedBuilds);
+  const okBuilds = Math.max(0, h.builds.runs - h.builds.failed);
   return (
     <Card className="min-w-0 p-5">
       <CardTitle aside={period === 'today' ? 'today' : 'last 7 days'}>Build health</CardTitle>
-      {t.totalCommands === 0 && t.buildRuns === 0 ? (
+      {t.totalCommands === 0 && h.builds.runs === 0 && h.programRuns === 0 ? (
         <p className="text-sm text-muted">No terminal commands recorded {period === 'today' ? 'today' : 'this week'}.</p>
       ) : (
         <div className="flex flex-col gap-5">
@@ -49,10 +56,10 @@ export function BuildHealth({ view, period }: { view: PeriodView; period: 'today
           </div>
           <div>
             <div className="mb-2 flex justify-between font-mono text-[12px]">
-              <span className="text-ink">{int(t.buildRuns)} builds</span>
-              <span className={t.failedBuilds ? 'text-bad-ink' : 'text-muted'}>{int(t.failedBuilds)} failed</span>
+              <span className="text-ink">{int(h.builds.runs)} {h.hasKinds ? 'builds and compiles' : 'builds'}</span>
+              <span className={h.builds.failed ? 'text-bad-ink' : 'text-muted'}>{int(h.builds.failed)} failed</span>
             </div>
-            <SplitBar label="Builds" parts={[{ label: 'passed', value: okBuilds, color: 'var(--heat-2)' }, { label: 'failed', value: t.failedBuilds, color: 'var(--bad)' }]} />
+            <SplitBar label="Builds" parts={[{ label: 'passed', value: okBuilds, color: 'var(--heat-2)' }, { label: 'failed', value: h.builds.failed, color: 'var(--bad)' }]} />
           </div>
           {timeline.some((x) => x.success || x.failed) && (
             <Bars
@@ -84,16 +91,74 @@ export function BuildHealth({ view, period }: { view: PeriodView; period: 'today
               </ul>
             </div>
           )}
-          {usage.length > 0 && (
-            <div>
-              <h3 className="mb-3 text-sm font-semibold text-ink">Most used</h3>
-              <RankedBars items={usage.map(([k, v]) => ({ label: k, value: v, display: int(v) }))} />
-            </div>
+          {h.hasKinds ? (
+            h.kinds.length > 0 && (
+              <div>
+                <h3 className="mb-3 text-sm font-semibold text-ink">By kind</h3>
+                <ul className="flex flex-col gap-1.5">
+                  {h.kinds.slice(0, 5).map((k) => (
+                    <li key={k.kind} className="flex items-center justify-between gap-3 text-sm">
+                      <span className="truncate text-ink">{k.label}</span>
+                      <span className="flex-none font-mono text-[12px]">
+                        <span className="text-ink">{int(k.count)}</span>
+                        {k.failed > 0 && <span className="text-bad-ink"> · {int(k.failed)} failed</span>}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )
+          ) : (
+            usage.length > 0 && (
+              <div>
+                <h3 className="mb-3 text-sm font-semibold text-ink">Most used</h3>
+                <RankedBars items={usage.map(([k, v]) => ({ label: k, value: v, display: int(v) }))} />
+              </div>
+            )
           )}
           <p className="font-mono text-[12px] text-muted">
-            {int(t.testRuns)} test runs · {int(t.debuggingSessions)} debug sessions · {int(t.gitActivity?.pushes ?? 0)} pushes
+            {h.hasKinds
+              ? `${plural(h.programRuns, 'program run')} · ${plural(h.debug.sessions, 'debug session')} · ${plural(h.debug.breakpointStops ?? 0, 'breakpoint stop')} · ${int(t.gitActivity?.pushes ?? 0)} pushes`
+              : `${int(t.testRuns)} test runs · ${int(t.debuggingSessions)} debug sessions · ${int(t.gitActivity?.pushes ?? 0)} pushes`}
           </p>
         </div>
+      )}
+    </Card>
+  );
+}
+
+/**
+ * The last 7 days by kind of work (D-55): DSA, project work, learning & setup, with how many sessions
+ * you confirmed. Your answers on Insights are what the work-type model will learn from, so sessions
+ * still waiting for one are linked from here.
+ */
+export function KindOfWorkCard() {
+  const q = useTypeAnalytics(7);
+  const sessions = useSessions(7);
+  const pending = sessions.data ? toLabel(sessions.data.sessions, 7).length : 0;
+  const g = q.data?.groups;
+  const confirmed = g ? WORK_GROUPS.reduce((a, w) => a + g[w.id].confirmed, 0) : 0;
+  const total = g ? WORK_GROUPS.reduce((a, w) => a + g[w.id].sessions, 0) : 0;
+  return (
+    <Card className="min-w-0 p-5">
+      <CardTitle aside={<Link to="/insights">Insights</Link>}>Kind of work</CardTitle>
+      {q.isPending ? (
+        <Skeleton className="h-28" />
+      ) : !g || q.data!.totalMinutes === 0 ? (
+        <p className="text-sm text-muted">No sorted sessions in the last 7 days yet. A session needs about five minutes of coding.</p>
+      ) : (
+        <>
+          <RankedBars items={WORK_GROUPS.map((w) => ({ label: w.label, value: g[w.id].minutes, display: hm(g[w.id].minutes * 60) }))} />
+          <p className="mt-3 font-mono text-[12px] text-muted">
+            last 7 days · {confirmed} of {plural(total, 'session')} confirmed by you
+          </p>
+        </>
+      )}
+      {pending > 0 && (
+        <p className="mt-3 text-sm">
+          <Link to="/insights">{plural(pending, 'session')} {pending === 1 ? 'needs' : 'need'} a one-tap answer</Link>
+          <span className="text-muted"> so the guesses can get better.</span>
+        </p>
       )}
     </Card>
   );
