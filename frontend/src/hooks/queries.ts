@@ -83,10 +83,13 @@ export const useGroupPreview = (groupId: string | undefined) =>
     enabled: Boolean(groupId),
   });
 
+/** The API's maximum (MAX_LIMIT in routes/leaderboard.js); its default of 100 cut the board off. */
+export const LEADERBOARD_LIMIT = 500;
+
 export const useLeaderboard = (days: number | null) =>
   useQuery({
     queryKey: ['leaderboard', days],
-    queryFn: () => apiGet<LeaderRow[]>(`/api/leaderboard${days ? `?days=${days}` : ''}`),
+    queryFn: () => apiGet<LeaderRow[]>(`/api/leaderboard?limit=${LEADERBOARD_LIMIT}${days ? `&days=${days}` : ''}`),
     placeholderData: (previous) => previous,
   });
 

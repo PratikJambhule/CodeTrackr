@@ -17,6 +17,8 @@ export interface TowerRow {
   extras?: ReactNode[];
   /** Read out by screen readers after the position and name. */
   summary?: string;
+  /** Position on the full board, when the rows are only a slice of it (default: row number). */
+  pos?: number;
 }
 
 const POS_COLOR = ['var(--gold)', 'var(--silver)', 'var(--bronze)'];
@@ -93,9 +95,9 @@ export function StandingsTower({
               }}
               className={`flex items-center gap-1.5 rounded-xl px-2 sm:gap-3 sm:px-3 ${rowH} ${r.isMe ? 'bg-me' : ''}`}
             >
-              <span className="sr-only">{`${ordinal(i + 1)}, ${r.isMe ? `${r.name} (you)` : r.name}, ${r.summary ?? r.value}`}</span>
-              <span className={`display w-8 flex-none sm:w-9 ${dense ? 'text-[24px]' : 'text-[30px]'}`} style={{ color: POS_COLOR[i] ?? 'var(--ink)' }} aria-hidden="true">
-                {i + 1}
+              <span className="sr-only">{`${ordinal(r.pos ?? i + 1)}, ${r.isMe ? `${r.name} (you)` : r.name}, ${r.summary ?? r.value}`}</span>
+              <span className={`display w-8 flex-none sm:w-9 ${dense ? 'text-[24px]' : 'text-[30px]'}`} style={{ color: POS_COLOR[(r.pos ?? i + 1) - 1] ?? 'var(--ink)' }} aria-hidden="true">
+                {r.pos ?? i + 1}
               </span>
               <span className={`min-w-[56px] flex-1 truncate sm:min-w-[84px] ${r.isMe ? 'font-bold' : 'font-medium'} ${dense ? 'text-[15px]' : 'text-[17px]'}`} aria-hidden="true">
                 {r.name}

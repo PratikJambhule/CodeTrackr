@@ -35,6 +35,15 @@ describe('StandingsTower', () => {
     const items = screen.getAllByRole('listitem');
     expect(items[0]).toHaveTextContent('1st, Soham (you)');
   });
+
+  it('shows the real position when the rows are a slice of the board', () => {
+    const slice = rows.map((r, i) => ({ ...r, pos: 4 + i }));
+    render(<StandingsTower rows={slice} label="Slice" />);
+    const items = within(screen.getByRole('list', { name: 'Slice' })).getAllByRole('listitem');
+    expect(items[0]).toHaveTextContent('4th, Diya');
+    expect(items[1]).toHaveTextContent('5th, Soham (you)');
+    expect(items[1]).toHaveTextContent(/^5th.*5/);
+  });
 });
 
 describe('YearHeatmap', () => {

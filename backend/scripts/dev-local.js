@@ -6,13 +6,16 @@
  *   - you ("Soham (local)"): about ten months of activity across four projects
  *     (year heatmap, streaks, hours of day, languages, failing builds), goals
  *     and notifications;
- *   - five friends with three weeks of activity;
+ *   - five friends with two months of activity;
  *   - groups: "CSE Squad" (private, password `squad`, you are admin), "Contest
  *     Week" (public), and two you have not joined, to discover.
  * Pair it with `npm run dev` in frontend/ and open http://localhost:5173.
  *
  *   node scripts/dev-local.js        (from backend/; avoid `npm run` on Windows,
  *                                     where stopping it can orphan the server)
+ *   node scripts/dev-local.js --name "Pratik Jambhule" --email pratikjambhule24@gmail.com
+ *                                    (a demo: the signed-in account shows that name
+ *                                     and email; the data stays the same, and local)
  *
  * Data disappears when the process stops. Never point this at a real database.
  */
@@ -196,20 +199,27 @@ function history(userId, days, now, { codeChance, evening = 0.7, intensity = 1 }
     return u;
   };
   // AUTH_BYPASS signs the website in as the user with the most activity: you.
-  const me = await mk('Soham (local)');
+  const arg = (flag) => { const i = process.argv.indexOf(flag); return i > 0 ? process.argv[i + 1] : undefined; };
+  const myName = arg('--name') || 'Soham (local)';
+  const myEmail = arg('--email');
+  const me = await mk(myName, myEmail ? { email: myEmail } : {});
   const friends = {};
   for (const name of ['Diya', 'Rohan', 'Aarav', 'Sneha', 'Kabir']) friends[name] = await mk(name);
 
   const docs = [...history(me._id, 300, now, { codeChance: 0.62 })];
   const profiles = { Diya: 0.8, Rohan: 0.75, Aarav: 0.7, Sneha: 0.6, Kabir: 0.45 };
   for (const [name, chance] of Object.entries(profiles)) {
-    docs.push(...history(friends[name]._id, 21, now, { codeChance: chance, evening: 0.6, intensity: 0.9 + rnd() * 0.5 }));
+    docs.push(...history(friends[name]._id, 60, now, { codeChance: chance, evening: 0.6, intensity: 0.9 + rnd() * 0.5 }));
   }
   // A few afternoon (14:30 IST) learning and setup sessions in the last two weeks, so the
   // Learning & setup tab on Insights has data. Added last, so the older demo numbers stay the same.
   const afternoon = (d) => Math.floor(now / DAY) * DAY - d * DAY + 9 * 3600e3;
   for (const d of [2, 5, 9]) docs.push(...session(me._id, afternoon(d), 50, 'react-tutorial', now, 'learning'));
   for (const d of [3, 11]) docs.push(...session(me._id, afternoon(d), 40, 'portfolio', now, 'setup'));
+  // The last five days, ending with a session that finished a few minutes ago, so a demo opened at
+  // any hour shows time today, a running streak and recent days in the group race.
+  for (const d of [4, 3, 2, 1]) docs.push(...session(me._id, afternoon(d) + 6 * 3600e3, 80, 'codetrackr', now));
+  docs.push(...session(me._id, Math.floor((now - 100 * 60e3) / TEN_MIN) * TEN_MIN, 90, 'codetrackr', now));
   // De-duplicate (user, project, language, bucket) so the unique bucket index accepts every row.
   const seen = new Set();
   const unique = docs.filter((d) => {
@@ -246,5 +256,5 @@ function history(userId, days, now, { codeChance, evening = 0.7, intensity = 1 }
   // DEV_PORT lets this run next to `docker compose` (which holds 5050); pair it with
   // VITE_API_URL=http://localhost:<port> and Vite on 5174 (allowed by CORS).
   const port = Number(process.env.DEV_PORT) || 5050;
-  app.listen(port, () => console.log(`DEV API on http://localhost:${port} (AUTH_BYPASS, in-memory DB, ${unique.length} activity buckets)`));
+  app.listen(port, () => console.log(`DEV API on http://localhost:${port} (AUTH_BYPASS as "${myName}", in-memory DB, ${unique.length} activity buckets)`));
 })().catch((e) => { console.error(e); process.exit(1); });

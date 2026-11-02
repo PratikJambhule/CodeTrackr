@@ -78,6 +78,7 @@ export function RaceStrip({ user }: { user: Me }) {
     id: racer.id,
     name: racer.name,
     isMe: racer.isMe,
+    pos,
     value: pos === 1 ? hm(racer.total) : gapLabel(gap),
     cells: cells[racer.id],
     move: todayIdx > 0 ? moves[racer.id] : undefined,

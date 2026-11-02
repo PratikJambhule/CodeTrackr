@@ -156,8 +156,8 @@ cd extension && npm test
 cd frontend && npm run lint && npm test && npm run build
 ```
 
-505 backend unit assertions, 65 API integration tests (the real Express app over HTTP against an
-in-memory MongoDB), 135 extension assertions and 66 frontend tests. Frontend tests run in the India
+510 backend unit assertions, 66 API integration tests (the real Express app over HTTP against an
+in-memory MongoDB), 135 extension assertions and 67 frontend tests. Frontend tests run in the India
 time zone, where the date bugs showed up. CI runs all of them, plus a Docker build with a health
 check, on every push.
 

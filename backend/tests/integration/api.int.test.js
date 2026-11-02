@@ -520,6 +520,21 @@ async function main() {
       assert.ok(res.body.every((row) => !('email' in row)));
     }],
 
+    ['leaderboard: 100 rows by default, everyone up to 500 with ?limit=500 (what the website asks for)', async () => {
+      const User = require('../../models/user');
+      const Activity = require('../../models/Activity');
+      const viewer = await h.makeUser('Viewer');
+      const start = Math.floor(Date.now() / 600000) * 600000 - 3600000;
+      const users = await User.insertMany(Array.from({ length: 105 }, (_, i) => ({ googleId: `lim-${i}`, name: `Lim ${i}`, email: `lim${i}@example.test` })));
+      await Activity.insertMany(users.map((u, i) => ({ userId: u._id, fileName: 'a.js', language: 'javascript', projectName: 'p',
+        duration: 60 + i, timestamp: new Date(start), bucketStart: new Date(start) })));
+      const def = await request(app).get('/api/leaderboard').set('Cookie', viewer.cookie);
+      assert.strictEqual(def.body.length, 100);
+      const all = await request(app).get('/api/leaderboard?limit=500').set('Cookie', viewer.cookie);
+      assert.ok(all.body.length > 105, `got ${all.body.length}`);
+      assert.ok(['Lim 0', 'Lim 104'].every((n) => all.body.some((r) => r.name === n)));
+    }],
+
     ['groups: private join needs the password; details are members-only', async () => {
       const owner = await h.makeUser('Owner');
       const joiner = await h.makeUser('Joiner');
