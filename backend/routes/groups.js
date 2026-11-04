@@ -504,4 +504,26 @@ router.delete('/:groupId/members/:userId', isAuthenticated, async (req, res, nex
     }
 });
 
+// GET /api/groups/:groupId/practice — members' LeetCode and Codeforces practice this week (D-62).
+// Members only. Only VERIFIED accounts are shown; the rest are listed by name so people know why.
+router.get('/:groupId/practice', isAuthenticated, async (req, res, next) => {
+    try {
+        const { groupId } = req.params;
+        if (!(await GroupMember.exists({ groupId, userId: req.user._id }))) {
+            return res.status(403).json({ message: 'You must be a member to view group details' });
+        }
+        const members = await GroupMember.find({ groupId }).populate('userId', 'name profilePictureUrl').lean();
+        const people = members.filter((m) => m.userId).map((m) => ({ id: String(m.userId._id), name: m.userId.name }));
+        const rows = await require('../services/linkedSync').boardRows(people.map((p) => p.id));
+        const names = new Map(people.map((p) => [p.id, p.name]));
+        const shown = new Set(rows.map((r) => r.userId));
+        res.json({
+            rows: rows.map((r) => ({ ...r, name: names.get(r.userId) })),
+            notShown: people.filter((p) => !shown.has(p.id)).map((p) => ({ id: p.id, name: p.name })),
+        });
+    } catch (err) {
+        return next(err);
+    }
+});
+
 module.exports = router;

@@ -96,10 +96,93 @@ router.post('/complete-onboarding', isAuthenticated, async (req, res) => {
         });
     } catch (error) {
         log.error('complete onboarding failed', { requestId: req.id, err: error });
-        res.status(500).json({ 
-            success: false, 
-            message: 'Failed to complete onboarding' 
+        res.status(500).json({
+            success: false,
+            message: 'Failed to complete onboarding'
         });
+    }
+});
+
+// Linked LeetCode (D-59) and Codeforces (D-60) accounts. Shown only to their owner.
+const rateLimit = require('express-rate-limit');
+const { sessionKey } = require('../services/rateLimitKeys');
+const linkedSync = require('../services/linkedSync');
+const { LinkError } = require('../services/leetcode');
+const { practiceAnalytics } = require('../services/practiceAnalytics');
+
+// Linking calls LeetCode or Codeforces right away: a small cap keeps one person from hammering them.
+const linkLimit = rateLimit({
+    windowMs: 60 * 60 * 1000, max: 20, keyGenerator: sessionKey,
+    standardHeaders: true, legacyHeaders: false, skip: () => process.env.NODE_ENV === 'test',
+});
+
+const providerOk = (req, res) => {
+    if (linkedSync.PROVIDERS.includes(req.params.provider)) return true;
+    res.status(404).json({ success: false, message: 'Unknown account type.' });
+    return false;
+};
+
+// GET /api/user/links — the linked accounts with their latest summary.
+router.get('/links', isAuthenticated, async (req, res, next) => {
+    try {
+        res.json({ success: true, links: await linkedSync.view(req.user.id) });
+    } catch (err) {
+        return next(err);
+    }
+});
+
+// GET /api/user/practice — practice analytics over the linked accounts (D-61).
+router.get('/practice', isAuthenticated, async (req, res, next) => {
+    try {
+        res.json({ success: true, practice: practiceAnalytics(await linkedSync.view(req.user.id)) });
+    } catch (err) {
+        return next(err);
+    }
+});
+
+// PUT /api/user/links/:provider { username } — link or change, then sync at once.
+router.put('/links/:provider', isAuthenticated, linkLimit, async (req, res, next) => {
+    if (!providerOk(req, res)) return;
+    try {
+        await linkedSync.link(req.user.id, req.params.provider, req.body && req.body.username);
+        res.json({ success: true, links: await linkedSync.view(req.user.id) });
+    } catch (err) {
+        if (err instanceof LinkError) return res.status(err.status).json({ success: false, message: err.publicMessage });
+        return next(err);
+    }
+});
+
+// POST /api/user/links/:provider/verify-code — a code to put in the public profile (D-62).
+router.post('/links/:provider/verify-code', isAuthenticated, linkLimit, async (req, res, next) => {
+    if (!providerOk(req, res)) return;
+    try {
+        res.json({ success: true, code: await linkedSync.startVerify(req.user.id, req.params.provider) });
+    } catch (err) {
+        if (err instanceof LinkError) return res.status(err.status).json({ success: false, message: err.publicMessage });
+        return next(err);
+    }
+});
+
+// POST /api/user/links/:provider/verify — check the code is in the public profile now.
+router.post('/links/:provider/verify', isAuthenticated, linkLimit, async (req, res, next) => {
+    if (!providerOk(req, res)) return;
+    try {
+        await linkedSync.verify(req.user.id, req.params.provider);
+        res.json({ success: true, links: await linkedSync.view(req.user.id) });
+    } catch (err) {
+        if (err instanceof LinkError) return res.status(err.status).json({ success: false, message: err.publicMessage });
+        return next(err);
+    }
+});
+
+// DELETE /api/user/links/:provider — unlink and delete everything pulled for it.
+router.delete('/links/:provider', isAuthenticated, async (req, res, next) => {
+    if (!providerOk(req, res)) return;
+    try {
+        await linkedSync.unlink(req.user.id, req.params.provider);
+        res.json({ success: true, links: await linkedSync.view(req.user.id) });
+    } catch (err) {
+        return next(err);
     }
 });
 

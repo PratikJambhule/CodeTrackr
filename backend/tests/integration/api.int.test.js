@@ -535,6 +535,138 @@ async function main() {
       assert.ok(['Lim 0', 'Lim 104'].every((n) => all.body.some((r) => r.name === n)));
     }],
 
+    ['linked accounts: link LeetCode and Codeforces, see them, a bad new name keeps the old data, unlink deletes it', async () => {
+      const LcSolve = require('../../models/LcSolve');
+      const me = await h.makeUser('Linker');
+      const other = await h.makeUser('Other');
+      const realFetch = global.fetch;
+      const answer = (data) => ({ ok: true, status: 200, json: async () => ({ data }) });
+      const cfAnswer = (result) => ({ ok: true, status: 200, json: async () => ({ status: 'OK', result }) });
+      global.fetch = async (url, opts) => {
+        if (url.includes('codeforces.com/api/user.info')) return cfAnswer([{ handle: 'asha_cf', rating: 1450, maxRating: 1500, rank: 'specialist' }]);
+        if (url.includes('codeforces.com/api/user.rating')) return cfAnswer([{ ratingUpdateTimeSeconds: 1, newRating: 1450 }]);
+        if (url.includes('codeforces.com/api/user.status')) return cfAnswer([{ creationTimeSeconds: Math.floor(Date.now() / 1000) - 60, verdict: 'OK', problem: { contestId: 1, index: 'A', name: 'Theatre Square', rating: 1000, tags: ['math'] } }]);
+        const body = JSON.parse(opts.body);
+        if (body.query.includes('question(')) return answer({ question: { difficulty: 'Easy', topicTags: [{ name: 'Array' }] } });
+        if (body.variables.u !== 'asha') return answer({ matchedUser: null });
+        return answer({
+          matchedUser: { username: 'asha', submitStats: { acSubmissionNum: [{ difficulty: 'All', count: 3 }, { difficulty: 'Easy', count: 3 }] },
+            tagProblemCounts: { fundamental: [{ tagName: 'Array', problemsSolved: 3 }], intermediate: [], advanced: [] }, submissionCalendar: '{}' },
+          recentAcSubmissionList: [{ title: 'Two Sum', titleSlug: 'two-sum', timestamp: String(Math.floor(Date.now() / 1000) - 60) }],
+          userContestRanking: null,
+        });
+      };
+      try {
+        const lc = await request(app).put('/api/user/links/leetcode').set('Cookie', me.cookie).send({ username: 'asha' });
+        assert.strictEqual(lc.status, 200, JSON.stringify(lc.body));
+        assert.deepStrictEqual(lc.body.links.leetcode.summary.solved, { all: 3, easy: 3, medium: 0, hard: 0 });
+        assert.deepStrictEqual(lc.body.links.leetcode.recentSolves.map((s) => [s.titleSlug, s.difficulty, s.topics]), [['two-sum', 'Easy', ['Array']]]);
+
+        const missing = await request(app).put('/api/user/links/leetcode').set('Cookie', me.cookie).send({ username: 'nobody' });
+        assert.strictEqual(missing.status, 404);
+        assert.strictEqual(await LcSolve.countDocuments({ userId: me.user.id }), 1, 'old solves kept after a failed change');
+
+        const cf = await request(app).put('/api/user/links/codeforces').set('Cookie', me.cookie).send({ username: 'asha_cf' });
+        assert.strictEqual(cf.status, 200, JSON.stringify(cf.body));
+        assert.deepStrictEqual([cf.body.links.codeforces.summary.rating, cf.body.links.codeforces.summary.solvedAll], [1450, 1]);
+        assert.ok(cf.body.links.leetcode, 'linking Codeforces keeps LeetCode');
+        const practice = await request(app).get('/api/user/practice').set('Cookie', me.cookie);
+        assert.strictEqual(practice.status, 200);
+        assert.deepStrictEqual(practice.body.practice.linked, { leetcode: true, codeforces: true });
+        assert.strictEqual(practice.body.practice.totals.solved, 4);
+        assert.ok(practice.body.practice.topics.find((t) => t.topic === 'Math').codeforces === 1);
+        assert.deepStrictEqual([practice.body.practice.outlook.eligible, practice.body.practice.outlook.reason], [false, 'needs 6 rated contests (you have 1)']);
+        assert.strictEqual((await request(app).get('/api/user/practice')).status, 401);
+
+        const theirs = await request(app).get('/api/user/links').set('Cookie', other.cookie);
+        assert.deepStrictEqual(theirs.body.links, { leetcode: null, codeforces: null });
+        for (const provider of ['github', 'hackerrank']) {
+          const bad = await request(app).put(`/api/user/links/${provider}`).set('Cookie', me.cookie).send({ username: 'x' });
+          assert.strictEqual(bad.status, 404);
+        }
+        assert.strictEqual((await request(app).get('/api/user/links')).status, 401);
+
+        await request(app).delete('/api/user/links/leetcode').set('Cookie', me.cookie);
+        await request(app).delete('/api/user/links/codeforces').set('Cookie', me.cookie);
+        const after = await request(app).get('/api/user/links').set('Cookie', me.cookie);
+        assert.deepStrictEqual(after.body.links, { leetcode: null, codeforces: null });
+        assert.strictEqual(await LcSolve.countDocuments({ userId: me.user.id }), 0);
+      } finally {
+        global.fetch = realFetch;
+      }
+    }],
+
+    ['practice boards: only verified accounts show on the group board and the leaderboard; a new name must verify again', async () => {
+      const owner = await h.makeUser('Asha');
+      const friend = await h.makeUser('Ravi');
+      const realFetch = global.fetch;
+      let about = 'hello';
+      const answer = (data) => ({ ok: true, status: 200, json: async () => ({ data }) });
+      global.fetch = async (url, opts) => {
+        const body = JSON.parse(opts.body);
+        if (body.query.includes('aboutMe')) return answer({ matchedUser: { profile: { aboutMe: about } } });
+        if (body.query.includes('question(')) return answer({ question: { difficulty: 'Medium', topicTags: [{ name: 'Graph Theory' }] } });
+        return answer({
+          matchedUser: { username: body.variables.u, submitStats: { acSubmissionNum: [{ difficulty: 'All', count: 12 }] },
+            tagProblemCounts: { fundamental: [], intermediate: [], advanced: [] }, submissionCalendar: '{}' },
+          recentAcSubmissionList: [{ title: 'Course Schedule', titleSlug: 'course-schedule', timestamp: String(Math.floor(Date.now() / 1000) - 3600) }],
+          userContestRanking: { rating: 1720.4 },
+        });
+      };
+      try {
+        const g = await request(app).post('/api/groups/create').set('Cookie', owner.cookie).send({ groupName: 'DSA club', groupDescription: 'practice', visibility: 'public' });
+        const id = g.body.group._id;
+        await request(app).post(`/api/groups/${id}/join`).set('Cookie', friend.cookie).send({});
+        await request(app).put('/api/user/links/leetcode').set('Cookie', owner.cookie).send({ username: 'asha_lc' });
+
+        let board = await request(app).get(`/api/groups/${id}/practice`).set('Cookie', friend.cookie);
+        assert.strictEqual(board.status, 200);
+        assert.deepStrictEqual(board.body.rows, [], 'not verified: not on the board');
+        assert.deepStrictEqual(board.body.notShown.map((p) => p.name).sort(), ['Asha', 'Ravi']);
+
+        const code = (await request(app).post('/api/user/links/leetcode/verify-code').set('Cookie', owner.cookie)).body.code;
+        assert.match(code, /^ct-[0-9a-f]{8}$/);
+        const early = await request(app).post('/api/user/links/leetcode/verify').set('Cookie', owner.cookie);
+        assert.strictEqual(early.status, 409);
+        about = `I code. ${code}`;
+        const ok = await request(app).post('/api/user/links/leetcode/verify').set('Cookie', owner.cookie);
+        assert.strictEqual(ok.status, 200, JSON.stringify(ok.body));
+        assert.strictEqual(ok.body.links.leetcode.verified, true);
+
+        board = await request(app).get(`/api/groups/${id}/practice`).set('Cookie', friend.cookie);
+        assert.deepStrictEqual(board.body.rows.map((r) => [r.name, r.solved7d, r.leetcode.rating, r.solvedTotal]), [['Asha', 1, 1720, 12]]);
+        const lb = await request(app).get('/api/leaderboard/practice').set('Cookie', friend.cookie);
+        assert.ok(lb.body.some((r) => r.name === 'Asha' && r.rank >= 1));
+
+        const outsider = await h.makeUser('Outsider');
+        assert.strictEqual((await request(app).get(`/api/groups/${id}/practice`).set('Cookie', outsider.cookie)).status, 403);
+
+        await request(app).put('/api/user/links/leetcode').set('Cookie', owner.cookie).send({ username: 'someone_else' });
+        board = await request(app).get(`/api/groups/${id}/practice`).set('Cookie', friend.cookie);
+        assert.deepStrictEqual(board.body.rows, [], 'a new name is not verified');
+      } finally {
+        global.fetch = realFetch;
+      }
+    }],
+
+    ['linked accounts: the nightly sync updates accounts and records a failure without throwing', async () => {
+      const LinkedAccount = require('../../models/LinkedAccount');
+      const { syncAll } = require('../../services/linkedSync');
+      const me = await h.makeUser('Nightly');
+      await LinkedAccount.create({ userId: me.user.id, provider: 'leetcode', username: 'gone-user', summary: { solved: { all: 9 } } });
+      const realFetch = global.fetch;
+      global.fetch = async () => ({ ok: false, status: 503, json: async () => ({}) });
+      try {
+        const r = await syncAll({ pauseMs: 0 });
+        assert.ok(r.failed >= 1);
+        const a = await LinkedAccount.findOne({ userId: me.user.id }).lean();
+        assert.match(a.lastError, /503/);
+        assert.strictEqual(a.summary.solved.all, 9, 'the last good summary is kept');
+      } finally {
+        global.fetch = realFetch;
+      }
+    }],
+
     ['groups: private join needs the password; details are members-only', async () => {
       const owner = await h.makeUser('Owner');
       const joiner = await h.makeUser('Joiner');

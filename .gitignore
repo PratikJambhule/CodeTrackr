@@ -30,3 +30,6 @@ extension/index.html
 # Generated training data: rebuilt exactly by `node ml/generate_synthetic.js` (seeded)
 ml/data/
 __pycache__/
+
+# Downloaded Kaggle datasets (ml/build_cf_userdata.js --dir): never commit, gigabytes
+archive*/

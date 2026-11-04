@@ -1,10 +1,7 @@
 import { useQueries, useQuery } from '@tanstack/react-query';
 import { ApiError, apiGet } from '../api';
 import { tzOffset } from '../lib/format';
-import type {
-  AppNotification, DeviceToken, Goal, GoalProgress, Group, GroupDetails, GroupPreview, History,
-  InsightsPayload, LeaderRow, Me, Metrics, PeriodView, TimeSlot, TypeAnalytics, WorkSession,
-} from '../types';
+import type { AppNotification, DeviceToken, Goal, GoalProgress, Group, GroupDetails, GroupPreview, History, InsightsPayload, LeaderRow, Links, Me, Metrics, PeriodView, Practice, PracticeRow, TimeSlot, TypeAnalytics, WorkSession } from '../types';
 
 /**
  * Every read the website makes, typed, in one place. React Query caches each
@@ -136,3 +133,19 @@ export const useSessions = (days: number) =>
     queryKey: ['sessions', days],
     queryFn: () => apiGet<{ days: number; sessions: WorkSession[] }>(`/api/sessions?days=${days}`),
   });
+
+export const useLinks = () =>
+  useQuery({ queryKey: ['links'], queryFn: async () => (await apiGet<{ links: Links }>('/api/user/links')).links });
+
+export const usePractice = () =>
+  useQuery({ queryKey: ['practice'], queryFn: async () => (await apiGet<{ practice: Practice }>('/api/user/practice')).practice });
+
+export const useGroupPractice = (groupId: string | undefined) =>
+  useQuery({
+    queryKey: ['groups', 'practice', groupId],
+    queryFn: () => apiGet<{ rows: PracticeRow[]; notShown: { id: string; name: string }[] }>(`/api/groups/${groupId}/practice`),
+    enabled: Boolean(groupId),
+  });
+
+export const usePracticeLeaderboard = (enabled: boolean) =>
+  useQuery({ queryKey: ['leaderboard', 'practice'], queryFn: () => apiGet<PracticeRow[]>('/api/leaderboard/practice'), enabled });

@@ -3,7 +3,8 @@ import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { useQueryClient } from '@tanstack/react-query';
 import { ArrowLeft, Link2, LogOut, Pencil } from 'lucide-react';
 import { apiSend, errorText } from '../api';
-import { useGroupDetails, type BoardWindow } from '../hooks/queries';
+import { type BoardWindow, useGroupDetails, useGroupPractice } from '../hooks/queries';
+import { PracticeStandings } from '../components/PracticeStandings';
 import { StandingsTower, type TowerRow } from '../components/charts/StandingsTower';
 import { CellLegend } from '../components/charts/DayCells';
 import { RaceChart } from '../components/charts/RaceChart';
@@ -262,6 +263,8 @@ export default function GroupBoard({ user }: { user: Me }) {
 
       {d.daily && !isAll && <Highlights racers={racers} futureFrom={futureFrom} details={d} />}
 
+      <GroupPractice groupId={d.group._id} meId={user.id} groupName={d.group.name} />
+
       <Card className="p-5">
         <CardTitle aside={<span className="hidden sm:inline">{inviteUrl}</span>}>Members</CardTitle>
         <ul className="flex flex-col">
@@ -391,5 +394,32 @@ function RenameDialog({ open, onClose, groupId, name, description }: { open: boo
         </Button>
       </form>
     </Modal>
+  );
+}
+
+/** LeetCode and Codeforces practice for the group's members, verified accounts only (D-62). */
+function GroupPractice({ groupId, meId, groupName }: { groupId: string; meId: string; groupName: string }) {
+  const q = useGroupPractice(groupId);
+  if (q.isPending) return <Skeleton className="mb-6 h-40" />;
+  if (q.isError) return null;
+  const { rows, notShown } = q.data;
+  const meMissing = notShown.some((p) => p.id === meId);
+  return (
+    <Card className="mb-6 p-4 sm:p-5">
+      <CardTitle aside="LeetCode + Codeforces · last 7 days · updated nightly">Practice</CardTitle>
+      {rows.length ? (
+        <PracticeStandings rows={rows} meId={meId} label={`${groupName}: problems solved in the last 7 days`} />
+      ) : (
+        <EmptyState title="Nobody here has a verified LeetCode or Codeforces account yet">
+          Link one on your profile and press Verify: the group then sees problems solved this week and ratings.
+        </EmptyState>
+      )}
+      {!!notShown.length && (
+        <p className="mt-4 border-t border-line px-1 pt-3 text-sm text-muted">
+          Not on this board: {notShown.map((p) => p.name).join(', ')}.{' '}
+          {meMissing ? <Link to="/profile">Link and verify your account</Link> : 'They can link and verify an account on their profile.'}
+        </p>
+      )}
+    </Card>
   );
 }

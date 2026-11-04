@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const crypto = require('crypto');
+const { log } = require('../services/logger');
 const {
   checkUpcomingDeadlines,
   checkOverdueGoals,
@@ -38,7 +39,12 @@ router.post('/run-rollup', requireCronSecret, async (req, res, next) => {
     const r = await rollupDaily({ apply: true, beforeDays: 2 });
     // Also save settled coding sessions for the work-type model (ML plan B7). Idempotent.
     const s = await require('../services/sessionSnapshot').snapshotAll();
-    res.json({ ok: true, wrote: r && r.wrote, sessions: s.sessions });
+    // Re-read linked LeetCode accounts (D-59) in the background: with a polite pause per
+    // account it can outlast the caller's 180 s timeout. Failures are recorded per account.
+    require('../services/linkedSync').syncAll()
+      .then((l) => log.info('linked accounts sync', l))
+      .catch((err) => log.error('linked accounts sync failed', { err }));
+    res.json({ ok: true, wrote: r && r.wrote, sessions: s.sessions, linked: 'started' });
   } catch (err) {
     return next(err);
   }

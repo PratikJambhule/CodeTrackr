@@ -1,7 +1,7 @@
 import { Link } from 'react-router-dom';
 import { splitGoals } from '../../lib/goals';
 import { Sparkles, Target } from 'lucide-react';
-import { useGoalProgress, useGoals, useMetrics, useSessions, useTypeAnalytics } from '../../hooks/queries';
+import { useGoalProgress, useGoals, useMetrics, usePractice, useSessions, useTypeAnalytics } from '../../hooks/queries';
 import { Bars, RankedBars, SplitBar } from '../../components/charts/Bars';
 import { Ring } from '../../components/charts/Ring';
 import { Sparkline } from '../../components/charts/Sparkline';
@@ -270,6 +270,54 @@ export function TimeSplitCard({ history, pending }: { history?: History; pending
             empty="File times appear with extension 2.6.0."
             items={files.slice(0, 5).map((f) => ({ label: f.name, value: f.seconds, display: hm(f.seconds) }))}
           />
+        </>
+      )}
+    </Card>
+  );
+}
+
+/** LeetCode and Codeforces at a glance (D-61): this week, ratings, and the first interview gap. */
+export function PracticeCard() {
+  const q = usePractice();
+  const p = q.data;
+  const linked = p && (p.linked.leetcode || p.linked.codeforces);
+  return (
+    <Card className="min-w-0 p-5">
+      <CardTitle aside={<Link to={linked ? '/practice' : '/profile'}>{linked ? 'Practice' : 'Link'}</Link>}>LeetCode &amp; Codeforces</CardTitle>
+      {q.isPending ? (
+        <Skeleton className="h-24" />
+      ) : !linked ? (
+        <p className="text-sm text-muted">
+          <Link to="/profile">Link your LeetCode or Codeforces</Link> to see problems solved, ratings and which interview topics need practice.
+        </p>
+      ) : (
+        <>
+          <div className="grid grid-cols-3 gap-3">
+            <div>
+              <div className="display text-3xl">{int(p.totals.solved7d)}</div>
+              <div className="font-mono text-[11px] text-muted">solved · 7 days</div>
+            </div>
+            <div>
+              <div className="display text-3xl">{p.totals.codeforces?.rating ?? '—'}</div>
+              <div className="font-mono text-[11px] text-muted">Codeforces</div>
+            </div>
+            <div>
+              <div className="display text-3xl">{p.totals.leetcode?.rating ?? '—'}</div>
+              <div className="font-mono text-[11px] text-muted">LeetCode contest</div>
+            </div>
+          </div>
+          {p.outlook?.eligible && p.outlook.range && (
+            <p className="mt-3 text-sm">
+              Outlook in 12 weeks: <strong>{p.outlook.range.low}–{p.outlook.range.high}</strong> <span className="text-muted">(Codeforces, ML forecast)</span>
+            </p>
+          )}
+          <p className="mt-3 text-sm">
+            {p.gaps.length ? (
+              <>Practise next: <strong>{p.gaps.slice(0, 2).join(', ')}</strong> <span className="text-muted">(interview topics with under 5 solved)</span></>
+            ) : (
+              <span className="text-muted">Every core interview topic has 5+ solved.</span>
+            )}
+          </p>
         </>
       )}
     </Card>

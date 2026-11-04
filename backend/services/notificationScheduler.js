@@ -91,6 +91,10 @@ const initScheduler = () => {
     require('./sessionSnapshot').snapshotAll()
       .then((r) => log.info('session snapshot', r))
       .catch((err) => log.error('session snapshot failed', { err }));
+    // Re-read linked LeetCode accounts (D-59). Failures are recorded per account.
+    require('./linkedSync').syncAll()
+      .then((r) => log.info('linked accounts sync', r))
+      .catch((err) => log.error('linked accounts sync failed', { err }));
   });
 
   // Run immediately on startup

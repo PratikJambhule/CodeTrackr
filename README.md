@@ -41,6 +41,20 @@ each other week by week.
     and a warning when setup takes a quarter of your coding time.
 
   Each tab says how many sessions you confirmed; the rest are CodeTrackr's guess.
+- **LeetCode and Codeforces on your profile.** Link a LeetCode username and a Codeforces handle to
+  see problems solved by difficulty and topic, recent solves, contest rating (and on Codeforces your
+  rank, best rating and rating over recent contests), refreshed every night. Shown only to you, never
+  on boards; unlinking deletes it.
+- **Practice analytics.** One page over both sites: problems solved per topic (the two sites' topic
+  names mapped to one list), interview topics with little practice, Codeforces acceptance rate per
+  topic, problems solved per week, how hard you practise (the share of solves above your rating,
+  and the hardest and average problem per month), contest ratings, and your VS Code DSA time.
+- **Rating outlook (machine learning).** On the Practice page, a range for your Codeforces rating in
+  12 weeks from three gradient-boosting models trained on ~37,000 Codeforces users; on 7,474 people
+  it never saw, 79.8% of real outcomes fell inside the range. The trees run in Node, no Python server.
+- **Practice on boards.** Verify a linked account (a short code in your public LeetCode "About" or
+  Codeforces name) and your groups' boards and the leaderboard ("Problems solved") show your problems
+  solved this week and ratings. Unverified accounts stay private, so nobody can borrow a profile.
 - **One-click sign-in for VS Code.** *CodeTrackr: Sign In* shows a code; approve it on the website
   and that computer gets its own revocable key, stored in the OS keychain.
 
@@ -128,7 +142,7 @@ cd backend && cp .env.example .env
 
 Fill in `MONGO_URI`, `JWT_SECRET`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` and
 `GOOGLE_CALLBACK_URL` (`http://localhost:5050/auth/google/callback`), then `npm run dev` in
-`backend/` and `npm run dev` in `frontend/`.
+`backend/` and `npm run dev` in `frontend/`. LeetCode and Codeforces linking need no key.
 
 ### Try the extension locally
 
@@ -156,8 +170,8 @@ cd extension && npm test
 cd frontend && npm run lint && npm test && npm run build
 ```
 
-510 backend unit assertions, 66 API integration tests (the real Express app over HTTP against an
-in-memory MongoDB), 135 extension assertions and 67 frontend tests. Frontend tests run in the India
+529 backend unit assertions, 69 API integration tests (the real Express app over HTTP against an
+in-memory MongoDB), 135 extension assertions and 74 frontend tests. Frontend tests run in the India
 time zone, where the date bugs showed up. CI runs all of them, plus a Docker build with a health
 check, on every push.
 
@@ -190,6 +204,8 @@ files you worked in (never folders or full paths), and terminal commands by kind
 compile, build, test, git, docker, other) with whether they failed.
 Command text is never stored: extension 2.6.0 sends only the kind, and the server reduces any text an
 older extension sends to its kind before saving. File contents, diffs and full paths are never sent.
+If you link LeetCode or Codeforces, the server reads only your public profile there (solved
+problems by difficulty and topic, ratings), shows it only to you, and deletes it when you unlink.
 The website's privacy page explains it in full.
 
 ## Team

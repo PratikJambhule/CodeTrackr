@@ -1,0 +1,465 @@
+{
+ "modelVersion": "cf-outlook-2026-11-04",
+ "cases": [
+  {
+   "features": {
+    "rating": 1262.0,
+    "prev_delta": -5.0,
+    "contests_so_far": 39.0,
+    "contests_60d": 5.0,
+    "days_since_prev_contest": 1.0,
+    "subs_28d": 78.0,
+    "solved_28d": 23.0,
+    "solved_prev_28d": 9.0,
+    "fail_ratio_28d": 0.7051,
+    "active_days_28d": 10.0,
+    "solved_rating_mean": 1257.0,
+    "solved_rating_max": 2000.0,
+    "hard_share": 0.4783,
+    "easy_share": 0.3478
+   },
+   "expected": {
+    "0.1": -59.938868604043165,
+    "0.5": 73.93020502975558,
+    "0.9": 222.89540914761037
+   }
+  },
+  {
+   "features": {
+    "rating": 1416.0,
+    "prev_delta": -24.0,
+    "contests_so_far": 29.0,
+    "contests_60d": 1.0,
+    "days_since_prev_contest": 69.0,
+    "subs_28d": 134.0,
+    "solved_28d": 53.0,
+    "solved_prev_28d": 10.0,
+    "fail_ratio_28d": 0.5597,
+    "active_days_28d": 23.0,
+    "solved_rating_mean": 1377.0,
+    "solved_rating_max": 2200.0,
+    "hard_share": 0.4808,
+    "easy_share": 0.4038
+   },
+   "expected": {
+    "0.1": -48.05157653663064,
+    "0.5": 70.60508886621541,
+    "0.9": 209.03637162854864
+   }
+  },
+  {
+   "features": {
+    "rating": 1033.0,
+    "prev_delta": -32.0,
+    "contests_so_far": 7.0,
+    "contests_60d": 1.0,
+    "days_since_prev_contest": 81.0,
+    "subs_28d": 7.0,
+    "solved_28d": 3.0,
+    "solved_prev_28d": 2.0,
+    "fail_ratio_28d": 0.5714,
+    "active_days_28d": 1.0,
+    "solved_rating_mean": 800.0,
+    "solved_rating_max": 800.0,
+    "hard_share": 0.0,
+    "easy_share": 0.0
+   },
+   "expected": {
+    "0.1": -112.20659281506944,
+    "0.5": -4.905722719193043,
+    "0.9": 169.41826224154755
+   }
+  },
+  {
+   "features": {
+    "rating": 1590.0,
+    "prev_delta": -82.0,
+    "contests_so_far": 34.0,
+    "contests_60d": 10.0,
+    "days_since_prev_contest": 2.0,
+    "subs_28d": 68.0,
+    "solved_28d": 29.0,
+    "solved_prev_28d": 22.0,
+    "fail_ratio_28d": 0.5588,
+    "active_days_28d": 12.0,
+    "solved_rating_mean": 1343.0,
+    "solved_rating_max": 2000.0,
+    "hard_share": 0.2857,
+    "easy_share": 0.4286
+   },
+   "expected": {
+    "0.1": -64.09048098752932,
+    "0.5": 102.521689236894,
+    "0.9": 267.9113995219047
+   }
+  },
+  {
+   "features": {
+    "rating": 853.0,
+    "prev_delta": -3.0,
+    "contests_so_far": 48.0,
+    "contests_60d": 14.0,
+    "days_since_prev_contest": 8.0,
+    "subs_28d": 36.0,
+    "solved_28d": 15.0,
+    "solved_prev_28d": 22.0,
+    "fail_ratio_28d": 0.5556,
+    "active_days_28d": 9.0,
+    "solved_rating_mean": 964.0,
+    "solved_rating_max": 1300.0,
+    "hard_share": 0.3571,
+    "easy_share": 0.0
+   },
+   "expected": {
+    "0.1": -81.94834591866109,
+    "0.5": 75.91845247706576,
+    "0.9": 233.55236582766935
+   }
+  },
+  {
+   "features": {
+    "rating": 1307.0,
+    "prev_delta": -51.0,
+    "contests_so_far": 26.0,
+    "contests_60d": 9.0,
+    "days_since_prev_contest": 7.0,
+    "subs_28d": 17.0,
+    "solved_28d": 8.0,
+    "solved_prev_28d": 21.0,
+    "fail_ratio_28d": 0.5294,
+    "active_days_28d": 4.0,
+    "solved_rating_mean": 938.0,
+    "solved_rating_max": 1200.0,
+    "hard_share": 0.0,
+    "easy_share": 0.625
+   },
+   "expected": {
+    "0.1": -74.62057138303024,
+    "0.5": 57.26684576949648,
+    "0.9": 207.64662071297448
+   }
+  },
+  {
+   "features": {
+    "rating": 1031.0,
+    "prev_delta": -24.0,
+    "contests_so_far": 24.0,
+    "contests_60d": 3.0,
+    "days_since_prev_contest": 12.0,
+    "subs_28d": 5.0,
+    "solved_28d": 2.0,
+    "solved_prev_28d": 2.0,
+    "fail_ratio_28d": 0.6,
+    "active_days_28d": 2.0,
+    "solved_rating_mean": 800.0,
+    "solved_rating_max": 800.0,
+    "hard_share": 0.0,
+    "easy_share": 0.0
+   },
+   "expected": {
+    "0.1": -85.84815076335433,
+    "0.5": 47.80107945313008,
+    "0.9": 212.71682626888244
+   }
+  },
+  {
+   "features": {
+    "rating": 942.0,
+    "prev_delta": 26.0,
+    "contests_so_far": 14.0,
+    "contests_60d": 9.0,
+    "days_since_prev_contest": 22.0,
+    "subs_28d": 35.0,
+    "solved_28d": 21.0,
+    "solved_prev_28d": 81.0,
+    "fail_ratio_28d": 0.4,
+    "active_days_28d": 11.0,
+    "solved_rating_mean": 986.0,
+    "solved_rating_max": 1300.0,
+    "hard_share": 0.381,
+    "easy_share": 0.0
+   },
+   "expected": {
+    "0.1": -82.38444435844983,
+    "0.5": 65.14818264029806,
+    "0.9": 231.78806828822852
+   }
+  },
+  {
+   "features": {
+    "rating": 1244.0,
+    "prev_delta": 58.0,
+    "contests_so_far": 25.0,
+    "contests_60d": 8.0,
+    "days_since_prev_contest": 4.0,
+    "subs_28d": 33.0,
+    "solved_28d": 12.0,
+    "solved_prev_28d": 17.0,
+    "fail_ratio_28d": 0.5455,
+    "active_days_28d": 7.0,
+    "solved_rating_mean": 1025.0,
+    "solved_rating_max": 1300.0,
+    "hard_share": 0.0,
+    "easy_share": 0.4167
+   },
+   "expected": {
+    "0.1": -97.05854540188864,
+    "0.5": 35.3227367625129,
+    "0.9": 172.96150090759204
+   }
+  },
+  {
+   "features": {
+    "rating": 1327.0,
+    "prev_delta": 69.0,
+    "contests_so_far": 22.0,
+    "contests_60d": 8.0,
+    "days_since_prev_contest": 2.0,
+    "subs_28d": 158.0,
+    "solved_28d": 67.0,
+    "solved_prev_28d": 13.0,
+    "fail_ratio_28d": 0.5696,
+    "active_days_28d": 19.0,
+    "solved_rating_mean": 1021.0,
+    "solved_rating_max": 1500.0,
+    "hard_share": 0.0159,
+    "easy_share": 0.5873
+   },
+   "expected": {
+    "0.1": -102.9008543462815,
+    "0.5": 24.490721283947803,
+    "0.9": 159.7232006125404
+   }
+  },
+  {
+   "features": {
+    "rating": 1264.0,
+    "prev_delta": 34.0,
+    "contests_so_far": 65.0,
+    "contests_60d": 14.0,
+    "days_since_prev_contest": 2.0,
+    "subs_28d": 55.0,
+    "solved_28d": 26.0,
+    "solved_prev_28d": 31.0,
+    "fail_ratio_28d": 0.5273,
+    "active_days_28d": 11.0,
+    "solved_rating_mean": 1019.0,
+    "solved_rating_max": 1700.0,
+    "hard_share": 0.1538,
+    "easy_share": 0.5385
+   },
+   "expected": {
+    "0.1": -115.2744722140054,
+    "0.5": 19.005356222137614,
+    "0.9": 154.58017084792982
+   }
+  },
+  {
+   "features": {
+    "rating": 966.0,
+    "prev_delta": -118.0,
+    "contests_so_far": 68.0,
+    "contests_60d": 13.0,
+    "days_since_prev_contest": 1.0,
+    "subs_28d": 28.0,
+    "solved_28d": 18.0,
+    "solved_prev_28d": 15.0,
+    "fail_ratio_28d": 0.3571,
+    "active_days_28d": 10.0,
+    "solved_rating_mean": 873.0,
+    "solved_rating_max": 1200.0,
+    "hard_share": 0.1333,
+    "easy_share": 0.0
+   },
+   "expected": {
+    "0.1": -93.78566451772495,
+    "0.5": 60.300025020406466,
+    "0.9": 211.8115697649726
+   }
+  },
+  {
+   "features": {
+    "rating": 2338.0,
+    "prev_delta": 53.0,
+    "contests_so_far": 50.0,
+    "contests_60d": 6.0,
+    "days_since_prev_contest": 12.0,
+    "subs_28d": 118.0,
+    "solved_28d": 74.0,
+    "solved_prev_28d": 65.0,
+    "fail_ratio_28d": 0.3559,
+    "active_days_28d": 17.0,
+    "solved_rating_mean": 1797.0,
+    "solved_rating_max": 3000.0,
+    "hard_share": 0.1216,
+    "easy_share": 0.6622
+   },
+   "expected": {
+    "0.1": -114.89085823145714,
+    "0.5": 24.73484870925925,
+    "0.9": 150.46615858267387
+   }
+  },
+  {
+   "features": {
+    "rating": 1428.0,
+    "prev_delta": 70.0,
+    "contests_so_far": 43.0,
+    "contests_60d": 5.0,
+    "days_since_prev_contest": 19.0,
+    "subs_28d": 64.0,
+    "solved_28d": 27.0,
+    "solved_prev_28d": 9.0,
+    "fail_ratio_28d": 0.5781,
+    "active_days_28d": 15.0,
+    "solved_rating_mean": 1576.0,
+    "solved_rating_max": 2400.0,
+    "hard_share": 0.6,
+    "easy_share": 0.16
+   },
+   "expected": {
+    "0.1": -89.39807808082828,
+    "0.5": 38.352467354332425,
+    "0.9": 197.3918062860667
+   }
+  },
+  {
+   "features": {
+    "rating": 1651.0,
+    "prev_delta": -13.0,
+    "contests_so_far": 9.0,
+    "contests_60d": 1.0,
+    "days_since_prev_contest": 997.0,
+    "subs_28d": 24.0,
+    "solved_28d": 15.0,
+    "solved_prev_28d": 0.0,
+    "fail_ratio_28d": 0.375,
+    "active_days_28d": 3.0,
+    "solved_rating_mean": 867.0,
+    "solved_rating_max": 1400.0,
+    "hard_share": 0.0,
+    "easy_share": 0.9333
+   },
+   "expected": {
+    "0.1": -107.91674676266328,
+    "0.5": 18.422199060383843,
+    "0.9": 190.47662065008402
+   }
+  },
+  {
+   "features": {
+    "rating": 1553.0,
+    "prev_delta": -9.0,
+    "contests_so_far": 38.0,
+    "contests_60d": 10.0,
+    "days_since_prev_contest": 1.0,
+    "subs_28d": 64.0,
+    "solved_28d": 34.0,
+    "solved_prev_28d": 4.0,
+    "fail_ratio_28d": 0.4375,
+    "active_days_28d": 8.0,
+    "solved_rating_mean": 1214.0,
+    "solved_rating_max": 2200.0,
+    "hard_share": 0.1379,
+    "easy_share": 0.5862
+   },
+   "expected": {
+    "0.1": -94.8210506008264,
+    "0.5": 47.1821490819956,
+    "0.9": 188.557633430861
+   }
+  },
+  {
+   "features": {
+    "rating": 957.0,
+    "prev_delta": -71.0,
+    "contests_so_far": 18.0,
+    "contests_60d": 2.0,
+    "days_since_prev_contest": 5.0,
+    "subs_28d": 121.0,
+    "solved_28d": 63.0,
+    "solved_prev_28d": 42.0,
+    "fail_ratio_28d": 0.4628,
+    "active_days_28d": 17.0,
+    "solved_rating_mean": 1284.0,
+    "solved_rating_max": 1700.0,
+    "hard_share": 0.8413,
+    "easy_share": 0.0
+   },
+   "expected": {
+    "0.1": -26.02826081943189,
+    "0.5": 130.33026085128705,
+    "0.9": 293.24141365791814
+   }
+  },
+  {
+   "features": {
+    "rating": 2134.0,
+    "prev_delta": -62.0,
+    "contests_so_far": 91.0,
+    "contests_60d": 2.0,
+    "days_since_prev_contest": 41.0,
+    "subs_28d": 18.0,
+    "solved_28d": 7.0,
+    "solved_prev_28d": 3.0,
+    "fail_ratio_28d": 0.5556,
+    "active_days_28d": 3.0,
+    "solved_rating_mean": 1320.0,
+    "solved_rating_max": 2100.0,
+    "hard_share": 0.0,
+    "easy_share": 0.8
+   },
+   "expected": {
+    "0.1": -113.55129913896717,
+    "0.5": 22.35627244069499,
+    "0.9": 157.91861796945554
+   }
+  },
+  {
+   "features": {
+    "rating": 1048.0,
+    "prev_delta": 25.0,
+    "contests_so_far": 8.0,
+    "contests_60d": 2.0,
+    "days_since_prev_contest": 52.0,
+    "subs_28d": 7.0,
+    "solved_28d": 5.0,
+    "solved_prev_28d": 4.0,
+    "fail_ratio_28d": 0.2857,
+    "active_days_28d": 2.0,
+    "solved_rating_mean": 820.0,
+    "solved_rating_max": 900.0,
+    "hard_share": 0.0,
+    "easy_share": 0.0
+   },
+   "expected": {
+    "0.1": -99.99154737829475,
+    "0.5": 18.03819636896121,
+    "0.9": 177.6601834644912
+   }
+  },
+  {
+   "features": {
+    "rating": 1462.0,
+    "prev_delta": 15.0,
+    "contests_so_far": 69.0,
+    "contests_60d": 6.0,
+    "days_since_prev_contest": 9.0,
+    "subs_28d": 67.0,
+    "solved_28d": 25.0,
+    "solved_prev_28d": 11.0,
+    "fail_ratio_28d": 0.597,
+    "active_days_28d": 9.0,
+    "solved_rating_mean": 1132.0,
+    "solved_rating_max": 2200.0,
+    "hard_share": 0.12,
+    "easy_share": 0.56
+   },
+   "expected": {
+    "0.1": -112.64750306100854,
+    "0.5": 30.135084431163243,
+    "0.9": 189.24646772954904
+   }
+  }
+ ]
+}

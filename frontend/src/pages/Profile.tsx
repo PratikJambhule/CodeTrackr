@@ -4,6 +4,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { Check, Copy, KeyRound, LogOut } from 'lucide-react';
 import { apiSend, errorText } from '../api';
 import DeviceList from '../components/DeviceList';
+import LinkedAccounts from '../components/LinkedAccounts';
 import { signOut } from '../components/layout/signOut';
 import { ThemeToggle } from '../components/layout/ThemeToggle';
 import { Avatar, Button, Card, CardTitle, Modal, PageHeader, useToast } from '../components/ui';
@@ -125,6 +126,15 @@ export default function Profile({ user }: { user: Me }) {
             expires after a year.
           </p>
           <DeviceList />
+        </Card>
+
+        <Card className="p-6">
+          <CardTitle aside={<Link to="/practice">Practice analytics</Link>}>Coding practice</CardTitle>
+          <p className="mb-5 text-sm text-muted">
+            Link your LeetCode username and Codeforces handle to see the problems you solved, your ratings and your strongest topics next to your VS Code time. CodeTrackr
+            reads only your public profiles, refreshes them every night, and shows them only to you. Unlinking deletes what was pulled.
+          </p>
+          <LinkedAccounts />
         </Card>
 
         <Card className="p-6">

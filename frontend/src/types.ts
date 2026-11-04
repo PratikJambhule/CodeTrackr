@@ -285,3 +285,94 @@ export interface InsightsPayload {
   skipped: { id: string; reason: string; metrics?: string[]; message?: string }[];
   totalFindings: number;
 }
+
+/** Linked LeetCode (D-59) and Codeforces (D-60) accounts (GET /api/user/links). Shown only to their owner. */
+export interface LinkedBase {
+  username: string;
+  linkedAt: string;
+  lastSyncAt?: string;
+  lastError: string | null;
+  /** Verified accounts appear on group boards and the leaderboard (D-62). */
+  verified?: boolean;
+  verifyCode?: string | null;
+}
+export interface LeetCodeLink extends LinkedBase {
+  summary: {
+    solved?: { all: number; easy: number; medium: number; hard: number };
+    topics?: { name: string; solved: number }[];
+    activeDays30?: number;
+    rating?: number | null;
+  };
+  recentSolves: { title: string; titleSlug: string; solvedAt: string; difficulty: 'Easy' | 'Medium' | 'Hard' | null; topics: string[] }[];
+}
+export interface CodeforcesLink extends LinkedBase {
+  summary: {
+    rating?: number | null;
+    maxRating?: number | null;
+    rank?: string | null;
+    contests?: number;
+    solvedAll?: number;
+    byDifficulty?: { label: string; count: number }[];
+    topics?: { name: string; solved: number }[];
+    activeDays30?: number;
+    ratingHistory?: { t: number; rating: number }[];
+    recentSolves?: { title: string; contestId: number; index: string; rating: number | null; tags: string[]; solvedAt: string }[];
+  };
+}
+export interface Links {
+  leetcode: LeetCodeLink | null;
+  codeforces: CodeforcesLink | null;
+}
+
+/** GET /api/user/practice (D-61): LeetCode and Codeforces together. */
+export interface Practice {
+  linked: { leetcode: boolean; codeforces: boolean };
+  totals: {
+    solved: number;
+    solved7d: number;
+    leetcode: { solved: { all: number; easy: number; medium: number; hard: number } | null; rating: number | null; streak: number; activeDays30: number } | null;
+    codeforces: { solved: number; rating: number | null; maxRating: number | null; rank: string | null; contests: number; activeDays30: number } | null;
+  };
+  topics: { topic: string; core: boolean; leetcode: number; codeforces: number; total: number; cfAcceptance: number | null }[];
+  gaps: string[];
+  strongest: string[];
+  weeks: { weekEnd: string | null; leetcodeSubmissions: number; codeforcesSolved: number }[];
+  difficulty: {
+    monthly: { month: string; solved: number; avgRating: number | null; maxRating: number | null }[];
+    rating: number | null;
+    above28d: { solvedRated: number; aboveRating: number; share: number | null } | null;
+    byBand: { label: string; count: number }[];
+  } | null;
+  leetcodeDifficulty: { easy: number; medium: number; hard: number } | null;
+  ratingHistory: { t: number; rating: number }[];
+  outlook: RatingOutlook | null;
+}
+
+/** The ML rating outlook (D-63): a 10–90% range for the Codeforces rating in `horizonDays`. */
+export interface RatingOutlook {
+  eligible: boolean;
+  reason?: string;
+  modelVersion?: string;
+  horizonDays?: number;
+  /** Share of real outcomes inside the range, on people the model never saw. */
+  coverage?: number;
+  heldOutPeople?: number;
+  asOf?: string;
+  rating?: number;
+  change?: { low: number; mid: number; high: number };
+  range?: { low: number; mid: number; high: number };
+  whatIfHarder?: number;
+  inputs?: { solved28d: number; activeDays28d: number; hardShare: number; contests60d: number };
+}
+
+/** One person on a practice board (group or leaderboard), verified accounts only (D-62). */
+export interface PracticeRow {
+  userId: string;
+  name: string;
+  rank?: number;
+  profilePictureUrl?: string;
+  solved7d: number;
+  solvedTotal: number;
+  leetcode: { username: string; solved: number; solved7d: number; rating: number | null } | null;
+  codeforces: { username: string; solved: number; solved7d: number; rating: number | null; rank: string | null } | null;
+}

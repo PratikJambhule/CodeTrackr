@@ -244,6 +244,21 @@ router.get('/', isAuthenticated, async (req, res, next) => {
 
 // The router is the module (app.use mounts it directly). The two pure helpers
 // ride along as properties so they can be unit tested without booting express.
+// GET /api/leaderboard/practice — everyone with a VERIFIED LeetCode or Codeforces account (D-62),
+// ranked by problems solved in the last 7 days, then by total solved.
+router.get('/practice', isAuthenticated, async (req, res, next) => {
+    try {
+        const LinkedAccount = require('../models/LinkedAccount');
+        const ids = await LinkedAccount.distinct('userId', { verifiedAt: { $ne: null } });
+        const rows = (await require('../services/linkedSync').boardRows(ids)).slice(0, MAX_LIMIT);
+        const users = await User.find({ _id: { $in: rows.map((r) => r.userId) } }, { name: 1, profilePictureUrl: 1 }).lean();
+        const byId = new Map(users.map((u) => [String(u._id), u]));
+        res.json(rows.map((r, i) => ({ ...r, rank: i + 1, name: (byId.get(r.userId) || {}).name || 'Unknown', profilePictureUrl: (byId.get(r.userId) || {}).profilePictureUrl })));
+    } catch (err) {
+        return next(err);
+    }
+});
+
 module.exports = router;
 module.exports.score = score;
 module.exports.maxOf = maxOf;

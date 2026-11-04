@@ -16,6 +16,8 @@
  *                                                              demo group "Mumbai Coders"
  *   node scripts/seed-demo-students.js --remove                dry run of the removal
  *   node scripts/seed-demo-students.js --remove --apply        delete all demo data
+ *   node scripts/seed-demo-students.js --remove --keep 40 --apply
+ *                                                              keep students 1-40, delete the rest
  */
 require('dotenv').config({ quiet: true });
 const mongoose = require('mongoose');
@@ -202,14 +204,17 @@ async function seed({ apply, addMembers }) {
   for (const u of [...users, ...extra]) await GroupMember.create({ groupId: group._id, userId: u._id });
 }
 
-async function remove({ apply }) {
+/** `keep` = N keeps demo students 1..N (and their group) and removes the rest. */
+async function remove({ apply, keep = 0 }) {
   const User = require('../models/user');
   const models = ['Activity', 'UserStats', 'Session', 'WindowUsage', 'IngestReceipt', 'Notification', 'Goal']
     .map((n) => require(`../models/${n}`));
   const GroupMember = require('../models/GroupMember');
   const Group = require('../models/Group');
 
-  const users = await User.find({ googleId: { $regex: `^${MARKER}` } }, { _id: 1 }).lean();
+  const all = await User.find({ googleId: { $regex: `^${MARKER}` } }, { _id: 1, googleId: 1 }).lean();
+  const users = all.filter((u) => Number(u.googleId.slice(MARKER.length)) > keep);
+  if (keep) console.log(`\nKeeping demo students 1-${keep} (${all.length - users.length} found); removing the rest.`);
   const ids = users.map((u) => u._id);
   const anyForm = { $in: [...ids, ...ids.map(String)] }; // activities may hold either form
   const groups = await Group.find({ createdBy: { $in: ids } }, { _id: 1 }).lean();
@@ -231,7 +236,10 @@ if (require.main === module) {
     const addMembers = i >= 0 ? String(args[i + 1] || '').split(',').map((e) => e.trim().toLowerCase()).filter(Boolean) : [];
     if (!process.env.MONGO_URI) { console.error('MONGO_URI is not set.'); process.exit(1); }
     await mongoose.connect(process.env.MONGO_URI, { serverSelectionTimeoutMS: 20000, autoIndex: false, autoCreate: false }); // never build indexes or collections
-    if (args.includes('--remove')) await remove({ apply });
+    const k = args.indexOf('--keep');
+    const keep = k >= 0 ? Number.parseInt(args[k + 1], 10) : 0;
+    if (k >= 0 && !(keep > 0)) throw new Error('--keep needs a number, e.g. --keep 40');
+    if (args.includes('--remove')) await remove({ apply, keep });
     else await seed({ apply, addMembers });
     console.log(apply ? '\nAPPLIED.\n' : '\nDRY RUN: nothing written. Add --apply to write.\n');
     await mongoose.disconnect();

@@ -244,6 +244,29 @@ function history(userId, days, now, { codeChance, evening = 0.7, intensity = 1 }
   await group('Night Owls', 'For people who code after midnight.', friends.Kabir, [friends.Kabir, friends.Aarav]);
   await group('Placement Prep', 'DSA every day until December.', friends.Sneha, [friends.Sneha], 'prep');
 
+  // Verified LeetCode / Codeforces accounts for the friends (D-62), so group boards and the
+  // leaderboard show their Practice standings. Demo numbers, local only. You stay unlinked: link
+  // your own on Profile to try it.
+  const LinkedAccount = model('LinkedAccount');
+  const practice = {
+    Diya: { lc: [312, 9, 1840], cf: [221, 6, 1620, 'expert'] },
+    Rohan: { lc: [188, 4, 1610], cf: null },
+    Aarav: { lc: null, cf: [402, 11, 1905, 'candidate master'] },
+    Sneha: { lc: [95, 2, null], cf: [60, 1, 1180, 'newbie'] },
+  };
+  for (const [name, p] of Object.entries(practice)) {
+    const userId = friends[name]._id;
+    const at = new Date(now - 6 * 3600e3);
+    if (p.lc) {
+      await LinkedAccount.create({ userId, provider: 'leetcode', username: `${name.toLowerCase()}_lc`, lastSyncAt: at, verifiedAt: at,
+        summary: { solved: { all: p.lc[0], easy: Math.round(p.lc[0] * 0.5), medium: Math.round(p.lc[0] * 0.4), hard: Math.round(p.lc[0] * 0.1) }, solved7d: p.lc[1], rating: p.lc[2] } });
+    }
+    if (p.cf) {
+      await LinkedAccount.create({ userId, provider: 'codeforces', username: `${name.toLowerCase()}_cf`, lastSyncAt: at, verifiedAt: at,
+        summary: { solvedAll: p.cf[0], solved7d: p.cf[1], rating: p.cf[2], rank: p.cf[3] } });
+    }
+  }
+
   const at = (days) => new Date(now + days * DAY);
   const portfolio = await Goal.create({ userId: me._id, title: 'Ship portfolio v2', description: 'New projects section and dark mode.', targetHours: 8, techStack: 'portfolio', deadline: at(3), createdAt: at(-12) });
   await Goal.create({ userId: me._id, title: 'Finish the DSA sheet', description: 'Arrays to graphs, one topic a day.', targetHours: 20, techStack: 'python', deadline: at(10), createdAt: at(-20) });

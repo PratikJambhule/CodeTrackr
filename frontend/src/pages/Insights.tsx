@@ -1,4 +1,5 @@
 import { useState, type ReactNode } from 'react';
+import { Link } from 'react-router-dom';
 import { RotateCw } from 'lucide-react';
 import { errorText } from '../api';
 import { useMetrics } from '../hooks/queries';
@@ -149,6 +150,14 @@ function Body({ m, findings, skipped, total }: { m: Metrics; findings: Finding[]
           </Card>
         ))}
       </div>
+
+      <Card className="flex flex-wrap items-center justify-between gap-3 p-5">
+        <div>
+          <div className="font-semibold">LeetCode and Codeforces practice</div>
+          <p className="text-sm text-muted">Topics, gaps for interviews, how hard you practise and your contest ratings, from the profiles you linked.</p>
+        </div>
+        <Link to="/practice" className="font-semibold">Open practice →</Link>
+      </Card>
 
       <TypeAnalytics days={m.windowDays} />
       <WorkSessions days={m.windowDays} />

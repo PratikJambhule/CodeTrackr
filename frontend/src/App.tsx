@@ -19,6 +19,7 @@ const GroupBoard = lazy(() => import('./pages/GroupBoard'));
 const JoinGroup = lazy(() => import('./pages/JoinGroup'));
 const Goals = lazy(() => import('./pages/Goals'));
 const Insights = lazy(() => import('./pages/Insights'));
+const Practice = lazy(() => import('./pages/Practice'));
 const Profile = lazy(() => import('./pages/Profile'));
 const Onboarding = lazy(() => import('./pages/Onboarding'));
 const Device = lazy(() => import('./pages/Device'));
@@ -105,6 +106,7 @@ export default function App() {
               <Route path="/join/:groupId" element={<JoinGroup />} />
               <Route path="/goals" element={<Goals />} />
               <Route path="/insights" element={<Insights />} />
+              <Route path="/practice" element={<Practice />} />
               <Route path="/profile" element={<Profile user={user} />} />
               <Route path="/onboarding" element={<Onboarding user={user} />} />
               <Route path="/device" element={<Device />} />

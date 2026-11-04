@@ -11,7 +11,7 @@ import { streaks } from '../lib/calendar';
 import { readStored, writeStored } from '../lib/storage';
 import type { Me } from '../types';
 import { RaceStrip } from './dashboard/RaceStrip';
-import { BuildHealth, GoalsMini, InsightTeaser, KindOfWorkCard, StatTile, TimeSplitCard } from './dashboard/cards';
+import { BuildHealth, GoalsMini, InsightTeaser, KindOfWorkCard, PracticeCard, StatTile, TimeSplitCard } from './dashboard/cards';
 import { buildHealth } from '../lib/buildHealth';
 import { TimeSlotDialog } from './dashboard/TimeSlotDialog';
 
@@ -237,6 +237,7 @@ export default function Dashboard({ user }: { user: Me }) {
 
         <div className="col-span-12 flex min-w-0 flex-col gap-4 xl:col-span-4 [&>*:last-child]:flex-1">
           <KindOfWorkCard />
+          <PracticeCard />
           {view.data ? <BuildHealth view={view.data} period={period} /> : <Skeleton className="h-80" />}
         </div>
 
