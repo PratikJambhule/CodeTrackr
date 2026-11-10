@@ -11,6 +11,11 @@ const groupMemberSchema = new mongoose.Schema({
         ref: 'User',
         required: true
     },
+    // Only records admins. No value means member; the owner is Group.createdBy (services/groupRoles.js).
+    role: {
+        type: String,
+        enum: ['member', 'admin']
+    },
     joinedAt: {
         type: Date,
         default: Date.now

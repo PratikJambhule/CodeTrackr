@@ -1,7 +1,7 @@
 import { useQueries, useQuery } from '@tanstack/react-query';
 import { ApiError, apiGet } from '../api';
 import { tzOffset } from '../lib/format';
-import type { AppNotification, DeviceToken, Goal, GoalProgress, Group, GroupDetails, GroupPreview, History, InsightsPayload, LeaderRow, Links, Me, Metrics, PeriodView, Practice, PracticeRow, TimeSlot, TypeAnalytics, WorkSession } from '../types';
+import type { AppNotification, DeviceToken, Goal, GoalProgress, Group, GroupAuditEntry, GroupDetails, GroupInviteRow, EventBoard, EventDetails, GroupPreview, GroupWeekBoard, HackEvent, History, InsightsPayload, InvitePreview, LeaderRow, Links, Me, Metrics, PeriodView, Practice, PracticeRow, TimeSlot, TypeAnalytics, WorkSession } from '../types';
 
 /**
  * Every read the website makes, typed, in one place. React Query caches each
@@ -140,11 +140,43 @@ export const useLinks = () =>
 export const usePractice = () =>
   useQuery({ queryKey: ['practice'], queryFn: async () => (await apiGet<{ practice: Practice }>('/api/user/practice')).practice });
 
-export const useGroupPractice = (groupId: string | undefined) =>
+export const useMyEvents = () =>
+  useQuery({ queryKey: ['events', 'mine'], queryFn: () => apiGet<{ events: HackEvent[] }>('/api/events/mine') });
+
+export const useEvent = (eventId: string) =>
+  useQuery({ queryKey: ['events', eventId], queryFn: () => apiGet<EventDetails>(`/api/events/${eventId}`), enabled: Boolean(eventId), retry: false });
+
+export const useEventBoard = (eventId: string) =>
   useQuery({
-    queryKey: ['groups', 'practice', groupId],
-    queryFn: () => apiGet<{ rows: PracticeRow[]; notShown: { id: string; name: string }[] }>(`/api/groups/${groupId}/practice`),
-    enabled: Boolean(groupId),
+    queryKey: ['events', eventId, 'board'],
+    queryFn: () => apiGet<EventBoard>(`/api/events/${eventId}/board`),
+    refetchInterval: (query) => (query.state.data?.status === 'live' ? 60_000 : false),
+  });
+
+export const useGroupWeekBoard = (groupId: string) =>
+  useQuery({
+    queryKey: ['groups', 'week', groupId],
+    queryFn: () => apiGet<GroupWeekBoard>(`/api/groups/${groupId}/week`),
+  });
+
+export const useGroupInvites = (groupId: string) =>
+  useQuery({
+    queryKey: ['groups', 'invites', groupId],
+    queryFn: () => apiGet<{ invites: GroupInviteRow[] }>(`/api/groups/${groupId}/invites`),
+  });
+
+export const useGroupAudit = (groupId: string) =>
+  useQuery({
+    queryKey: ['groups', 'audit', groupId],
+    queryFn: () => apiGet<{ entries: GroupAuditEntry[] }>(`/api/groups/${groupId}/audit`),
+  });
+
+export const useInvitePreview = (token: string | undefined) =>
+  useQuery({
+    queryKey: ['invite', token],
+    queryFn: () => apiGet<InvitePreview>(`/api/groups/invites/${token}/preview`),
+    enabled: Boolean(token),
+    retry: false,
   });
 
 export const usePracticeLeaderboard = (enabled: boolean) =>

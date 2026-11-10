@@ -26,12 +26,12 @@ export function PracticeStandings({ rows, meId, label, dense = false }: { rows: 
       rows={tower}
       dense={dense}
       label={label}
-      valueHeader="7 days"
+      valueHeader="Solved, last 7 days"
       columns={[
-        { label: 'LeetCode', title: 'LeetCode problems solved in the last 7 days' },
-        { label: 'CF', title: 'Codeforces problems solved in the last 7 days' },
-        { label: 'CF rating', title: 'Codeforces rating' },
-        { label: 'LC rating', title: 'LeetCode contest rating' },
+        { label: 'LeetCode solved', title: 'LeetCode problems solved in the last 7 days' },
+        { label: 'Codeforces solved', title: 'Codeforces problems solved in the last 7 days' },
+        { label: 'Codeforces rating', title: 'Codeforces rating' },
+        { label: 'LeetCode rating', title: 'LeetCode contest rating' },
       ]}
     />
   );

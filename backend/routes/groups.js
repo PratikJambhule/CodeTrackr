@@ -2,6 +2,9 @@ const express = require('express');
 const router = express.Router();
 const Group = require('../models/Group');
 const GroupMember = require('../models/GroupMember');
+const GroupInvite = require('../models/GroupInvite');
+const GroupAuditLog = require('../models/GroupAuditLog');
+const mongoose = require('mongoose');
 const User = require('../models/user');
 const Activity = require('../models/Activity');
 const { isAuthenticated } = require('../middleware/auth');
@@ -14,6 +17,8 @@ const { statsComplete } = require('../services/userStats');
 const { matchActivityUsers, USER_KEY } = require('../services/activityUser');
 const rateLimit = require('express-rate-limit');
 const { userKey } = require('../services/rateLimitKeys');
+const { roleOf, atLeast, canManage, newInviteToken, hashInviteToken, parseInviteOptions } = require('../services/groupRoles');
+const { log } = require('../services/logger');
 
 // Discover is an unbounded browse of every group in the system. Cap it so the
 // response cannot grow with the size of the install.
@@ -30,6 +35,78 @@ const joinLimiter = rateLimit({
     standardHeaders: true,
     legacyHeaders: false,
     keyGenerator: userKey,
+});
+
+/** Records an admin action. A failed log line must not undo or fail the action itself. */
+async function audit(groupId, actorId, action, targetId = null, detail = null) {
+    try {
+        await GroupAuditLog.create({ groupId, actorId, action, targetId, detail });
+    } catch (err) {
+        log.error('group audit write failed', { action, err });
+    }
+}
+
+// ---- Invite links (plan slice 1) -------------------------------------------
+// These two sit before the /:groupId routes: POST /invites/join would otherwise match /:groupId/join.
+
+/** The invite for this token if it can still be used, else null. */
+async function usableInvite(token) {
+    if (typeof token !== 'string' || !token) return null;
+    const invite = await GroupInvite.findOne({ tokenHash: hashInviteToken(token), expiresAt: { $gt: new Date() } });
+    return invite && invite.uses < invite.maxUses ? invite : null;
+}
+
+router.get('/invites/:token/preview', isAuthenticated, joinLimiter, async (req, res, next) => {
+    try {
+        const invite = await usableInvite(req.params.token);
+        const group = invite && await Group.findById(invite.groupId).populate('createdBy', 'name');
+        if (!group) return res.status(404).json({ message: 'This invite link is not valid any more' });
+        const [memberCount, isMember] = await Promise.all([
+            GroupMember.countDocuments({ groupId: group._id }),
+            GroupMember.exists({ groupId: group._id, userId: req.user._id }),
+        ]);
+        res.json({
+            group: { _id: group._id, name: group.name, description: group.description, createdByName: group.createdBy && group.createdBy.name },
+            memberCount,
+            isMember: Boolean(isMember),
+        });
+    } catch (error) {
+        return next(error);
+    }
+});
+
+router.post('/invites/join', isAuthenticated, joinLimiter, async (req, res, next) => {
+    try {
+        const token = req.body && req.body.token;
+        const invite = await GroupInvite.findOne({ tokenHash: hashInviteToken(token) });
+        const target = invite && await Group.findById(invite.groupId, { eventId: 1 }).lean();
+        if (!target) {
+            return res.status(410).json({ message: 'This invite link is not valid any more' });
+        }
+        if (target.eventId) {
+            return res.status(409).json({ message: 'This is a hackathon team. Join it from the event page' });
+        }
+        if (await GroupMember.exists({ groupId: invite.groupId, userId: req.user._id })) {
+            return res.status(409).json({ message: 'You are already a member of this group', groupId: invite.groupId });
+        }
+        // One atomic update claims a use, so two people can't both take the last one.
+        const claimed = await GroupInvite.findOneAndUpdate(
+            { _id: invite._id, expiresAt: { $gt: new Date() }, $expr: { $lt: ['$uses', '$maxUses'] } },
+            { $inc: { uses: 1 } }
+        );
+        if (!claimed) return res.status(410).json({ message: 'This invite link is not valid any more' });
+        try {
+            await GroupMember.create({ groupId: invite.groupId, userId: req.user._id });
+        } catch (error) {
+            await GroupInvite.updateOne({ _id: invite._id }, { $inc: { uses: -1 } }); // give the use back
+            if (error.code === 11000) return res.status(409).json({ message: 'You are already a member of this group', groupId: invite.groupId });
+            throw error;
+        }
+        await audit(invite.groupId, req.user._id, 'joined_by_invite');
+        res.json({ success: true, groupId: invite.groupId });
+    } catch (error) {
+        return next(error);
+    }
 });
 
 // Create a new group
@@ -107,7 +184,7 @@ router.get('/discover', isAuthenticated, async (req, res, next) => {
         const joinedGroupIds = memberships.map(m => m.groupId);
 
         // Find groups user is not a member of
-        let query = { _id: { $nin: joinedGroupIds } };
+        let query = { _id: { $nin: joinedGroupIds }, eventId: null }; // hackathon teams are joined from their event
 
         // Escaped: `$regex: search` let the caller compile their own pattern,
         // so `(a+)+$` backtracked catastrophically and stalled the event loop.
@@ -158,7 +235,8 @@ router.get('/:groupId/details', isAuthenticated, async (req, res, next) => {
         const membersList = members.map(m => ({
             id: m.userId._id,
             name: m.userId.name,
-            joinedAt: m.joinedAt
+            joinedAt: m.joinedAt,
+            role: roleOf(group, m)
         }));
 
         // Get member IDs for leaderboard
@@ -292,6 +370,7 @@ router.get('/:groupId/details', isAuthenticated, async (req, res, next) => {
                 createdAt: group.createdAt
             },
             members: membersList,
+            myRole: roleOf(group, membership),
             leaderboard: leaderboardWithUsers,
             window: board.from ? { from: board.from, to: board.to } : null,
             daily,
@@ -418,11 +497,12 @@ router.post('/:groupId/leave', isAuthenticated, async (req, res, next) => {
             });
         }
 
-        // The creator is the only admin: hand the group to the longest-standing
-        // member so it is never left without one (roadmap item 12).
+        // The owner left: hand the group to the longest-standing admin, or else
+        // the longest-standing member, so it is never left without an owner.
         const group = await Group.findById(groupId);
         if (group && group.createdBy.toString() === req.user._id.toString()) {
-            const heir = await GroupMember.findOne({ groupId }).sort({ joinedAt: 1, _id: 1 });
+            const heir = await GroupMember.findOne({ groupId, role: 'admin' }).sort({ joinedAt: 1, _id: 1 })
+                || await GroupMember.findOne({ groupId }).sort({ joinedAt: 1, _id: 1 });
             if (heir) {
                 group.createdBy = heir.userId;
                 await group.save();
@@ -438,23 +518,25 @@ router.post('/:groupId/leave', isAuthenticated, async (req, res, next) => {
     }
 });
 
-// ---- Admin: the group's creator (roadmap item 12) ----------------------------
+// ---- Admin: owner and admins (plan slice 1) ----------------------------------
 
 const MAX_NAME = 80;
 const MAX_DESCRIPTION = 500;
 
-/** Loads the group and checks the caller is its creator; answers and returns null otherwise. */
-async function loadOwnedGroup(req, res) {
+/** Loads the group and checks the caller's role; answers and returns null otherwise. */
+async function loadGroupAs(req, res, minRole) {
     const group = await Group.findById(req.params.groupId);
     if (!group) {
         res.status(404).json({ message: 'Group not found' });
         return null;
     }
-    if (group.createdBy.toString() !== req.user._id.toString()) {
-        res.status(403).json({ message: 'Only the group admin can do that' });
+    const membership = await GroupMember.findOne({ groupId: group._id, userId: req.user._id });
+    const role = roleOf(group, membership);
+    if (!atLeast(role, minRole)) {
+        res.status(403).json({ message: minRole === 'owner' ? 'Only the group owner can do that' : 'Only a group admin can do that' });
         return null;
     }
-    return group;
+    return { group, role };
 }
 
 // Rename / re-describe a group
@@ -473,11 +555,13 @@ router.patch('/:groupId', isAuthenticated, async (req, res, next) => {
             return res.status(400).json({ message: 'Nothing to update' });
         }
 
-        const group = await loadOwnedGroup(req, res);
-        if (!group) return;
+        const access = await loadGroupAs(req, res, 'admin');
+        if (!access) return;
+        const { group } = access;
         if (name !== undefined) group.name = name;
         if (description !== undefined) group.description = description;
         await group.save();
+        await audit(group._id, req.user._id, 'group_renamed');
 
         const { password: _omit, ...safeGroup } = group.toObject();
         res.json({ success: true, group: safeGroup });
@@ -489,18 +573,156 @@ router.patch('/:groupId', isAuthenticated, async (req, res, next) => {
 // Remove a member
 router.delete('/:groupId/members/:userId', isAuthenticated, async (req, res, next) => {
     try {
-        const group = await loadOwnedGroup(req, res);
-        if (!group) return;
+        const access = await loadGroupAs(req, res, 'admin');
+        if (!access) return;
+        const { group, role } = access;
         if (req.params.userId === req.user._id.toString()) {
             return res.status(400).json({ message: 'Use Leave to remove yourself' });
         }
-        const removed = await GroupMember.findOneAndDelete({ groupId: group._id, userId: req.params.userId });
-        if (!removed) {
+        const target = await GroupMember.findOne({ groupId: group._id, userId: req.params.userId });
+        if (!target) {
             return res.status(404).json({ message: 'That user is not a member of this group' });
         }
+        if (!canManage(role, roleOf(group, target))) {
+            return res.status(403).json({ message: 'You can only remove people below your own role' });
+        }
+        await target.deleteOne();
+        await audit(group._id, req.user._id, 'member_removed', req.params.userId);
         res.json({ success: true, message: 'Member removed' });
     } catch (error) {
         return next(error);
+    }
+});
+
+// Make someone an admin, or back to a member. Owner only.
+router.patch('/:groupId/members/:userId/role', isAuthenticated, async (req, res, next) => {
+    try {
+        const newRole = req.body && req.body.role;
+        if (newRole !== 'admin' && newRole !== 'member') {
+            return res.status(400).json({ message: 'role must be admin or member' });
+        }
+        const access = await loadGroupAs(req, res, 'owner');
+        if (!access) return;
+        const { group } = access;
+        const target = await GroupMember.findOne({ groupId: group._id, userId: req.params.userId });
+        if (!target) return res.status(404).json({ message: 'That user is not a member of this group' });
+        if (roleOf(group, target) === 'owner') return res.status(400).json({ message: 'The owner has no other role. Transfer ownership instead' });
+        target.role = newRole;
+        await target.save();
+        await audit(group._id, req.user._id, 'role_changed', req.params.userId, newRole);
+        res.json({ success: true });
+    } catch (error) {
+        return next(error);
+    }
+});
+
+// Hand the group to another member. The old owner stays on as an admin.
+router.post('/:groupId/transfer', isAuthenticated, async (req, res, next) => {
+    try {
+        const access = await loadGroupAs(req, res, 'owner');
+        if (!access) return;
+        const { group } = access;
+        const userId = req.body && req.body.userId;
+        const target = typeof userId === 'string' && mongoose.isValidObjectId(userId)
+            ? await GroupMember.findOne({ groupId: group._id, userId })
+            : null;
+        if (!target) return res.status(404).json({ message: 'That user is not a member of this group' });
+        if (userId === req.user._id.toString()) return res.status(400).json({ message: 'You already own this group' });
+        group.createdBy = target.userId;
+        await group.save();
+        await GroupMember.updateOne({ groupId: group._id, userId: req.user._id }, { $set: { role: 'admin' } });
+        await audit(group._id, req.user._id, 'ownership_transferred', userId);
+        res.json({ success: true });
+    } catch (error) {
+        return next(error);
+    }
+});
+
+// Create an invite link. The token is returned this once and never again.
+router.post('/:groupId/invites', isAuthenticated, async (req, res, next) => {
+    try {
+        const access = await loadGroupAs(req, res, 'admin');
+        if (!access) return;
+        const options = parseInviteOptions(req.body);
+        if (!options.ok) return res.status(400).json({ message: options.error });
+        const token = newInviteToken();
+        const invite = await GroupInvite.create({
+            groupId: access.group._id,
+            tokenHash: hashInviteToken(token),
+            createdBy: req.user._id,
+            maxUses: options.maxUses,
+            expiresAt: new Date(Date.now() + options.days * 864e5),
+        });
+        await audit(access.group._id, req.user._id, 'invite_created');
+        res.status(201).json({ invite: { id: invite._id, token, expiresAt: invite.expiresAt, maxUses: invite.maxUses, uses: 0 } });
+    } catch (error) {
+        return next(error);
+    }
+});
+
+// Links still in force. Never includes the token.
+router.get('/:groupId/invites', isAuthenticated, async (req, res, next) => {
+    try {
+        const access = await loadGroupAs(req, res, 'admin');
+        if (!access) return;
+        const invites = await GroupInvite.find({ groupId: access.group._id, expiresAt: { $gt: new Date() } })
+            .sort({ createdAt: -1 }).limit(50).populate('createdBy', 'name').lean();
+        res.json({
+            invites: invites.map((i) => ({
+                id: i._id, expiresAt: i.expiresAt, maxUses: i.maxUses, uses: i.uses,
+                createdByName: i.createdBy && i.createdBy.name,
+            })),
+        });
+    } catch (error) {
+        return next(error);
+    }
+});
+
+router.delete('/:groupId/invites/:inviteId', isAuthenticated, async (req, res, next) => {
+    try {
+        const access = await loadGroupAs(req, res, 'admin');
+        if (!access) return;
+        const removed = await GroupInvite.findOneAndDelete({ _id: req.params.inviteId, groupId: access.group._id });
+        if (!removed) return res.status(404).json({ message: 'Invite not found' });
+        await audit(access.group._id, req.user._id, 'invite_revoked');
+        res.json({ success: true });
+    } catch (error) {
+        return next(error);
+    }
+});
+
+// The last 50 admin actions in this group, newest first. Names only, no emails.
+router.get('/:groupId/audit', isAuthenticated, async (req, res, next) => {
+    try {
+        const access = await loadGroupAs(req, res, 'admin');
+        if (!access) return;
+        const rows = await GroupAuditLog.find({ groupId: access.group._id }).sort({ at: -1, _id: -1 }).limit(50)
+            .populate('actorId', 'name').populate('targetId', 'name').lean();
+        res.json({
+            entries: rows.map((r) => ({
+                id: r._id, action: r.action, detail: r.detail, at: r.at,
+                actorName: r.actorId && r.actorId.name,
+                targetName: r.targetId && r.targetId.name,
+            })),
+        });
+    } catch (error) {
+        return next(error);
+    }
+});
+
+// GET /api/groups/:groupId/week — this week's board: plain counts from the sites (D-70).
+// Members only. Names, never emails. Verified accounts only.
+router.get('/:groupId/week', isAuthenticated, async (req, res, next) => {
+    try {
+        const { groupId } = req.params;
+        if (!(await GroupMember.exists({ groupId, userId: req.user._id }))) {
+            return res.status(403).json({ message: 'You must be a member to view group details' });
+        }
+        const rows = await GroupMember.find({ groupId }).populate('userId', 'name').lean();
+        const members = rows.filter((m) => m.userId).map((m) => ({ id: String(m.userId._id), name: m.userId.name }));
+        res.json(await require('../services/competitionLedger').boardFor({ members }));
+    } catch (err) {
+        return next(err);
     }
 });
 

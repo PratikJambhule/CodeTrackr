@@ -1,21 +1,25 @@
 'use strict';
 
 /**
- * Linked LeetCode (D-59) and Codeforces (D-60) accounts: link, unlink, the nightly sync and the
+ * Linked LeetCode (D-59) and Codeforces (D-60) accounts: link, unlink, the hourly sync and the
  * profile view.
  *
  * A failed fetch never breaks anything: the account keeps its last good summary and records
- * `lastError`, and the next night tries again. Linked numbers are shown only to their owner.
+ * `lastError`, and the next hour tries again. Linked numbers are shown only to their owner.
  */
 const crypto = require('crypto');
 const LinkedAccount = require('../models/LinkedAccount');
 const LcSolve = require('../models/LcSolve');
 const leetcode = require('./leetcode');
 const codeforces = require('./codeforces');
+const github = require('./github');
+const ledger = require('./competitionLedger');
 const { log } = require('./logger');
 
-const PROVIDERS = ['leetcode', 'codeforces'];
-const PAUSE_MS = 1500; // between people in the nightly sync: stay a light, polite client
+const PROVIDERS = ['leetcode', 'codeforces', 'github'];
+const PRACTICE_PROVIDERS = ['leetcode', 'codeforces']; // the sites with solved problems
+const PAUSE_MS = 1500; // between people in the sync: stay a light, polite client
+const FRESH_MS = 45 * 60 * 1000; // two schedulers can both fire in one hour; an account refreshes once
 
 /**
  * Fetch one profile and store it. Codeforces gives everything in one summary; LeetCode shows only
@@ -23,12 +27,22 @@ const PAUSE_MS = 1500; // between people in the nightly sync: stay a light, poli
  */
 async function pull(userId, provider, username, deps = {}) {
   const now = deps.now || Date.now();
+  if (provider === 'github') {
+    const g = await github.fetchProfile(username, { fetchImpl: deps.fetchImpl, now });
+    const saved = await save(userId, provider, g.username, g.summary, now);
+    await ledger.safely('github', () => ledger.writeDays(userId, provider, g.username, g.ledger, { keepHighest: true }));
+    await ledger.safely('github pushes', () => ledger.writePushes(userId, g.username, g.pushes || []));
+    return saved;
+  }
   if (provider === 'codeforces') {
     const c = await codeforces.fetchProfile(username, { fetchImpl: deps.fetchImpl, now, pauseMs: deps.cfPauseMs });
     const last = (c.summary.weekly || [])[11];
     c.summary.solved7d = last ? last.solved : 0;
-    return save(userId, provider, c.username, c.summary, now);
+    const saved = await save(userId, provider, c.username, c.summary, now);
+    await ledger.safely('codeforces', () => ledger.writeDays(userId, provider, c.username, c.ledger));
+    return saved;
   }
+  const before = await LinkedAccount.findOne({ userId, provider, username }, { 'summary.rating': 1 }).lean();
   const p = await leetcode.fetchProfile(username, { fetchImpl: deps.fetchImpl, now });
   const known = new Set((await LcSolve.find({ userId, titleSlug: { $in: p.recent.map((r) => r.titleSlug) } }, { titleSlug: 1 }).lean()).map((s) => s.titleSlug));
   const fresh = p.recent.filter((s) => !known.has(s.titleSlug));
@@ -43,7 +57,9 @@ async function pull(userId, provider, username, deps = {}) {
   }
   // Only accepted problems we have seen (LeetCode shows the last 20), so this can undercount a busy week.
   p.summary.solved7d = await LcSolve.countDocuments({ userId, solvedAt: { $gte: new Date(now - 7 * 864e5) } });
-  return save(userId, provider, p.username, p.summary, now);
+  const saved = await save(userId, provider, p.username, p.summary, now);
+  await ledger.safely('leetcode', () => ledger.writeLeetcode(userId, p.username, before && before.summary && before.summary.rating, p.summary.rating, now));
+  return saved;
 }
 
 function save(userId, provider, username, summary, now) {
@@ -67,6 +83,7 @@ async function link(userId, provider, username, deps) {
     }
   }
   const account = await pull(userId, provider, clean, deps);
+  await ledger.safely('rename', () => ledger.removeOtherNames(userId, provider, account.username)); // a new name starts clean
   if (old && old.username.toLowerCase() !== clean.toLowerCase() && (old.verifiedAt || old.verifyCode)) {
     // A new name has to be verified again.
     await LinkedAccount.updateOne({ userId, provider }, { $unset: { verifiedAt: 1, verifyCode: 1 } });
@@ -82,19 +99,26 @@ async function startVerify(userId, provider) {
   return code;
 }
 
+const PROFILE_TEXT = {
+  leetcode: (name, deps) => leetcode.fetchAbout(name, { fetchImpl: deps.fetchImpl }),
+  codeforces: (name, deps) => codeforces.fetchNameFields(name, { fetchImpl: deps.fetchImpl, pauseMs: deps.cfPauseMs }),
+  github: (name, deps) => github.fetchBio(name, { fetchImpl: deps.fetchImpl }),
+};
+const WHERE = {
+  leetcode: 'your LeetCode "About" text',
+  codeforces: 'your Codeforces first name, last name or organization',
+  github: 'your GitHub bio',
+};
+
 /** Finish verification: the code must be in the public profile now. */
 async function verify(userId, provider, deps = {}) {
   const a = await LinkedAccount.findOne({ userId, provider }).lean();
   if (!a) throw new leetcode.LinkError(404, 'Link the account first.');
   if (a.verifiedAt) return a;
   if (!a.verifyCode) throw new leetcode.LinkError(400, 'Ask for a code first.');
-  const text = provider === 'codeforces'
-    ? await codeforces.fetchNameFields(a.username, { fetchImpl: deps.fetchImpl, pauseMs: deps.cfPauseMs })
-    : await leetcode.fetchAbout(a.username, { fetchImpl: deps.fetchImpl });
+  const text = await PROFILE_TEXT[provider](a.username, deps);
   if (!text.includes(a.verifyCode)) {
-    throw new leetcode.LinkError(409, provider === 'codeforces'
-      ? `${a.verifyCode} is not in your Codeforces first name, last name or organization yet. Save it there, then try again.`
-      : `${a.verifyCode} is not in your LeetCode "About" text yet. Save it there, then try again.`);
+    throw new leetcode.LinkError(409, `${a.verifyCode} is not in ${WHERE[provider]} yet. Save it there, then try again.`);
   }
   await LinkedAccount.updateOne({ _id: a._id }, { $set: { verifiedAt: new Date() }, $unset: { verifyCode: 1 } });
   return LinkedAccount.findById(a._id).lean();
@@ -105,7 +129,7 @@ async function verify(userId, provider, deps = {}) {
  * verified account: problems solved in the last 7 days on both sites, totals and ratings.
  */
 async function boardRows(userIds) {
-  const accounts = await LinkedAccount.find({ userId: { $in: userIds }, verifiedAt: { $ne: null } }).lean();
+  const accounts = await LinkedAccount.find({ userId: { $in: userIds }, provider: { $in: PRACTICE_PROVIDERS }, verifiedAt: { $ne: null } }).lean();
   const by = new Map();
   for (const a of accounts) {
     const key = String(a.userId);
@@ -130,33 +154,59 @@ async function unlink(userId, provider) {
 }
 
 /** Pulled rows outside the account itself: only LeetCode keeps any (Codeforces lives in `summary`). */
-function removeData(userId, provider) {
-  return provider === 'leetcode' ? LcSolve.deleteMany({ userId }) : Promise.resolve();
+async function removeData(userId, provider) {
+  await ledger.removeProvider(userId, provider);
+  if (provider === 'leetcode') await LcSolve.deleteMany({ userId });
 }
 
-/** Nightly: re-read every linked account. Returns { synced, failed }. */
+/**
+ * Re-read every linked account. Returns { synced, failed, skipped }.
+ * `freshMs` leaves alone accounts refreshed that recently. Once GitHub says we are over its limit,
+ * the remaining GitHub accounts wait for the next run instead of spending more refused requests.
+ */
 async function syncAll(deps = {}) {
-  const accounts = await LinkedAccount.find({}).lean();
+  const query = deps.freshMs ? { $or: [{ lastSyncAt: null }, { lastSyncAt: { $lt: new Date((deps.now || Date.now()) - deps.freshMs) } }] } : {};
+  const accounts = await LinkedAccount.find(query).sort({ lastSyncAt: 1 }).lean();
   let synced = 0;
   let failed = 0;
+  let skipped = 0;
+  let githubLimited = false;
   for (const a of accounts) {
+    if (githubLimited && a.provider === 'github') {
+      skipped++;
+      continue;
+    }
     try {
       await pull(a.userId, a.provider, a.username, deps);
       synced++;
     } catch (err) {
       failed++;
+      if (a.provider === 'github' && err.status === 503) githubLimited = true;
       await LinkedAccount.updateOne({ _id: a._id }, { $set: { lastError: err.message } });
       log.warn('linked account sync failed', { provider: a.provider, err: err.message });
     }
     if (deps.pauseMs !== 0) await new Promise((r) => setTimeout(r, deps.pauseMs || PAUSE_MS));
   }
-  return { synced, failed };
+  return { synced, failed, skipped };
+}
+
+let syncRunning = false;
+
+/** The hourly job: starts in the background, and never overlaps itself. Returns false if one is running. */
+function syncInBackground() {
+  if (syncRunning) return false;
+  syncRunning = true;
+  syncAll({ freshMs: FRESH_MS })
+    .then((r) => log.info('linked accounts sync', r))
+    .catch((err) => log.error('linked accounts sync failed', { err }))
+    .finally(() => { syncRunning = false; });
+  return true;
 }
 
 /** The profile view: each linked account with its summary (and LeetCode's stored solves). */
 async function view(userId) {
   const accounts = await LinkedAccount.find({ userId }).lean();
-  const out = { leetcode: null, codeforces: null };
+  const out = { leetcode: null, codeforces: null, github: null };
   for (const a of accounts) {
     out[a.provider] = { username: a.username, linkedAt: a.linkedAt, lastSyncAt: a.lastSyncAt, lastError: a.lastError || null, summary: a.summary || {},
       verified: Boolean(a.verifiedAt), verifyCode: a.verifyCode || null };
@@ -168,4 +218,4 @@ async function view(userId) {
   return out;
 }
 
-module.exports = { link, unlink, syncAll, view, pull, startVerify, verify, boardRows, PROVIDERS };
+module.exports = { link, unlink, syncAll, syncInBackground, FRESH_MS, view, pull, startVerify, verify, boardRows, PROVIDERS };

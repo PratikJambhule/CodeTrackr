@@ -28,6 +28,13 @@ const groupSchema = new mongoose.Schema({
         type: mongoose.Schema.Types.ObjectId,
         ref: 'User',
         required: true
+    },
+    // Set when the group is a team in a hackathon (D-71). Teams are joined from the event page.
+    eventId: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'Event',
+        default: null,
+        index: true
     }
 }, { timestamps: true });
 

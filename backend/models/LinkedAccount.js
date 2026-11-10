@@ -11,7 +11,7 @@ const mongoose = require('mongoose');
  */
 const linkedAccountSchema = new mongoose.Schema({
     userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
-    provider: { type: String, enum: ['leetcode', 'codeforces'], required: true },
+    provider: { type: String, enum: ['leetcode', 'codeforces', 'github'], required: true },
     username: { type: String, required: true },
     linkedAt: { type: Date, default: Date.now },
     lastSyncAt: Date,

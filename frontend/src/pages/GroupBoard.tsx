@@ -3,17 +3,20 @@ import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { useQueryClient } from '@tanstack/react-query';
 import { ArrowLeft, Link2, LogOut, Pencil } from 'lucide-react';
 import { apiSend, errorText } from '../api';
-import { type BoardWindow, useGroupDetails, useGroupPractice } from '../hooks/queries';
-import { PracticeStandings } from '../components/PracticeStandings';
+import { type BoardWindow, useGroupDetails } from '../hooks/queries';
+import { GroupAdminPanel } from '../components/GroupAdminPanel';
+import { GroupWeekBoard } from '../components/GroupWeekBoard';
+import { isGroupAdmin, memberActions } from '../lib/groupRoles';
 import { StandingsTower, type TowerRow } from '../components/charts/StandingsTower';
 import { CellLegend } from '../components/charts/DayCells';
 import { RaceChart } from '../components/charts/RaceChart';
 import { Avatar, Button, Card, CardTitle, EmptyState, ErrorBox, Modal, PageHeader, Pill, Segmented, Skeleton, TextField, useToast } from '../components/ui';
 import { addDays, dayLabel, fromDateKey, gapLabel, hm, localDateKey, mondayOf, plural, startOfDay, weekdayShort } from '../lib/format';
 import { cellsSummary, dayCells, movement, orderOnDay, rank, type Racer } from '../lib/standings';
-import type { GroupDetails, Me } from '../types';
+import type { Me } from '../types';
 
 type Period = 'week' | '7d' | 'all' | 'contest';
+type View = 'problems' | 'vscode' | 'members';
 
 /** The board's window from the URL, so a contest week can be shared as a link. */
 function useBoardPeriod() {
@@ -39,47 +42,24 @@ function useBoardPeriod() {
     }
     return { keys: null }; // all time: the API returns the last 7 days of cells
   }, [period, fromKey, toKey]);
-  const set = (p: Period, extra: Record<string, string> = {}) => setParams({ period: p, ...extra }, { replace: true });
+  const set = (p: Period, extra: Record<string, string> = {}) =>
+    setParams((prev) => {
+      const next = new URLSearchParams(prev);
+      next.set('period', p);
+      next.delete('from');
+      next.delete('to');
+      for (const [k, v] of Object.entries(extra)) next.set(k, v);
+      return next;
+    }, { replace: true });
   return { period, range, set, fromKey, toKey };
-}
-
-function Highlights({ racers, futureFrom, details }: { racers: Racer[]; futureFrom: number; details: GroupDetails }) {
-  const items: { label: string; who: string; detail: string; tone: string }[] = [];
-  let best = { secs: 0, names: [] as string[], days: [] as number[] };
-  for (const r of racers) {
-    (r.days ?? []).slice(0, futureFrom).forEach((v, d) => {
-      if (v > best.secs) best = { secs: v, names: [r.name], days: [d] };
-      else if (v === best.secs && v > 0 && !best.names.includes(r.name)) {
-        best.names.push(r.name);
-        best.days.push(d);
-      }
-    });
-  }
-  if (best.secs > 0) items.push({ label: 'Biggest single day', who: best.names.slice(0, 2).join(' and '), detail: hm(best.secs), tone: 'text-accent-ink' });
-  const days = Math.min(futureFrom, racers[0]?.days?.length ?? 0);
-  const everyDay = racers.filter((r) => days > 1 && (r.days ?? []).slice(0, days).every((v) => v > 0)).map((r) => r.name);
-  if (everyDay.length) items.push({ label: `Coded all ${days} days`, who: everyDay.slice(0, 3).join(', ') + (everyDay.length > 3 ? ` +${everyDay.length - 3}` : ''), detail: 'no day off', tone: 'text-good-ink' });
-  const commits = [...details.leaderboard].sort((a, b) => b.commits - a.commits)[0];
-  if (commits?.commits) items.push({ label: 'Most commits', who: commits.userName, detail: plural(commits.commits, 'commit'), tone: 'text-muted' });
-  const steady = details.leaderboard.filter((r) => r.totalCommands >= 5 && r.commandFailureRate !== null).sort((a, b) => (a.commandFailureRate ?? 1) - (b.commandFailureRate ?? 1))[0];
-  if (steady) items.push({ label: 'Fewest failed commands', who: steady.userName, detail: `${Math.round((steady.commandFailureRate ?? 0) * 100)}% of ${steady.totalCommands}`, tone: 'text-muted' });
-  if (!items.length) return null;
-  return (
-    <ul className="mb-6 grid gap-4 [grid-template-columns:repeat(auto-fit,minmax(min(220px,100%),1fr))]">
-      {items.map((h) => (
-        <Card as="li" key={h.label} className="flex flex-col gap-1.5 p-5">
-          <span className="eyebrow">{h.label}</span>
-          <span className="display text-balance text-[28px] leading-[1.05]">{h.who}</span>
-          <span className={`font-mono text-[13px] ${h.tone}`}>{h.detail}</span>
-        </Card>
-      ))}
-    </ul>
-  );
 }
 
 export default function GroupBoard({ user }: { user: Me }) {
   const { groupId } = useParams();
   const { period, range, set, fromKey, toKey } = useBoardPeriod();
+  const [params, setParams] = useSearchParams();
+  const view = (['problems', 'vscode', 'members'].includes(params.get('view') ?? '') ? params.get('view') : 'problems') as View;
+  const setView = (v: View) => setParams((prev) => { const next = new URLSearchParams(prev); next.set('view', v); return next; }, { replace: true });
   const q = useGroupDetails(groupId, range);
   const qc = useQueryClient();
   const toast = useToast();
@@ -88,6 +68,7 @@ export default function GroupBoard({ user }: { user: Me }) {
   const [renameOpen, setRenameOpen] = useState(false);
   const [leaveOpen, setLeaveOpen] = useState(false);
   const [removing, setRemoving] = useState<{ id: string; name: string } | null>(null);
+  const [transferring, setTransferring] = useState<{ id: string; name: string } | null>(null);
   const today = useMemo(() => new Date(), []);
 
   if (q.isPending) return <Skeleton className="h-[520px]" />;
@@ -110,7 +91,8 @@ export default function GroupBoard({ user }: { user: Me }) {
   }
 
   const d = q.data;
-  const isAdmin = d.group.createdBy?._id === user.id;
+  const isAdmin = isGroupAdmin(d.myRole);
+  const isOwner = d.myRole === 'owner';
   const todayKey = localDateKey(today);
   const keys = range.keys ?? d.daily?.dates ?? [];
   const byUser = d.daily?.byUser ?? {};
@@ -176,11 +158,34 @@ export default function GroupBoard({ user }: { user: Me }) {
       toast(errorText(err), 'error');
     }
   };
+  const setRole = async (id: string, name: string, role: 'admin' | 'member') => {
+    try {
+      await apiSend('PATCH', `/api/groups/${d.group._id}/members/${id}/role`, { role });
+      await qc.invalidateQueries({ queryKey: ['groups', 'details', d.group._id] });
+      await qc.invalidateQueries({ queryKey: ['groups', 'audit', d.group._id] });
+      toast(role === 'admin' ? `${name} is now an admin` : `${name} is now a member`);
+    } catch (err) {
+      toast(errorText(err), 'error');
+    }
+  };
+  const transfer = async () => {
+    if (!transferring) return;
+    try {
+      await apiSend('POST', `/api/groups/${d.group._id}/transfer`, { userId: transferring.id });
+      await qc.invalidateQueries({ queryKey: ['groups', 'details', d.group._id] });
+      await qc.invalidateQueries({ queryKey: ['groups', 'audit', d.group._id] });
+      toast(`${transferring.name} now owns this group`);
+    } catch (err) {
+      toast(errorText(err), 'error');
+    }
+    setTransferring(null);
+  };
   const remove = async () => {
     if (!removing) return;
     try {
       await apiSend('DELETE', `/api/groups/${d.group._id}/members/${removing.id}`);
       await qc.invalidateQueries({ queryKey: ['groups', 'details', d.group._id] });
+      await qc.invalidateQueries({ queryKey: ['groups', 'audit', d.group._id] });
       toast(`Removed ${removing.name}`);
     } catch (err) {
       toast(errorText(err), 'error');
@@ -192,27 +197,40 @@ export default function GroupBoard({ user }: { user: Me }) {
     <>
       <BackLink />
       <PageHeader
-        eyebrow={
-          <span className="flex flex-wrap items-center gap-2">
-            {d.group.visibility === 'private' ? 'Private group' : 'Public group'} · {plural(d.members.length, 'member')}
-            {isAdmin && <Pill tone="accent">you are admin</Pill>}
-          </span>
-        }
         title={d.group.name}
         actions={
-          <>
-            <Button icon={<Link2 className="h-4 w-4" aria-hidden="true" />} onClick={copyInvite}>
-              Copy invite link
-            </Button>
-            <Button variant="primary" onClick={() => setContestOpen(true)}>
-              Set contest dates
-            </Button>
-          </>
+          <Button icon={<Link2 className="h-4 w-4" aria-hidden="true" />} onClick={copyInvite}>
+            Copy invite link
+          </Button>
         }
       >
-        {d.group.description}
+        <p>{d.group.description}</p>
+        <p className="mt-2 flex flex-wrap items-center gap-2 text-sm">
+          <span>{d.group.visibility === 'private' ? 'Private' : 'Public'} · {plural(d.members.length, 'member')}</span>
+          {isAdmin && <Pill tone="accent">you are {isOwner ? 'the owner' : 'an admin'}</Pill>}
+        </p>
       </PageHeader>
 
+      <div className="mb-6 border-b border-line">
+        <nav aria-label="Group sections" className="-mb-px flex gap-1 overflow-x-auto">
+          {([['problems', 'Problems'], ['vscode', 'VS Code time'], ['members', `Members · ${d.members.length}`]] as [View, string][]).map(([v, label]) => (
+            <button
+              key={v}
+              type="button"
+              aria-current={view === v ? 'page' : undefined}
+              onClick={() => setView(v)}
+              className={`whitespace-nowrap border-b-2 px-4 py-2.5 text-sm font-semibold transition-colors ${view === v ? 'border-accent text-ink' : 'border-transparent text-muted hover:text-ink'}`}
+            >
+              {label}
+            </button>
+          ))}
+        </nav>
+      </div>
+
+      {view === 'problems' && <GroupWeekBoard groupId={d.group._id} groupName={d.group.name} meId={user.id} />}
+
+      {view === 'vscode' && (
+      <>
       <div className="mb-5 flex flex-wrap items-center gap-3">
         <Segmented
           label="Board period"
@@ -225,25 +243,27 @@ export default function GroupBoard({ user }: { user: Me }) {
             ...(period === 'contest' ? [{ value: 'contest' as Period, label: periodLabel }] : []),
           ]}
         />
+        <Button size="sm" variant="ghost" onClick={() => setContestOpen(true)}>Set contest dates</Button>
         {q.isFetching && <span className="font-mono text-xs text-muted">updating…</span>}
       </div>
 
       {/* Wide screens: the tower and the race chart side by side; otherwise stacked. */}
       <div className="mb-6 grid grid-cols-12 gap-4">
         <Card className={`col-span-12 min-w-0 p-4 sm:p-5 ${showRace ? '2xl:col-span-7' : ''}`}>
-          <CardTitle aside={isAll ? 'cells: last 7 days' : periodLabel}>Standings</CardTitle>
+          <CardTitle aside={isAll ? 'cells: last 7 days' : periodLabel}>VS Code time</CardTitle>
+          <p className="-mt-2 mb-3 text-sm text-muted">Time tracked by the VS Code extension, for people who use it. Each small box is one day. This doesn't change the problems ranking.</p>
           {ranked.length === 0 ? (
             <EmptyState title="No members yet" />
           ) : (
             <StandingsTower
               rows={rows}
               label={`${d.group.name} standings, ${periodLabel}`}
-              valueHeader={isAll ? 'Hours' : 'Gap'}
+              valueHeader={isAll ? 'Hours' : 'Behind leader'}
               dayHeader={keys.length ? `${weekdayShort(keys[0])} → ${weekdayShort(keys[keys.length - 1])}` : undefined}
               columns={[
                 { label: 'Commits' },
-                { label: 'Cmd fail', title: 'Share of terminal commands that failed' },
-                { label: 'Build fail', title: 'Share of builds that failed' },
+                { label: 'Failed commands', title: 'Share of terminal commands that failed' },
+                { label: 'Failed builds', title: 'Share of builds that failed' },
               ]}
             />
           )}
@@ -260,30 +280,48 @@ export default function GroupBoard({ user }: { user: Me }) {
           </Card>
         )}
       </div>
+      </>
+      )}
 
-      {d.daily && !isAll && <Highlights racers={racers} futureFrom={futureFrom} details={d} />}
-
-      <GroupPractice groupId={d.group._id} meId={user.id} groupName={d.group.name} />
-
+      {view === 'members' && (
+      <div className="flex flex-col gap-4">
       <Card className="p-5">
         <CardTitle aside={<span className="hidden sm:inline">{inviteUrl}</span>}>Members</CardTitle>
         <ul className="flex flex-col">
-          {d.members.map((m) => (
+          {d.members.map((m) => {
+            const can = memberActions(d.myRole, m.role, m.id === user.id);
+            return (
             <li key={m.id} className="flex flex-wrap items-center gap-3 border-t border-line py-3 first:border-0">
               <Avatar name={m.name} size={36} />
               <span className="min-w-[140px] flex-1 font-medium">
                 {m.name}
                 {m.id === user.id && <span className="ml-2 font-mono text-[11px] text-accent-ink">you</span>}
-                {m.id === d.group.createdBy?._id && <span className="ml-2 font-mono text-[11px] text-muted">admin</span>}
+                {m.role !== 'member' && <span className="ml-2 font-mono text-[11px] text-muted">{m.role}</span>}
               </span>
               <span className="font-mono text-xs text-muted">joined {new Date(m.joinedAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}</span>
-              {isAdmin && m.id !== user.id && (
+              {can.promote && (
+                <Button size="sm" variant="ghost" onClick={() => setRole(m.id, m.name, 'admin')}>
+                  Make admin
+                </Button>
+              )}
+              {can.demote && (
+                <Button size="sm" variant="ghost" onClick={() => setRole(m.id, m.name, 'member')}>
+                  Remove admin
+                </Button>
+              )}
+              {can.transfer && (
+                <Button size="sm" variant="ghost" onClick={() => setTransferring({ id: m.id, name: m.name })}>
+                  Make owner
+                </Button>
+              )}
+              {can.remove && (
                 <Button size="sm" variant="danger" onClick={() => setRemoving({ id: m.id, name: m.name })}>
                   Remove
                 </Button>
               )}
             </li>
-          ))}
+            );
+          })}
         </ul>
         <div className="mt-4 flex flex-wrap gap-2 border-t border-line pt-4">
           {isAdmin && (
@@ -297,6 +335,10 @@ export default function GroupBoard({ user }: { user: Me }) {
         </div>
       </Card>
 
+      {isAdmin && <GroupAdminPanel groupId={d.group._id} />}
+      </div>
+      )}
+
       <ContestDialog
         open={contestOpen}
         onClose={() => setContestOpen(false)}
@@ -308,11 +350,19 @@ export default function GroupBoard({ user }: { user: Me }) {
         }}
       />
       <RenameDialog open={renameOpen} onClose={() => setRenameOpen(false)} groupId={d.group._id} name={d.group.name} description={d.group.description} />
-      <Modal open={leaveOpen} onClose={() => setLeaveOpen(false)} title={`Leave ${d.group.name}?`} description={isAdmin ? 'You are the admin. The longest-standing member will take over.' : 'You can join again later.'}>
+      <Modal open={leaveOpen} onClose={() => setLeaveOpen(false)} title={`Leave ${d.group.name}?`} description={isOwner ? 'You are the owner. The longest-standing admin takes over, or the longest-standing member if there are no admins.' : 'You can join again later.'}>
         <div className="flex justify-end gap-2">
           <Button onClick={() => setLeaveOpen(false)}>Stay</Button>
           <Button variant="danger" onClick={leave}>
             Leave group
+          </Button>
+        </div>
+      </Modal>
+      <Modal open={transferring !== null} onClose={() => setTransferring(null)} title={`Make ${transferring?.name ?? ''} the owner?`} description="You will stay in the group as an admin. Only the new owner can undo this.">
+        <div className="flex justify-end gap-2">
+          <Button onClick={() => setTransferring(null)}>Cancel</Button>
+          <Button variant="primary" onClick={transfer}>
+            Make owner
           </Button>
         </div>
       </Modal>
@@ -394,32 +444,5 @@ function RenameDialog({ open, onClose, groupId, name, description }: { open: boo
         </Button>
       </form>
     </Modal>
-  );
-}
-
-/** LeetCode and Codeforces practice for the group's members, verified accounts only (D-62). */
-function GroupPractice({ groupId, meId, groupName }: { groupId: string; meId: string; groupName: string }) {
-  const q = useGroupPractice(groupId);
-  if (q.isPending) return <Skeleton className="mb-6 h-40" />;
-  if (q.isError) return null;
-  const { rows, notShown } = q.data;
-  const meMissing = notShown.some((p) => p.id === meId);
-  return (
-    <Card className="mb-6 p-4 sm:p-5">
-      <CardTitle aside="LeetCode + Codeforces · last 7 days · updated nightly">Practice</CardTitle>
-      {rows.length ? (
-        <PracticeStandings rows={rows} meId={meId} label={`${groupName}: problems solved in the last 7 days`} />
-      ) : (
-        <EmptyState title="Nobody here has a verified LeetCode or Codeforces account yet">
-          Link one on your profile and press Verify: the group then sees problems solved this week and ratings.
-        </EmptyState>
-      )}
-      {!!notShown.length && (
-        <p className="mt-4 border-t border-line px-1 pt-3 text-sm text-muted">
-          Not on this board: {notShown.map((p) => p.name).join(', ')}.{' '}
-          {meMissing ? <Link to="/profile">Link and verify your account</Link> : 'They can link and verify an account on their profile.'}
-        </p>
-      )}
-    </Card>
   );
 }

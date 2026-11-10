@@ -74,16 +74,16 @@ export function StandingsTower({
     <div className="overflow-x-auto">
       <div className="min-w-[232px]">
         <div aria-hidden="true" className="flex items-center gap-1.5 px-2 pb-2 font-mono text-[11px] uppercase tracking-[0.05em] text-faint sm:gap-3 sm:px-3">
-          <span className="w-8 sm:w-9">Pos</span>
+          <span className="w-8 sm:w-9">Rank</span>
           <span className="min-w-[56px] flex-1 sm:min-w-[84px]">Name</span>
           {hasCells && <span className="hidden sm:block">{dayHeader ?? 'Days'}</span>}
           {columns.map((c) => (
-            <span key={c.label} title={c.title} className="hidden w-16 text-right md:block">
+            <span key={c.label} title={c.title} className="hidden w-16 text-right leading-tight md:block">
               {c.label}
             </span>
           ))}
           <span className="w-7 sm:w-8" />
-          <span className="w-[66px] text-right sm:w-[92px]">{valueHeader}</span>
+          <span className="w-[66px] text-right leading-tight sm:w-[92px]">{valueHeader}</span>
         </div>
         <ol aria-label={label} className="relative flex flex-col gap-1">
           {rows.map((r, i) => (

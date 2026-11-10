@@ -317,7 +317,7 @@ export default function Practice() {
   return (
     <>
       <PageHeader eyebrow="LeetCode · Codeforces · VS Code" title="Practice">
-        Your problem solving across both sites, in one place. Refreshed every night from your public profiles; only you see it.
+        Your problem solving across both sites, in one place. Refreshed every hour from your public profiles; only you see it.
       </PageHeader>
       {q.isPending && <Skeleton className="h-64" />}
       {q.isError && <ErrorBox message={errorText(q.error)} onRetry={() => q.refetch()} />}

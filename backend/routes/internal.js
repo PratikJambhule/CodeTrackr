@@ -22,12 +22,15 @@ function requireCronSecret(req, res, next) {
   return next();
 }
 
-// POST /api/internal/run-notifications — the hourly deadline sweep.
+// POST /api/internal/run-notifications — the hourly deadline sweep and linked-account refresh.
 router.post('/run-notifications', requireCronSecret, async (req, res, next) => {
   try {
     await checkUpcomingDeadlines();
     await checkOverdueGoals();
-    res.json({ ok: true });
+    // LeetCode, Codeforces and GitHub, in the background: with a polite pause per account
+    // it can outlast the caller's timeout. Failures are recorded per account.
+    const linked = require('../services/linkedSync').syncInBackground();
+    res.json({ ok: true, linked: linked ? 'started' : 'already running' });
   } catch (err) {
     return next(err);
   }
@@ -39,12 +42,7 @@ router.post('/run-rollup', requireCronSecret, async (req, res, next) => {
     const r = await rollupDaily({ apply: true, beforeDays: 2 });
     // Also save settled coding sessions for the work-type model (ML plan B7). Idempotent.
     const s = await require('../services/sessionSnapshot').snapshotAll();
-    // Re-read linked LeetCode accounts (D-59) in the background: with a polite pause per
-    // account it can outlast the caller's 180 s timeout. Failures are recorded per account.
-    require('../services/linkedSync').syncAll()
-      .then((l) => log.info('linked accounts sync', l))
-      .catch((err) => log.error('linked accounts sync failed', { err }));
-    res.json({ ok: true, wrote: r && r.wrote, sessions: s.sessions, linked: 'started' });
+    res.json({ ok: true, wrote: r && r.wrote, sessions: s.sessions });
   } catch (err) {
     return next(err);
   }

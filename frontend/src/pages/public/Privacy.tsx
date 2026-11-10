@@ -43,15 +43,15 @@ export default function Privacy() {
         <p>Signing in with Google gives us your name, email address and profile picture. We do not get your password or access to anything else in your Google account.</p>
       </Block>
 
-      <Block title="From LeetCode and Codeforces (only if you link them)">
+      <Block title="From LeetCode, Codeforces and GitHub (only if you link them)">
         <p>
           On your profile you can link a LeetCode username and a Codeforces handle. CodeTrackr then reads only what those public profiles show, once when you link and again
-          every night: from LeetCode, problems solved by difficulty and topic, your daily activity, your last 20 accepted problems and your contest rating; from Codeforces,
-          your rating, rank and contest history, and your recent submissions with each problem's difficulty and topics. No password and no code.
+          every hour: from LeetCode, problems solved by difficulty and topic, your daily activity, your last 20 accepted problems and your contest rating; from Codeforces,
+          your rating, rank and contest history, and your recent submissions with each problem's difficulty and topics; from GitHub, your public pushes and pull requests as counts and times, and the names of those public repos. No password and no code.
         </p>
         <p>
           Only you see this, unless you <strong>verify</strong> the account (by putting a short code in your public profile). Then your groups and the leaderboard see your
-          problems solved in the last 7 days, totals and ratings. Unlinking deletes everything that was read.
+          problems solved in the last 7 days, totals and ratings, and your groups see your problems solved, contests entered and GitHub pushes this week. In a hackathon, everyone in the event sees each team's GitHub pushes and VS Code time inside the event, and the organiser sees whether each member has a verified GitHub account and has connected VS Code. Unlinking deletes everything that was read.
         </p>
       </Block>
 

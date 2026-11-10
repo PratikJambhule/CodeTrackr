@@ -102,7 +102,8 @@ export interface GroupBoardRow {
 
 export interface GroupDetails {
   group: Group;
-  members: { id: string; name: string; joinedAt: string }[];
+  members: { id: string; name: string; joinedAt: string; role: GroupRole }[];
+  myRole: GroupRole;
   leaderboard: GroupBoardRow[];
   window: { from: string; to: string } | null;
   daily: { dates: string[]; byUser: Record<string, number[]> } | null;
@@ -322,6 +323,26 @@ export interface CodeforcesLink extends LinkedBase {
 export interface Links {
   leetcode: LeetCodeLink | null;
   codeforces: CodeforcesLink | null;
+  github: GithubLink | null;
+}
+
+export interface GithubLink extends LinkedBase {
+  summary: {
+    publicRepos?: number;
+    pushes7d?: number;
+    pushes30d?: number;
+    activeWindows7d?: number;
+    activeWindows30d?: number;
+    activeDays30?: number;
+    mergedPrs30d?: number;
+    openedPrs30d?: number;
+    repos30d?: number;
+    topRepos?: { name: string; pushes: number }[];
+    lastPushAt?: string | null;
+    recentPushes?: { repo: string; at: string }[];
+    weekly?: { weekEnding: string; pushes: number }[];
+    truncated?: boolean;
+  };
 }
 
 /** GET /api/user/practice (D-61): LeetCode and Codeforces together. */
@@ -375,4 +396,75 @@ export interface PracticeRow {
   solvedTotal: number;
   leetcode: { username: string; solved: number; solved7d: number; rating: number | null } | null;
   codeforces: { username: string; solved: number; solved7d: number; rating: number | null; rank: string | null } | null;
+}
+
+export type GroupRole = 'owner' | 'admin' | 'member';
+
+export interface GroupInviteRow {
+  id: string;
+  expiresAt: string;
+  maxUses: number;
+  uses: number;
+  createdByName?: string | null;
+}
+
+export interface CreatedInvite extends GroupInviteRow {
+  token: string;
+}
+
+export interface GroupAuditEntry {
+  id: string;
+  action: string;
+  detail?: string | null;
+  at: string;
+  actorName?: string | null;
+  targetName?: string | null;
+}
+
+export interface InvitePreview {
+  group: { _id: string; name: string; description: string; createdByName?: string | null };
+  memberCount: number;
+  isMember: boolean;
+}
+
+export interface GroupWeekBoard {
+  week: { startsOn: string; endsOn: string; daysLeft: number };
+  rows: { id: string; name: string; pos: number; problems: number; contests: number; pushes: number }[];
+  lastWeek: { problems: number; names: string[] } | null;
+  unranked: { id: string; name: string }[];
+}
+
+export interface HackEvent {
+  id: string;
+  name: string;
+  description: string;
+  startsAt: string;
+  endsAt: string;
+  editorRule: 'any' | 'vscode';
+  maxTeamSize: number;
+  organizerName?: string | null;
+  status: 'upcoming' | 'live' | 'ended';
+  isOrganizer: boolean;
+}
+
+export interface EventDetails {
+  event: HackEvent;
+  teams: { id: string; name: string; size: number; members: string[] }[];
+  myTeamId: string | null;
+}
+
+export interface EventBoard {
+  status: HackEvent['status'];
+  teams: {
+    id: string;
+    name: string;
+    size: number;
+    pushes: number;
+    vscodeSeconds: number;
+    firstPushAt: string | null;
+    lastPushAt: string | null;
+    members: { id: string; name: string; pushes: number; vscodeSeconds: number; github: boolean; vscode: boolean }[];
+  }[];
+  checks: { kind: string; team: string; member: string | null; text: string }[] | null;
+  lastRefreshAt: string | null;
 }

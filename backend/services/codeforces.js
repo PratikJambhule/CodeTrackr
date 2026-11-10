@@ -8,6 +8,7 @@
  */
 const { LinkError } = require('./leetcode');
 const ratingOutlook = require('./ratingOutlook');
+const { codeforcesDays } = require('./competition');
 const { log } = require('./logger');
 
 const API = 'https://codeforces.com/api/';
@@ -94,8 +95,10 @@ function parseProfile(info, ratingHistory, submissions, { now = Date.now() } = {
   const recent = list.filter((p) => p.t >= now / 1000 - 28 * 86400 && p.rating);
   const above = info.rating ? recent.filter((p) => p.rating >= info.rating + 100).length : 0;
 
+  const ledger = codeforcesDays(list, ratingHistory, now);
   return {
     username: info.handle,
+    ledger,
     summary: {
       rating: info.rating ?? null,
       maxRating: info.maxRating ?? null,

@@ -579,8 +579,8 @@ async function main() {
         assert.strictEqual((await request(app).get('/api/user/practice')).status, 401);
 
         const theirs = await request(app).get('/api/user/links').set('Cookie', other.cookie);
-        assert.deepStrictEqual(theirs.body.links, { leetcode: null, codeforces: null });
-        for (const provider of ['github', 'hackerrank']) {
+        assert.deepStrictEqual(theirs.body.links, { leetcode: null, codeforces: null, github: null });
+        for (const provider of ['twitter', 'hackerrank']) {
           const bad = await request(app).put(`/api/user/links/${provider}`).set('Cookie', me.cookie).send({ username: 'x' });
           assert.strictEqual(bad.status, 404);
         }
@@ -589,7 +589,7 @@ async function main() {
         await request(app).delete('/api/user/links/leetcode').set('Cookie', me.cookie);
         await request(app).delete('/api/user/links/codeforces').set('Cookie', me.cookie);
         const after = await request(app).get('/api/user/links').set('Cookie', me.cookie);
-        assert.deepStrictEqual(after.body.links, { leetcode: null, codeforces: null });
+        assert.deepStrictEqual(after.body.links, { leetcode: null, codeforces: null, github: null });
         assert.strictEqual(await LcSolve.countDocuments({ userId: me.user.id }), 0);
       } finally {
         global.fetch = realFetch;
@@ -1553,6 +1553,287 @@ async function main() {
       assert.strictEqual((await request(app).get('/api/groups/aaaaaaaaaaaaaaaaaaaaaaaa/preview').set('Cookie', owner.cookie)).status, 404);
       assert.strictEqual((await request(app).get('/api/groups/not-an-id/preview').set('Cookie', owner.cookie)).status, 400);
       assert.strictEqual((await request(app).get(`/api/groups/${id}/preview`)).status, 401);
+    }],
+    ['group roles: owner, admin and member can each do only their part', async () => {
+      const owner = await h.makeUser('Owner'); const admin = await h.makeUser('Admin'); const member = await h.makeUser('Member'); const outsider = await h.makeUser('Outsider');
+      const id = (await request(app).post('/api/groups/create').set('Cookie', owner.cookie).send({ groupName: 'Hack team', groupDescription: 'x', visibility: 'public' })).body.group._id;
+      await request(app).post(`/api/groups/${id}/join`).set('Cookie', admin.cookie).send({});
+      await request(app).post(`/api/groups/${id}/join`).set('Cookie', member.cookie).send({});
+      const setRole = (who, target, role) => request(app).patch(`/api/groups/${id}/members/${target.user.id}/role`).set('Cookie', who.cookie).send({ role });
+
+      assert.strictEqual((await setRole(member, admin, 'admin')).status, 403);
+      assert.strictEqual((await setRole(outsider, admin, 'admin')).status, 403);
+      assert.strictEqual((await setRole(owner, admin, 'boss')).status, 400);
+      assert.strictEqual((await setRole(owner, outsider, 'admin')).status, 404);
+      assert.strictEqual((await setRole(owner, owner, 'member')).status, 400, 'the owner has no other role');
+      assert.strictEqual((await setRole(owner, admin, 'admin')).status, 200);
+      assert.strictEqual((await setRole(admin, member, 'admin')).status, 403, 'only the owner hands out roles');
+
+      const details = await request(app).get(`/api/groups/${id}/details`).set('Cookie', admin.cookie);
+      assert.strictEqual(details.body.myRole, 'admin');
+      assert.deepStrictEqual(details.body.members.map((m) => m.role), ['owner', 'admin', 'member']);
+
+      assert.strictEqual((await request(app).patch(`/api/groups/${id}`).set('Cookie', admin.cookie).send({ groupName: 'Renamed' })).status, 200);
+      assert.strictEqual((await request(app).delete(`/api/groups/${id}/members/${owner.user.id}`).set('Cookie', admin.cookie)).status, 403);
+      assert.strictEqual((await request(app).delete(`/api/groups/${id}/members/${member.user.id}`).set('Cookie', admin.cookie)).status, 200);
+
+      const audit = await request(app).get(`/api/groups/${id}/audit`).set('Cookie', admin.cookie);
+      assert.strictEqual(audit.status, 200);
+      assert.deepStrictEqual(audit.body.entries.map((e) => e.action).slice(0, 3), ['member_removed', 'group_renamed', 'role_changed']);
+      assert.strictEqual(audit.body.entries[0].targetName, 'Member');
+      assert.ok(!JSON.stringify(audit.body).includes('@'), 'no emails');
+      await request(app).post(`/api/groups/${id}/join`).set('Cookie', member.cookie).send({});
+      assert.strictEqual((await request(app).get(`/api/groups/${id}/audit`).set('Cookie', member.cookie)).status, 403);
+    }],
+
+    ['group roles: an admin of one group has no power in another', async () => {
+      const a = await h.makeUser('A'); const b = await h.makeUser('B');
+      const make = (u, n) => request(app).post('/api/groups/create').set('Cookie', u.cookie).send({ groupName: n, groupDescription: 'x', visibility: 'public' });
+      const ga = (await make(a, 'Group A')).body.group._id; const gb = (await make(b, 'Group B')).body.group._id;
+      assert.strictEqual((await request(app).patch(`/api/groups/${gb}`).set('Cookie', a.cookie).send({ groupName: 'Taken' })).status, 403);
+      assert.strictEqual((await request(app).post(`/api/groups/${gb}/invites`).set('Cookie', a.cookie).send({})).status, 403);
+      assert.strictEqual((await request(app).get(`/api/groups/${gb}/invites`).set('Cookie', a.cookie)).status, 403);
+      const inv = (await request(app).post(`/api/groups/${gb}/invites`).set('Cookie', b.cookie).send({})).body.invite;
+      assert.strictEqual((await request(app).delete(`/api/groups/${ga}/invites/${inv.id}`).set('Cookie', a.cookie)).status, 404, 'an invite is only found under its own group');
+    }],
+
+    ['group ownership: transfer, and who takes over when the owner leaves', async () => {
+      const owner = await h.makeUser('Owner'); const older = await h.makeUser('Older'); const admin = await h.makeUser('Admin');
+      const id = (await request(app).post('/api/groups/create').set('Cookie', owner.cookie).send({ groupName: 'G', groupDescription: 'x', visibility: 'public' })).body.group._id;
+      await request(app).post(`/api/groups/${id}/join`).set('Cookie', older.cookie).send({});
+      await request(app).post(`/api/groups/${id}/join`).set('Cookie', admin.cookie).send({});
+      await request(app).patch(`/api/groups/${id}/members/${admin.user.id}/role`).set('Cookie', owner.cookie).send({ role: 'admin' });
+
+      assert.strictEqual((await request(app).post(`/api/groups/${id}/transfer`).set('Cookie', admin.cookie).send({ userId: admin.user.id })).status, 403);
+      assert.strictEqual((await request(app).post(`/api/groups/${id}/transfer`).set('Cookie', owner.cookie).send({ userId: 'aaaaaaaaaaaaaaaaaaaaaaaa' })).status, 404);
+
+      // An admin takes over ahead of a longer-standing plain member.
+      await request(app).post(`/api/groups/${id}/leave`).set('Cookie', owner.cookie).send({});
+      let d = await request(app).get(`/api/groups/${id}/details`).set('Cookie', admin.cookie);
+      assert.strictEqual(d.body.myRole, 'owner');
+
+      assert.strictEqual((await request(app).post(`/api/groups/${id}/transfer`).set('Cookie', admin.cookie).send({ userId: older.user.id })).status, 200);
+      d = await request(app).get(`/api/groups/${id}/details`).set('Cookie', admin.cookie);
+      assert.strictEqual(d.body.myRole, 'admin', 'the old owner stays on as an admin');
+      d = await request(app).get(`/api/groups/${id}/details`).set('Cookie', older.cookie);
+      assert.strictEqual(d.body.myRole, 'owner');
+    }],
+
+    ['group invites: join a private group by link; expired, revoked and used-up links are refused', async () => {
+      const owner = await h.makeUser('Owner'); const one = await h.makeUser('One'); const two = await h.makeUser('Two');
+      const id = (await request(app).post('/api/groups/create').set('Cookie', owner.cookie).send({ groupName: 'Secret', groupDescription: 'x', visibility: 'private', password: 'hunter2' })).body.group._id;
+      assert.strictEqual((await request(app).post(`/api/groups/${id}/invites`).set('Cookie', owner.cookie).send({ days: 99 })).status, 400);
+      const created = await request(app).post(`/api/groups/${id}/invites`).set('Cookie', owner.cookie).send({ days: 1, maxUses: 1 });
+      assert.strictEqual(created.status, 201);
+      const { token, id: inviteId } = created.body.invite;
+
+      const list = await request(app).get(`/api/groups/${id}/invites`).set('Cookie', owner.cookie);
+      assert.strictEqual(list.body.invites.length, 1);
+      assert.ok(!JSON.stringify(list.body).includes(token), 'the link is shown once, never listed');
+      const GroupInvite = require('../../models/GroupInvite');
+      assert.ok(!JSON.stringify(await GroupInvite.findById(inviteId).lean()).includes(token), 'only the hash is stored');
+
+      const preview = await request(app).get(`/api/groups/invites/${token}/preview`).set('Cookie', one.cookie);
+      assert.strictEqual(preview.status, 200);
+      assert.strictEqual(preview.body.group.name, 'Secret');
+      assert.strictEqual((await request(app).get('/api/groups/invites/nonsense/preview').set('Cookie', one.cookie)).status, 404);
+
+      assert.strictEqual((await request(app).post('/api/groups/invites/join').set('Cookie', owner.cookie).send({ token })).status, 409, 'a member spends no use');
+      const joined = await request(app).post('/api/groups/invites/join').set('Cookie', one.cookie).send({ token });
+      assert.strictEqual(joined.status, 200, JSON.stringify(joined.body));
+      assert.strictEqual(joined.body.groupId, id);
+      assert.strictEqual((await request(app).post('/api/groups/invites/join').set('Cookie', two.cookie).send({ token })).status, 410, 'used up');
+
+      const revoked = (await request(app).post(`/api/groups/${id}/invites`).set('Cookie', owner.cookie).send({})).body.invite;
+      assert.strictEqual((await request(app).delete(`/api/groups/${id}/invites/${revoked.id}`).set('Cookie', owner.cookie)).status, 200);
+      assert.strictEqual((await request(app).post('/api/groups/invites/join').set('Cookie', two.cookie).send({ token: revoked.token })).status, 410);
+
+      const expired = (await request(app).post(`/api/groups/${id}/invites`).set('Cookie', owner.cookie).send({})).body.invite;
+      await GroupInvite.updateOne({ _id: expired.id }, { $set: { expiresAt: new Date(Date.now() - 1000) } });
+      assert.strictEqual((await request(app).post('/api/groups/invites/join').set('Cookie', two.cookie).send({ token: expired.token })).status, 410);
+      assert.strictEqual((await request(app).post('/api/groups/invites/join').send({ token: expired.token })).status, 401);
+    }],
+
+    ['group invites: two people racing for the last use, only one gets in', async () => {
+      const owner = await h.makeUser('Owner'); const one = await h.makeUser('One'); const two = await h.makeUser('Two');
+      const id = (await request(app).post('/api/groups/create').set('Cookie', owner.cookie).send({ groupName: 'Race', groupDescription: 'x', visibility: 'public' })).body.group._id;
+      const { token } = (await request(app).post(`/api/groups/${id}/invites`).set('Cookie', owner.cookie).send({ maxUses: 1 })).body.invite;
+      const res = await Promise.all([one, two].map((u) => request(app).post('/api/groups/invites/join').set('Cookie', u.cookie).send({ token })));
+      assert.deepStrictEqual(res.map((r) => r.status).sort(), [200, 410]);
+      const GroupMember = require('../../models/GroupMember');
+      assert.strictEqual(await GroupMember.countDocuments({ groupId: id }), 2);
+    }],
+
+    ['an older group with no role data behaves as before', async () => {
+      const owner = await h.makeUser('Owner'); const member = await h.makeUser('Member');
+      const id = (await request(app).post('/api/groups/create').set('Cookie', owner.cookie).send({ groupName: 'Old', groupDescription: 'x', visibility: 'public' })).body.group._id;
+      await request(app).post(`/api/groups/${id}/join`).set('Cookie', member.cookie).send({});
+      const d = await request(app).get(`/api/groups/${id}/details`).set('Cookie', owner.cookie);
+      assert.strictEqual(d.body.myRole, 'owner');
+      assert.deepStrictEqual(d.body.members.map((m) => m.role), ['owner', 'member']);
+      assert.strictEqual((await request(app).delete(`/api/groups/${id}/members/${member.user.id}`).set('Cookie', owner.cookie)).status, 200);
+    }],
+    ['GitHub link: stored privately, verified through the bio, kept off practice boards, deleted on unlink', async () => {
+      const u = await h.makeUser('Coder');
+      const realFetch = global.fetch;
+      let bio = 'just a coder';
+      global.fetch = async (url) => {
+        if (String(url).includes('/events/public')) {
+          return { ok: true, status: 200, json: async () => [{ type: 'PushEvent', created_at: new Date(Date.now() - 3600e3).toISOString(), repo: { name: 'coder/app' }, payload: {} }] };
+        }
+        if (String(url).includes('/users/nobody')) return { ok: false, status: 404, json: async () => ({}) };
+        return { ok: true, status: 200, json: async () => ({ login: 'coder', bio, public_repos: 3 }) };
+      };
+      try {
+        assert.strictEqual((await request(app).put('/api/user/links/github').set('Cookie', u.cookie).send({ username: 'bad name!' })).status, 400);
+        assert.strictEqual((await request(app).put('/api/user/links/github').set('Cookie', u.cookie).send({ username: 'nobody' })).status, 404);
+        const linked = await request(app).put('/api/user/links/github').set('Cookie', u.cookie).send({ username: 'Coder' });
+        assert.strictEqual(linked.status, 200, JSON.stringify(linked.body));
+        assert.strictEqual(linked.body.links.github.username, 'coder');
+        assert.strictEqual(linked.body.links.github.summary.pushes7d, 1);
+        assert.strictEqual(linked.body.links.github.verified, false);
+
+        const code = (await request(app).post('/api/user/links/github/verify-code').set('Cookie', u.cookie)).body.code;
+        const early = await request(app).post('/api/user/links/github/verify').set('Cookie', u.cookie);
+        assert.strictEqual(early.status, 409);
+        assert.match(early.body.message, /GitHub bio/);
+        bio = `hello ${code}`;
+        const done = await request(app).post('/api/user/links/github/verify').set('Cookie', u.cookie);
+        assert.strictEqual(done.status, 200, JSON.stringify(done.body));
+        assert.strictEqual(done.body.links.github.verified, true);
+
+        const { boardRows } = require('../../services/linkedSync');
+        assert.deepStrictEqual(await boardRows([u.user.id]), [], 'a GitHub account is not a practice-board row');
+
+        assert.strictEqual((await request(app).delete('/api/user/links/github').set('Cookie', u.cookie)).status, 200);
+        assert.strictEqual((await request(app).get('/api/user/links').set('Cookie', u.cookie)).body.links.github, null);
+      } finally {
+        global.fetch = realFetch;
+      }
+    }],
+    ['hourly refresh: an account refreshed recently is left alone; GitHub stops at its limit', async () => {
+      const LinkedAccount = require('../../models/LinkedAccount');
+      const { syncAll, FRESH_MS } = require('../../services/linkedSync');
+      const a = await h.makeUser('A'); const b = await h.makeUser('B'); const c = await h.makeUser('C');
+      const old = new Date(Date.now() - 2 * 3600e3);
+      await LinkedAccount.create({ userId: a.user.id, provider: 'github', username: 'fresh-one', lastSyncAt: new Date(), summary: { pushes7d: 4 } });
+      await LinkedAccount.create({ userId: b.user.id, provider: 'github', username: 'old-one', lastSyncAt: old });
+      await LinkedAccount.create({ userId: c.user.id, provider: 'github', username: 'old-two', lastSyncAt: old });
+      const realFetch = global.fetch;
+      const asked = [];
+      global.fetch = async (url) => { asked.push(String(url)); return { ok: false, status: 403, json: async () => ({ message: 'rate limit' }) }; };
+      try {
+        const r = await syncAll({ pauseMs: 0, freshMs: FRESH_MS });
+        assert.deepStrictEqual(r, { synced: 0, failed: 1, skipped: 1 });
+        assert.strictEqual(asked.length, 1, 'one refused request, then no more');
+        assert.ok(!asked.join().includes('fresh-one'));
+      } finally {
+        global.fetch = realFetch;
+      }
+    }],
+    ['hourly job: the scheduler route starts the linked-account refresh', async () => {
+      process.env.INTERNAL_CRON_SECRET = 'cron-test-secret';
+      try {
+        const res = await request(app).post('/api/internal/run-notifications').set('x-internal-secret', 'cron-test-secret');
+        assert.strictEqual(res.status, 200, JSON.stringify(res.body));
+        assert.ok(['started', 'already running'].includes(res.body.linked));
+        await new Promise((r) => setTimeout(r, 50));
+      } finally {
+        delete process.env.INTERNAL_CRON_SECRET;
+      }
+    }],
+    ['weekly board: only verified accounts appear, members only, and unlink removes them', async () => {
+      const owner = await h.makeUser('Owner'); const rival = await h.makeUser('Rival'); const outsider = await h.makeUser('Outsider');
+      const id = (await request(app).post('/api/groups/create').set('Cookie', owner.cookie).send({ groupName: 'Week', groupDescription: 'x', visibility: 'public' })).body.group._id;
+      await request(app).post(`/api/groups/${id}/join`).set('Cookie', rival.cookie).send({});
+      const realFetch = global.fetch;
+      let bio = '';
+      global.fetch = async (url) => {
+        if (String(url).includes('/events/public')) {
+          return { ok: true, status: 200, json: async () => [{ type: 'PushEvent', created_at: new Date(Date.now() - 600e3).toISOString(), repo: { name: 'o/app' }, payload: {} }] };
+        }
+        return { ok: true, status: 200, json: async () => ({ login: 'ownerdev', bio, public_repos: 1 }) };
+      };
+      try {
+        await request(app).put('/api/user/links/github').set('Cookie', owner.cookie).send({ username: 'ownerdev' });
+        let c = await request(app).get(`/api/groups/${id}/week`).set('Cookie', owner.cookie);
+        assert.strictEqual(c.status, 200, JSON.stringify(c.body));
+        assert.deepStrictEqual(c.body.rows, [], 'unverified accounts do not appear');
+        assert.deepStrictEqual(c.body.unranked.map((u) => u.name).sort(), ['Owner', 'Rival']);
+
+        bio = (await request(app).post('/api/user/links/github/verify-code').set('Cookie', owner.cookie)).body.code;
+        await request(app).post('/api/user/links/github/verify').set('Cookie', owner.cookie);
+        c = await request(app).get(`/api/groups/${id}/week`).set('Cookie', rival.cookie);
+        assert.strictEqual(c.body.rows.length, 1);
+        assert.strictEqual(c.body.rows[0].name, 'Owner');
+        assert.ok(c.body.rows[0].pushes >= 0);
+        assert.ok(!JSON.stringify(c.body).includes('@'), 'no emails');
+
+        assert.strictEqual((await request(app).get(`/api/groups/${id}/week`).set('Cookie', outsider.cookie)).status, 403);
+        await request(app).delete('/api/user/links/github').set('Cookie', owner.cookie);
+        const CompetitionDay = require('../../models/CompetitionDay');
+        assert.strictEqual(await CompetitionDay.countDocuments({ userId: owner.user.id }), 0, 'unlinking deletes the ledger');
+      } finally {
+        global.fetch = realFetch;
+      }
+    }],
+    ['hackathon events: create, teams, size limit, one team each, board counts and organiser checks', async () => {
+      const org = await h.makeUser('Organiser'); const a = await h.makeUser('Asha'); const b = await h.makeUser('Bilal'); const c = await h.makeUser('Chen'); const out = await h.makeUser('Outsider');
+      const now = Date.now();
+      const iso = (ms) => new Date(ms).toISOString();
+      assert.strictEqual((await request(app).post('/api/events').set('Cookie', org.cookie).send({ name: 'x', startsAt: iso(now), endsAt: iso(now + 3600e3) })).status, 400);
+      const created = await request(app).post('/api/events').set('Cookie', org.cookie).send({ name: 'SPIT Hack', startsAt: iso(now - 3 * 3600e3), endsAt: iso(now + 20 * 3600e3), editorRule: 'vscode', maxTeamSize: 2 });
+      assert.strictEqual(created.status, 201, JSON.stringify(created.body));
+      const id = created.body.event.id;
+      assert.strictEqual(created.body.event.status, 'live');
+
+      const team = (await request(app).post(`/api/events/${id}/teams`).set('Cookie', a.cookie).send({ name: 'Alpha' })).body.teamId;
+      assert.ok(team);
+      assert.strictEqual((await request(app).post(`/api/events/${id}/teams`).set('Cookie', a.cookie).send({ name: 'Second' })).status, 409, 'one team per event');
+      assert.strictEqual((await request(app).post(`/api/events/${id}/teams`).set('Cookie', c.cookie).send({ name: 'alpha' })).status, 409, 'names are unique');
+      assert.strictEqual((await request(app).post(`/api/events/${id}/teams/${team}/join`).set('Cookie', b.cookie)).status, 200);
+      assert.strictEqual((await request(app).post(`/api/events/${id}/teams/${team}/join`).set('Cookie', c.cookie)).status, 409, 'team of 2 is full');
+
+      const ev = await request(app).get(`/api/events/${id}`).set('Cookie', out.cookie);
+      assert.strictEqual(ev.status, 200);
+      assert.deepStrictEqual(ev.body.teams.map((t) => [t.name, t.size]), [['Alpha', 2]]);
+      assert.ok(!JSON.stringify(ev.body).includes('@'), 'no emails');
+      assert.strictEqual((await request(app).get(`/api/events/${id}/board`).set('Cookie', out.cookie)).status, 403);
+
+      // Teams are not in Discover and can't be joined with a group invite link.
+      const disc = await request(app).get('/api/groups/discover').set('Cookie', out.cookie);
+      assert.ok(!JSON.stringify(disc.body).includes('Alpha'));
+      const inv = (await request(app).post(`/api/groups/${team}/invites`).set('Cookie', a.cookie).send({})).body.invite;
+      assert.strictEqual((await request(app).post('/api/groups/invites/join').set('Cookie', out.cookie).send({ token: inv.token })).status, 409);
+
+      const LinkedAccount = require('../../models/LinkedAccount');
+      const GitPush = require('../../models/GitPush');
+      await LinkedAccount.create({ userId: a.user.id, provider: 'github', username: 'asha', verifiedAt: new Date(), summary: {} });
+      await LinkedAccount.create({ userId: b.user.id, provider: 'github', username: 'bilal', summary: {} });
+      await GitPush.create([
+        { userId: a.user.id, username: 'asha', eventId: '1', at: new Date(now - 3600e3) },
+        { userId: a.user.id, username: 'asha', eventId: '2', at: new Date(now - 10 * 3600e3) },
+        { userId: b.user.id, username: 'bilal', eventId: '3', at: new Date(now - 3600e3) },
+      ]);
+      const mine = await request(app).get(`/api/events/${id}/board`).set('Cookie', a.cookie);
+      assert.strictEqual(mine.status, 200);
+      assert.strictEqual(mine.body.teams[0].pushes, 1, 'before the start and unverified pushes are left out');
+      assert.strictEqual(mine.body.checks, null);
+      await require('../../models/user').updateOne({ _id: b.user.id }, { $unset: { apiKeyId: 1 } }); // Bilal never connected VS Code
+      const orgView = await request(app).get(`/api/events/${id}/board`).set('Cookie', org.cookie);
+      const kinds = orgView.body.checks.map((x) => x.kind);
+      assert.ok(kinds.includes('no-github') && kinds.includes('no-vscode') && kinds.includes('no-vscode-time'));
+
+      assert.strictEqual((await request(app).post(`/api/events/${id}/refresh`).set('Cookie', a.cookie)).status, 403);
+      assert.strictEqual((await request(app).post(`/api/events/${id}/refresh`).set('Cookie', org.cookie)).status, 200);
+      assert.strictEqual((await request(app).post(`/api/events/${id}/refresh`).set('Cookie', org.cookie)).status, 429, 'at most once in 5 minutes');
+      assert.strictEqual((await request(app).patch(`/api/events/${id}`).set('Cookie', a.cookie).send({ name: 'Taken' })).status, 403);
+      assert.strictEqual((await request(app).patch(`/api/events/${id}`).set('Cookie', org.cookie).send({ maxTeamSize: 3 })).body.event.maxTeamSize, 3);
+
+      const list = await request(app).get('/api/events/mine').set('Cookie', b.cookie);
+      assert.deepStrictEqual(list.body.events.map((e) => e.name), ['SPIT Hack']);
+      assert.strictEqual((await request(app).get('/api/events/aaaaaaaaaaaaaaaaaaaaaaaa').set('Cookie', b.cookie)).status, 404);
+      await new Promise((r) => setTimeout(r, 50));
     }],
   ]);
 

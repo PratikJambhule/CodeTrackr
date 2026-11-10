@@ -267,6 +267,46 @@ function history(userId, days, now, { codeChance, evening = 0.7, intensity = 1 }
     }
   }
 
+  // The weekly board (D-70). --linked also gives you a verified account, so you appear on it.
+  const CompetitionDay = model('CompetitionDay');
+  const { dayKey } = require('../services/competition');
+  const verified = Object.keys(practice).map((n) => friends[n]._id);
+  if (process.argv.includes('--linked')) {
+    const stamp = new Date(now - 3600e3);
+    await LinkedAccount.create({ userId: me._id, provider: 'github', username: 'demo_me', lastSyncAt: stamp, verifiedAt: stamp, summary: { pushes7d: 6, pushes30d: 24, activeDays30: 11, repos30d: 3, weekly: [] } });
+    verified.push(me._id);
+  }
+  let seed = 7;
+  const rand = () => { seed = (seed * 16807) % 2147483647; return seed / 2147483647; };
+  const dayRows = [];
+  for (const userId of verified) {
+    const account = await LinkedAccount.findOne({ userId, verifiedAt: { $ne: null } }).lean();
+    for (let d = 0; d < 16; d++) {
+      if (rand() > 0.6) continue;
+      dayRows.push({ userId, provider: account.provider, username: account.username, day: dayKey(now - d * DAY), problems: Math.floor(rand() * 4), pushes: Math.floor(rand() * 5), contests: d % 9 === 3 ? 1 : 0 });
+    }
+  }
+  await CompetitionDay.insertMany(dayRows);
+
+  // A live demo hackathon (D-71) with two teams and some pushes.
+  const Event = model('Event');
+  const GitPush = model('GitPush');
+  const hack = await Event.create({ name: 'Demo Hack', description: 'A 24-hour build sprint.', startsAt: new Date(now - 5 * 3600e3), endsAt: new Date(now + 19 * 3600e3), createdBy: me._id, editorRule: 'vscode', maxTeamSize: 3 });
+  for (const [teamName, people] of [['Byte Me', [me, friends.Diya]], ['Null Pointers', [friends.Rohan, friends.Aarav]]]) {
+    const team = await Group.create({ name: teamName, description: 'Team in Demo Hack', visibility: 'private', password: 'x', createdBy: people[0]._id, eventId: hack._id });
+    for (const p of people) await GroupMember.create({ groupId: team._id, userId: p._id });
+  }
+  const pushers = [friends.Diya, friends.Rohan, friends.Aarav];
+  for (const f of pushers) {
+    await LinkedAccount.create({ userId: f._id, provider: 'github', username: f.name.toLowerCase() + '_gh', lastSyncAt: new Date(now - 3600e3), verifiedAt: new Date(now - 3600e3), summary: {} });
+  }
+  const meGh = await LinkedAccount.findOne({ userId: me._id, provider: 'github' }).lean();
+  for (const [userId, username] of [...pushers.map((f) => [f._id, f.name.toLowerCase() + '_gh']), ...(meGh ? [[me._id, meGh.username]] : [])]) {
+    for (let i = 0; i < 1 + Math.floor(rand() * 6); i++) {
+      await GitPush.create({ userId, username, eventId: String(userId) + i, at: new Date(now - rand() * 5 * 3600e3) });
+    }
+  }
+
   const at = (days) => new Date(now + days * DAY);
   const portfolio = await Goal.create({ userId: me._id, title: 'Ship portfolio v2', description: 'New projects section and dark mode.', targetHours: 8, techStack: 'portfolio', deadline: at(3), createdAt: at(-12) });
   await Goal.create({ userId: me._id, title: 'Finish the DSA sheet', description: 'Arrays to graphs, one topic a day.', targetHours: 20, techStack: 'python', deadline: at(10), createdAt: at(-20) });

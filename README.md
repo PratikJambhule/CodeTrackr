@@ -24,13 +24,15 @@ each other week by week.
   your top files), the week by kind of work, a year heatmap, languages and projects, when you code,
   build health (commands by kind with failures, program runs, real debugging), goals and the top
   insight.
+- **Hackathons.** Create an event with a start, an end, a team size and an editor rule (any editor, or VS Code required), and share its link. People make or join teams there. While it runs, every team sees its GitHub pushes and VS Code time inside the event; it shows activity, not the quality of a project. The organiser can refresh GitHub on demand and sees plain checks: who has no verified GitHub account, who hasn't connected VS Code, quiet teams, and pushes with no VS Code time.
+- **Weekly group board.** Members with a verified account are ranked by problems solved this week on LeetCode and Codeforces, with contests entered and GitHub pushes next to it. Plain counts from those sites. VS Code time is shown separately and doesn't affect the rank.
+- **Group roles and invites.** Owner, admins and members; hand over ownership; invite links that expire, run out and can be revoked (only a hash is stored); an activity log of admin actions.
 - **Leaderboard.** Everyone ranked by hours, all time or the last 7 / 30 days.
 - **Goals.** "N hours of X by a date", with progress from matching time and one reminder per goal.
 - **Insights.** Plain statistics over your own data (deep-work ratio, peak hours, cadence, rework)
   and 13 threshold rules. Every number shows "—" until there is enough data. Not machine learning.
 - **What kind of work.** Each coding session is shown as DSA, Project work or Learning & setup, with a
-  one-tap ✓ / Change. You can also pick the kind in VS Code's status bar. Your answers are private;
-  they score the work-type model running in shadow mode and are what it will be retrained on.
+  one-tap ✓ / Change. You can also pick the kind in VS Code's status bar. Your answers are private.
 - **Analytics per kind of work.** Insights has a tab for each kind, because each cares about
   different things:
   - **DSA:** problems worked on and time on each, compile-and-run loops, failed compiles, days
@@ -43,8 +45,9 @@ each other week by week.
   Each tab says how many sessions you confirmed; the rest are CodeTrackr's guess.
 - **LeetCode and Codeforces on your profile.** Link a LeetCode username and a Codeforces handle to
   see problems solved by difficulty and topic, recent solves, contest rating (and on Codeforces your
-  rank, best rating and rating over recent contests), refreshed every night. Shown only to you, never
+  rank, best rating and rating over recent contests), refreshed every hour. Shown only to you, never
   on boards; unlinking deletes it.
+- **GitHub.** Link and verify a GitHub username to see your public pushes, active days, merged pull requests and most active repos, refreshed every hour. Public activity only; counts and times are stored, never code.
 - **Practice analytics.** One page over both sites: problems solved per topic (the two sites' topic
   names mapped to one list), interview topics with little practice, Codeforces acceptance rate per
   topic, problems solved per week, how hard you practise (the share of solves above your rating,
@@ -71,7 +74,7 @@ flowchart LR
   end
   Q -- "POST /api/extension/track<br/>per-device key" --> API
   B["React website (Vercel)"] -- "/api, /auth via Vercel proxy<br/>httpOnly JWT cookie" --> API
-  GH["GitHub Actions cron"] -- "hourly reminders, nightly rollup" --> API
+  GH["GitHub Actions cron"] -- "hourly reminders and account refresh, daily rollup" --> API
   subgraph API["Express API (Render)"]
     I["validate → credit → 10-minute bucket"]
     R["analytics, leaderboard, groups, goals,<br/>sessions + labels"]
@@ -170,22 +173,11 @@ cd extension && npm test
 cd frontend && npm run lint && npm test && npm run build
 ```
 
-529 backend unit assertions, 69 API integration tests (the real Express app over HTTP against an
-in-memory MongoDB), 135 extension assertions and 74 frontend tests. Frontend tests run in the India
+570 backend unit assertions, 80 API integration tests (the real Express app over HTTP against an
+in-memory MongoDB), 135 extension assertions and 79 frontend tests. Frontend tests run in the India
 time zone, where the date bugs showed up. CI runs all of them, plus a Docker build with a health
 check, on every push.
 
-## Work-type classifier (experimental)
-
-`ml/` holds a pipeline that labels a coding session as DSA practice, project building, debugging,
-learning or setup from 33 features the extension already collects (18 for sessions from versions
-before 2.6.0). There are not enough real
-labelled sessions yet, so the current model is trained on a **generated** dataset
-(`node ml/generate_synthetic.js`, then `python ml/train_work_type.py`). Its scores describe that
-generated data, not real users. The API runs it in **shadow mode**: it guesses every session from
-extension 2.6.0 and saves the guess without showing it, so people's own answers can score it against
-the rules (`node scripts/shadow-report.js`). People keep seeing the rules' guess until the model
-wins on real answers. See [`ml/README.md`](ml/README.md).
 
 ## Project structure
 
@@ -193,7 +185,7 @@ wins on real answers. See [`ml/README.md`](ml/README.md).
 backend/     Express API: routes/, services/, models/, middleware/, tests/, scripts/, bench/
 frontend/    React website: src/pages, src/components (ui, charts, layout), src/lib, src/hooks
 extension/   VS Code extension: src/ (trackers, outbox, sign-in), tests/
-ml/          work-type classifier: synthetic data generator, training script, reports
+ml/          rating forecast: data conversion, training scripts
 .github/     CI, scheduled jobs, deploy workflow
 ```
 

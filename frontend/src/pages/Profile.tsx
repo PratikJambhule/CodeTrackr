@@ -131,8 +131,8 @@ export default function Profile({ user }: { user: Me }) {
         <Card className="p-6">
           <CardTitle aside={<Link to="/practice">Practice analytics</Link>}>Coding practice</CardTitle>
           <p className="mb-5 text-sm text-muted">
-            Link your LeetCode username and Codeforces handle to see the problems you solved, your ratings and your strongest topics next to your VS Code time. CodeTrackr
-            reads only your public profiles, refreshes them every night, and shows them only to you. Unlinking deletes what was pulled.
+            Link your LeetCode, Codeforces and GitHub accounts to see the problems you solved, your ratings and your strongest topics next to your VS Code time. CodeTrackr
+            reads only your public profiles, refreshes them every hour, and shows them only to you. Unlinking deletes what was pulled.
           </p>
           <LinkedAccounts />
         </Card>

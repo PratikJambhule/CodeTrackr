@@ -4,6 +4,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { Lock, Plus, Search, Users } from 'lucide-react';
 import { apiSend, errorText } from '../api';
 import { useDiscoverGroups, useMyGroups } from '../hooks/queries';
+import { CreateEventButton, EventsCard } from '../components/EventsCard';
 import { Button, Card, EmptyState, ErrorBox, Modal, PageHeader, Pill, Segmented, Skeleton, TextArea, TextField, useToast } from '../components/ui';
 import type { Group } from '../types';
 
@@ -153,16 +154,20 @@ export default function Groups() {
   return (
     <>
       <PageHeader
-        eyebrow="Race your friends"
         title="Groups"
         actions={
-          <Button variant="primary" icon={<Plus className="h-4 w-4" aria-hidden="true" />} onClick={() => setCreating(true)}>
-            Create a group
-          </Button>
+          <>
+            <CreateEventButton />
+            <Button variant="primary" icon={<Plus className="h-4 w-4" aria-hidden="true" />} onClick={() => setCreating(true)}>
+              Create a group
+            </Button>
+          </>
         }
       >
-        Each group has its own board. Pick a week and see who put in the hours.
+        Each group ranks its members by problems solved every week, with VS Code time alongside.
       </PageHeader>
+
+      <EventsCard />
 
       <div className="mb-6 flex flex-wrap items-center gap-3">
         <Segmented

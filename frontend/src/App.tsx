@@ -17,6 +17,8 @@ const Leaderboard = lazy(() => import('./pages/Leaderboard'));
 const Groups = lazy(() => import('./pages/Groups'));
 const GroupBoard = lazy(() => import('./pages/GroupBoard'));
 const JoinGroup = lazy(() => import('./pages/JoinGroup'));
+const InviteJoin = lazy(() => import('./pages/InviteJoin'));
+const EventPage = lazy(() => import('./pages/Event'));
 const Goals = lazy(() => import('./pages/Goals'));
 const Insights = lazy(() => import('./pages/Insights'));
 const Practice = lazy(() => import('./pages/Practice'));
@@ -104,6 +106,8 @@ export default function App() {
               <Route path="/groups" element={<Groups />} />
               <Route path="/groups/:groupId" element={<GroupBoard user={user} />} />
               <Route path="/join/:groupId" element={<JoinGroup />} />
+              <Route path="/invite/:token" element={<InviteJoin />} />
+              <Route path="/events/:eventId" element={<EventPage />} />
               <Route path="/goals" element={<Goals />} />
               <Route path="/insights" element={<Insights />} />
               <Route path="/practice" element={<Practice />} />

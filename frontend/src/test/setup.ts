@@ -1,6 +1,10 @@
 import '@testing-library/jest-dom/vitest';
 import { afterEach } from 'vitest';
-import { cleanup } from '@testing-library/react';
+import { cleanup, configure } from '@testing-library/react';
+
+// findBy* waited 1 s by default. Lazy-loaded pages in a full parallel run can take longer on a busy
+// machine, which failed App and NotificationBell tests at random. 5 s still fails a real bug fast.
+configure({ asyncUtilTimeout: 5000 });
 
 afterEach(() => cleanup());
 
